@@ -1,6 +1,7 @@
 from .astnodes import ConditionalFieldAccess
 from .typed_sympy import TypedSymbol, CastFunc, tcast, DynamicType
 from .pointers import mem_acc
+from .bit_masks import bit_conditional
 
 from .math import (
     prod,
@@ -63,5 +64,6 @@ __all__ = [
     "common_denominator",
     "get_symmetric_part",
     "SymbolCreator",
-    "DynamicType"
+    "DynamicType",
+    "bit_conditional"
 ]

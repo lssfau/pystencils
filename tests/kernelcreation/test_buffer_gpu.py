@@ -6,7 +6,7 @@ import pytest
 
 import pystencils
 from pystencils import Assignment, Field, FieldType, Target, CreateKernelConfig, create_kernel, fields
-from pystencils.sympyextensions.bit_masks import flag_cond
+from pystencils.sympyextensions.bit_masks import bit_conditional
 from pystencils.field import create_numpy_array_with_layout, layout_string_to_tuple
 from pystencils.slicing import (
     add_ghost_layers, get_ghost_region_slice, get_slice_before_ghost_layer)
@@ -16,14 +16,13 @@ try:
     # noinspection PyUnresolvedReferences
     import cupy as cp
 except ImportError:
-    pass
-
+    pytest.skip("Cupy not available", allow_module_level=True)
+    
 
 FIELD_SIZES = [(4, 3), (9, 3, 7)]
 
 
 def _generate_fields(dt=np.uint8, stencil_directions=1, layout='numpy'):
-    pytest.importorskip('cupy')
     field_sizes = FIELD_SIZES
     if stencil_directions > 1:
         field_sizes = [s + (stencil_directions,) for s in field_sizes]
@@ -235,7 +234,6 @@ def test_field_layouts():
             unpack_kernel(buffer=gpu_buffer_arr, dst_field=gpu_dst_arr)
 
 
-@pytest.mark.xfail(reason="flag_cond is not available yet")
 def test_buffer_indexing():
     src_field, dst_field = fields(f'pdfs_src(19), pdfs_dst(19) :double[3D]')
     mask_field = fields(f'mask : uint32 [3D]')
@@ -246,9 +244,9 @@ def test_buffer_indexing():
     src_field_size = src_field.spatial_shape
     mask_field_size = mask_field.spatial_shape
 
-    up = Assignment(buffer(0), flag_cond(1, mask_field.center, src_field[0, 1, 0](1)))
+    up = Assignment(buffer(0), bit_conditional(1, mask_field.center, src_field[0, 1, 0](1)))
     iteration_slice = tuple(slice(None, None, 2) for _ in range(3))
-    config = CreateKernelConfig(target=Target.GPU)
+    config = CreateKernelConfig(target=Target.CurrentGPU)
     config = replace(config, iteration_slice=iteration_slice)
 
     ast = create_kernel(up, config=config)

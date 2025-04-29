@@ -397,7 +397,7 @@ class BasePrinter(ABC):
         pass
 
     @abstractmethod
-    def _type_str(self, dtype: PsType) -> str:
+    def _type_str(self, dtype: PsType | None) -> str:
         """Return a valid string representation of the given type"""
 
     def _char_and_op(self, node: PsBinOp) -> tuple[str, Ops]:
