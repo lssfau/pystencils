@@ -9,7 +9,7 @@ from pystencils import (
     TypedSymbol,
     DynamicType,
 )
-from pystencils.sympyextensions import tcast
+from pystencils.sympyextensions import tcast, bit_conditional
 from pystencils.sympyextensions.pointers import mem_acc
 
 from pystencils.backend.ast.structural import (
@@ -520,3 +520,63 @@ def test_indexed():
 
     expr = freeze(a[x, y, z])
     assert expr.structurally_equal(PsSubscript(a2, (x2, y2, z2)))
+
+
+def test_freeze_bit_conditional():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+    expr = freeze(bit_conditional(x, y, z))
+    one = freeze(sp.Integer(1))
+
+    assert expr.structurally_equal(
+        PsMul(
+            PsCast(
+                None,
+                PsBitwiseAnd(
+                    PsRightShift(
+                        PsExpression.make(ctx.get_symbol("y")),
+                        PsExpression.make(ctx.get_symbol("x")),
+                    ),
+                    one,
+                ),
+            ),
+            PsExpression.make(ctx.get_symbol("z")),
+        )
+    )
+
+    expr = freeze(bit_conditional(x, y, z, z))
+    assert expr.structurally_equal(
+        PsAdd(
+            PsMul(
+                PsCast(
+                    None,
+                    PsBitwiseAnd(
+                        PsRightShift(
+                            PsExpression.make(ctx.get_symbol("y")),
+                            PsExpression.make(ctx.get_symbol("x")),
+                        ),
+                        one,
+                    ),
+                ),
+                PsExpression.make(ctx.get_symbol("z")),
+            ),
+            PsMul(
+                PsCast(
+                    None,
+                    PsBitwiseXor(
+                        PsBitwiseAnd(
+                            PsRightShift(
+                                PsExpression.make(ctx.get_symbol("y")),
+                                PsExpression.make(ctx.get_symbol("x")),
+                            ),
+                            one,
+                        ),
+                        one,
+                    ),
+                ),
+                PsExpression.make(ctx.get_symbol("z")),
+            ),
+        )
+    )

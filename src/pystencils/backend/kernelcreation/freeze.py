@@ -15,6 +15,7 @@ from ...sympyextensions import (
 )
 from ...sympyextensions.typed_sympy import TypedSymbol, TypeCast, DynamicType
 from ...sympyextensions.pointers import AddressOf, mem_acc
+from ...sympyextensions.bit_masks import bit_conditional
 from ...field import Field, FieldType
 
 from .context import KernelCreationContext
@@ -537,3 +538,19 @@ class FreezeExpressions:
     def map_Not(self, neg: sympy.logic.Not) -> PsNot:
         arg = self.visit_expr(neg.args[0])
         return PsNot(arg)
+    
+    def map_bit_conditional(self, conditional: bit_conditional):
+        args = [self.visit_expr(arg) for arg in conditional.args]
+        bitpos, mask, then_expr = args[:3]
+
+        one = PsExpression.make(PsConstant(1))
+        extract_bit = PsBitwiseAnd(PsRightShift(mask, bitpos), one)
+        masked_then_expr = PsCast(None, extract_bit) * then_expr
+
+        if len(args) == 4:
+            else_expr = args[3]
+            invert_bit = PsBitwiseXor(extract_bit.clone(), one.clone())
+            masked_else_expr = PsCast(None, invert_bit) * else_expr
+            return masked_then_expr + masked_else_expr
+        else:
+            return masked_then_expr

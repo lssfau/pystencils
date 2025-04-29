@@ -11,7 +11,7 @@ from ..memory import PsSymbol, PsBuffer, BufferBasePtr
 from ..constants import PsConstant
 from ..literals import PsLiteral
 from ..functions import PsFunction
-from ...types import PsType
+from ...types import PsType, deconstify
 
 from .util import failing_cast
 from ..exceptions import PsInternalCompilerError
@@ -26,6 +26,10 @@ class PsExpression(PsAstNode, ABC):
     Upon construction, the `dtype <PsExpression.dtype>` property of most expression nodes is unset;
     only constant expressions, symbol expressions, and array accesses immediately inherit their type from
     their constant, symbol, or array, respectively.
+
+    The type assigned to an expression must never be ``const``.
+    Constness and mutability are properties of memory objects, not of expressions;
+    they are verified by inspecting the memory objects referred to by an expression.
 
     The canonical way to add types to newly constructed expressions is through the `Typifier`.
     It should be run at least once on any expression constructed by the backend.
@@ -144,7 +148,7 @@ class PsSymbolExpr(PsLeafMixIn, PsLvalue, PsExpression):
     __match_args__ = ("symbol",)
 
     def __init__(self, symbol: PsSymbol):
-        super().__init__(symbol.dtype)
+        super().__init__(deconstify(symbol.dtype) if symbol.dtype is not None else None)
         self._symbol = symbol
 
     @property
@@ -172,7 +176,7 @@ class PsConstantExpr(PsLeafMixIn, PsExpression):
     __match_args__ = ("constant",)
 
     def __init__(self, constant: PsConstant):
-        super().__init__(constant.dtype)
+        super().__init__(deconstify(constant.dtype) if constant.dtype is not None else None)
         self._constant = constant
 
     @property
@@ -200,7 +204,7 @@ class PsLiteralExpr(PsLeafMixIn, PsExpression):
     __match_args__ = ("literal",)
 
     def __init__(self, literal: PsLiteral):
-        super().__init__(literal.dtype)
+        super().__init__(deconstify(literal.dtype) if literal.dtype is not None else None)
         self._literal = literal
 
     @property
@@ -238,7 +242,7 @@ class PsBufferAcc(PsLvalue, PsExpression):
 
         self._base_ptr = PsExpression.make(base_ptr)
         self._index = list(index)
-        self._dtype = bptr_prop.buffer.element_type
+        self._dtype = deconstify(bptr_prop.buffer.element_type)
 
     @property
     def base_pointer(self) -> PsSymbolExpr:
@@ -582,14 +586,26 @@ class PsAddressOf(PsUnOp):
 
 
 class PsCast(PsUnOp):
+    """C-style type cast.
+    
+    Convert values to another type according to C casting rules.
+    The target type may be `None`, in which case it will be inferred by the `Typifier`
+    according to the surrounding type context.
+
+    Args:
+        target_type: Target type of the cast,
+            or `None` if the target type should be inferred from the surrounding context
+        operand: Expression whose value will be cast
+    """
+
     __match_args__ = ("target_type", "operand")
 
-    def __init__(self, target_type: PsType, operand: PsExpression):
+    def __init__(self, target_type: PsType | None, operand: PsExpression):
         super().__init__(operand)
-        self._target_type = target_type
+        self._target_type = deconstify(target_type) if target_type is not None else None
 
     @property
-    def target_type(self) -> PsType:
+    def target_type(self) -> PsType | None:
         return self._target_type
 
     @target_type.setter

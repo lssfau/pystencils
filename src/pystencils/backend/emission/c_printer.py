@@ -60,7 +60,10 @@ class CAstPrinter(BasePrinter):
 
         return dtype.create_literal(constant.value)
 
-    def _type_str(self, dtype: PsType):
+    def _type_str(self, dtype: PsType | None):
+        if dtype is None:
+            raise EmissionError("Cannot emit untyped object as C code.")
+
         try:
             return dtype.c_string()
         except PsTypeError:

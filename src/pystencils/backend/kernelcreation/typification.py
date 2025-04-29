@@ -66,7 +66,10 @@ class TypeContext:
     """Typing context, with support for type inference and checking.
 
     Instances of this class are used to propagate and check data types across expression subtrees
-    of the AST. Each type context has a target type `target_type`, which shall be applied to all expressions it covers
+    of the AST. Each type context has a target type `target_type`, which shall be applied to all expressions it covers.
+
+    Just like the types of expressions, the context's target type must never be ``const``.
+    This is ensured by this class, which removes const-qualification from the target type when it is set.
     """
 
     def __init__(
@@ -140,6 +143,7 @@ class TypeContext:
 
     def _propagate_target_type(self):
         assert self._target_type is not None
+        assert not self._target_type.const
 
         for hook in self._hooks:
             hook(self._target_type)
@@ -151,9 +155,10 @@ class TypeContext:
 
     def _apply_target_type(self, expr: PsExpression):
         assert self._target_type is not None
+        assert not self._target_type.const
 
         if expr.dtype is not None:
-            if not self._compatible(expr.dtype):
+            if expr.dtype != self._target_type:
                 raise TypificationError(
                     f"Type mismatch at expression {expr}: Expression type did not match the context's target type\n"
                     f"  Expression type: {expr.dtype}\n"
@@ -186,7 +191,7 @@ class TypeContext:
                 case PsSymbolExpr(symb):
                     if symb.dtype is None:
                         #   Symbols are not forced to constness
-                        symb.dtype = deconstify(self._target_type)
+                        symb.dtype = self._target_type
                     elif not self._compatible(symb.dtype):
                         raise TypificationError(
                             f"Type mismatch at symbol {symb}: Symbol type did not match the context's target type\n"
@@ -223,6 +228,9 @@ class TypeContext:
                         f"    Expression: {expr}"
                         f"  Type Context: {self._target_type}"
                     )
+                
+                case PsCast(cast_target, _) if cast_target is None:
+                    expr.target_type = self._target_type
         # endif
         expr.dtype = self._target_type
 
@@ -613,7 +621,7 @@ class Typifier:
                     f"    Array: {expr}"
                 )
 
-            case PsCast(dtype, arg):
+            case PsCast(cast_target_type, arg):
                 arg_tc = TypeContext()
                 self.visit_expr(arg, arg_tc)
 
@@ -622,7 +630,10 @@ class Typifier:
                         f"Unable to determine type of argument to Cast: {arg}"
                     )
 
-                tc.apply_dtype(dtype, expr)
+                if cast_target_type is None:
+                    tc.infer_dtype(expr)
+                else:
+                    tc.apply_dtype(cast_target_type, expr)
 
             case PsVecBroadcast(lanes, arg):
                 op_tc = TypeContext()

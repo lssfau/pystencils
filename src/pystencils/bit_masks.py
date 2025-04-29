@@ -1,9 +1,12 @@
-from .sympyextensions.bit_masks import flag_cond as _flag_cond
-
+from .sympyextensions.bit_masks import bit_conditional
 from warnings import warn
-warn(
-    "Importing the `pystencils.bit_masks` module is deprecated. "
-    "Import `flag_cond` from `pystencils.sympyextensions` instead."
-)
 
-flag_cond = _flag_cond
+
+class flag_cond(bit_conditional):
+    def __new__(cls, *args, **kwargs):
+        warn(
+            "flag_cond is deprecated and will be removed in pystencils 2.1. "
+            "Use `pystencils.sympyextensions.bit_conditional` instead.",
+            FutureWarning
+        )
+        return bit_conditional.__new__(cls, *args, **kwargs)

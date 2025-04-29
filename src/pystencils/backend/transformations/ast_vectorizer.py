@@ -270,7 +270,9 @@ class AstVectorizer:
         return self.visit(node, vc)
 
     @overload
-    def visit(self, node: PsStructuralNode, vc: VectorizationContext) -> PsStructuralNode:
+    def visit(
+        self, node: PsStructuralNode, vc: VectorizationContext
+    ) -> PsStructuralNode:
         pass
 
     @overload
@@ -381,6 +383,11 @@ class AstVectorizer:
 
             #   Unary Ops
             case PsCast(target_type, operand):
+                if target_type is None:
+                    raise VectorizationError(
+                        f"Unable to vectorize type cast with unknown target type: {expr}"
+                    )
+
                 vec_expr = PsCast(
                     vc.vector_type(target_type), self.visit_expr(operand, vc)
                 )

@@ -95,3 +95,13 @@ Integer Operations
     integer_functions.round_to_multiple_towards_zero
     integer_functions.ceil_to_multiple
     integer_functions.div_ceil
+
+Bit Masks and Bit-Set Conditionals
+----------------------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: autosummary/sympy_class.rst
+
+    bit_masks.bit_conditional

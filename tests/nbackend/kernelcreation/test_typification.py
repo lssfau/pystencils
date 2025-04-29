@@ -621,6 +621,29 @@ def test_cfunction():
         _ = typify(PsCall(threeway, (x, p)))
 
 
+def test_typify_typecast():
+    ctx = KernelCreationContext()
+    typify = Typifier(ctx)
+
+    x, y = [PsExpression.make(ctx.get_symbol(name, Fp(32))) for name in "xy"]
+    p, q = [PsExpression.make(ctx.get_symbol(name, Int(32))) for name in "pq"]
+
+    #   Explicit target type
+    expr = typify(PsCast(Int(64), x))
+    assert expr.dtype == expr.target_type == Int(64)
+
+    #   Infer target type from context
+    cast_expr = PsCast(None, p)
+    expr = typify(y + cast_expr)
+    assert expr.dtype == Fp(32)
+    assert cast_expr.dtype == cast_expr.target_type == Fp(32)
+
+    #   Invalid target type
+    expr = p + PsCast(Fp(64), q)
+    with pytest.raises(TypificationError):
+        typify(expr)
+
+
 def test_typify_integer_vectors():
     ctx = KernelCreationContext()
     typify = Typifier(ctx)
