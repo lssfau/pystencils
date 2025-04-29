@@ -1,7 +1,7 @@
 from ..platforms import Platform
 from ..ast import PsAstNode
 from ..ast.expressions import PsCall
-from ..functions import PsMathFunction
+from ..functions import PsMathFunction, PsConstantFunction
 
 
 class SelectFunctions:
@@ -17,7 +17,9 @@ class SelectFunctions:
     def visit(self, node: PsAstNode) -> PsAstNode:
         node.children = [self.visit(c) for c in node.children]
 
-        if isinstance(node, PsCall) and isinstance(node.function, PsMathFunction):
+        if isinstance(node, PsCall) and isinstance(
+            node.function, (PsMathFunction | PsConstantFunction)
+        ):
             return self._platform.select_function(node)
         else:
             return node

@@ -1,37 +1,11 @@
-"""
-Functions supported by pystencils.
-
-Every supported function might require handling logic in the following modules:
-
-- In `freeze.FreezeExpressions`, a case in `map_Function` or a separate mapper method to catch its frontend variant
-- In each backend platform, a case in `Platform.select_function` to map the function onto a concrete
-  C/C++ implementation
-- If very special typing rules apply, a case in `typification.Typifier`.
-
-In most cases, typification of function applications will require no special handling.
-
-.. autoclass:: PsFunction
-    :members:
-
-.. autoclass:: MathFunctions
-    :members:
-    :undoc-members:
-
-.. autoclass:: PsMathFunction
-    :members:
-
-.. autoclass:: CFunction
-    :members:
-
-"""
-
 from __future__ import annotations
 from typing import Any, Sequence, TYPE_CHECKING
 from abc import ABC
 from enum import Enum
 
-from ..types import PsType
+from ..types import PsType, PsNumericType
 from .exceptions import PsInternalCompilerError
+from ..types import PsTypeError
 
 if TYPE_CHECKING:
     from .ast.expressions import PsExpression
@@ -119,6 +93,91 @@ class PsMathFunction(PsFunction):
 
     def __hash__(self) -> int:
         return hash(self._func)
+
+
+class ConstantFunctions(Enum):
+    """Numerical constant functions.
+
+    Each platform has to materialize these functions to a concrete implementation.
+    """
+
+    Pi = "pi"
+    E = "e"
+    PosInfinity = "pos_infinity"
+    NegInfinity = "neg_infinity"
+
+    def __init__(self, func_name):
+        self.function_name = func_name
+
+
+class PsConstantFunction(PsFunction):
+    """Data-type-specific numerical constants.
+
+    Represents numerical constants which need to be exactly represented,
+    e.g. transcendental numbers and non-finite constants.
+
+    Functions of this class are treated the same as `PsConstant` instances
+    by most transforms.
+    In particular, they are subject to the same contextual typing rules,
+    and will be broadcast by the vectorizer.
+    """
+
+    __match_args__ = ("func,")
+
+    def __init__(
+        self, func: ConstantFunctions, dtype: PsNumericType | None = None
+    ) -> None:
+        super().__init__(func.function_name, 0)
+        self._func = func
+        self._set_dtype(dtype)
+
+    @property
+    def func(self) -> ConstantFunctions:
+        return self._func
+
+    @property
+    def dtype(self) -> PsNumericType | None:
+        """This constant function's data type, or ``None`` if it is untyped."""
+        return self._dtype
+
+    @dtype.setter
+    def dtype(self, t: PsNumericType):
+        self._set_dtype(t)
+
+    def get_dtype(self) -> PsNumericType:
+        """Retrieve this constant function's data type, throwing an exception if it is untyped."""
+        if self._dtype is None:
+            raise PsInternalCompilerError(
+                "Data type of constant  function was not set."
+            )
+        return self._dtype
+
+    def __str__(self) -> str:
+        return f"{self._func.function_name}"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PsConstantFunction):
+            return False
+
+        return (self._func, self._dtype) == (other._func, other._dtype)
+
+    def __hash__(self) -> int:
+        return hash((self._func, self._dtype))
+
+    def _set_dtype(self, dtype: PsNumericType | None):
+        if dtype is not None:
+            match self._func:
+                case (
+                    ConstantFunctions.Pi
+                    | ConstantFunctions.E
+                    | ConstantFunctions.PosInfinity
+                    | ConstantFunctions.NegInfinity
+                ) if not dtype.is_float():
+                    raise PsTypeError(
+                        f"Invalid type for {self.func.function_name}: {dtype}"
+                    )
+
+        self._dtype = dtype
 
 
 class CFunction(PsFunction):

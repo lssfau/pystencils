@@ -8,4 +8,4 @@ class CudaPlatform(GenericGpu):
 
     @property
     def required_headers(self) -> set[str]:
-        return set()
+        return super().required_headers | {'"pystencils_runtime/cuda.cuh"'}

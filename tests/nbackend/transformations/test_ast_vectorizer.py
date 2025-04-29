@@ -97,6 +97,22 @@ def test_vectorize_expressions():
                     assert subexpr.dtype == vector_type
 
 
+def test_broadcast_constants():
+    ctx = KernelCreationContext()
+    factory = AstFactory(ctx)
+
+    ctr = ctx.get_symbol("ctr", ctx.index_dtype)
+    axis = VectorizationAxis(ctr)
+    vc = VectorizationContext(ctx, 4, axis)
+    vectorize = AstVectorizer(ctx)
+
+    for constant in (sp.sympify(14), sp.pi, - sp.oo):
+        expr = factory.parse_sympy(constant)
+        vec_expr = vectorize(expr, vc)
+        assert isinstance(vec_expr, PsVecBroadcast)
+        assert vec_expr.dtype == PsVectorType(ctx.default_dtype, 4)
+
+
 def test_vectorize_casts_and_counter():
     ctx = KernelCreationContext()
     factory = AstFactory(ctx)

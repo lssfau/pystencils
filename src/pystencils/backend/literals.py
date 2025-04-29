@@ -11,6 +11,9 @@ class PsLiteral:
 
     Each literal has to be annotated with a type, and is considered constant within the scope of a kernel.
     Instances of `PsLiteral` are immutable.
+
+    The code generator assumes literals to be *constant* and *pure* with respect to the kernel:
+    their evaluation at kernel runtime must not include any side effects.
     """
 
     __match_args__ = ("text", "dtype")

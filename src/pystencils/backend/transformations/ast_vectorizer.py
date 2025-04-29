@@ -9,7 +9,7 @@ from ...types import PsType, PsVectorType, PsBoolType, PsScalarType
 from ..kernelcreation import KernelCreationContext, AstFactory
 from ..memory import PsSymbol
 from ..constants import PsConstant
-from ..functions import PsMathFunction
+from ..functions import PsMathFunction, PsConstantFunction
 
 from ..ast import PsAstNode
 from ..ast.structural import (
@@ -370,8 +370,13 @@ class AstVectorizer:
                     "since no vectorized version of the counter was present in the context."
                 )
 
-            #   Symbols, constants, and literals that can be broadcast
-            case PsSymbolExpr() | PsConstantExpr() | PsLiteral():
+            #   Symbols, constants, constant functions, and literals that can be broadcast
+            case (
+                PsSymbolExpr()
+                | PsConstantExpr()
+                | PsLiteral()
+                | PsCall(PsConstantFunction())
+            ):
                 if isinstance(expr.dtype, PsScalarType):
                     #   Broadcast constant or non-vectorized scalar symbol
                     vec_expr = PsVecBroadcast(vc.lanes, expr.clone())

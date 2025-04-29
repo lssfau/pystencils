@@ -50,7 +50,7 @@ from ..ast.expressions import (
     PsNot,
 )
 from ..ast.vector import PsVecBroadcast, PsVecMemAcc
-from ..functions import PsMathFunction, CFunction
+from ..functions import PsMathFunction, CFunction, PsConstantFunction
 from ..ast.util import determine_memory_object
 from ..exceptions import TypificationError
 
@@ -169,7 +169,8 @@ class TypeContext:
                 case PsConstantExpr(c):
                     if not isinstance(self._target_type, PsNumericType):
                         raise TypificationError(
-                            f"Can't typify constant with non-numeric type {self._target_type}"
+                            f"Can't typify constant with non-numeric type {self._target_type}\n"
+                            f"    at: {expr}"
                         )
                     if c.dtype is None:
                         expr.constant = c.interpret_as(self._target_type)
@@ -199,9 +200,25 @@ class TypeContext:
                             f"    Target type: {self._target_type}"
                         )
 
-                case PsNumericOpTrait() if not isinstance(
-                    self._target_type, PsNumericType
-                ) or self._target_type.is_bool():
+                case PsCall(func) if isinstance(func, PsConstantFunction):
+                    if not isinstance(self._target_type, PsNumericType):
+                        raise TypificationError(
+                            f"Can't typify constant function with non-numeric type {self._target_type}\n"
+                            f"    at: {expr}"
+                        )
+                    if func.dtype is None:
+                        func.dtype = constify(self._target_type)
+                    elif not self._compatible(func.dtype):
+                        raise TypificationError(
+                            f"Type mismatch at constant function {func}: Type did not match the context's target type\n"
+                            f"  Function type: {func.dtype}\n"
+                            f"    Target type: {self._target_type}"
+                        )
+
+                case PsNumericOpTrait() if (
+                    not isinstance(self._target_type, PsNumericType)
+                    or self._target_type.is_bool()
+                ):
                     #   FIXME: PsBoolType derives from PsNumericType, but is not numeric
                     raise TypificationError(
                         f"Numerical operation encountered in non-numerical type context:\n"
@@ -602,6 +619,12 @@ class Typifier:
                         for arg in args:
                             self.visit_expr(arg, tc)
                         tc.infer_dtype(expr)
+
+                    case PsConstantFunction():
+                        if function.dtype is not None:
+                            tc.apply_dtype(function.dtype, expr)
+                        else:
+                            tc.infer_dtype(expr)
 
                     case CFunction(_, arg_types, ret_type):
                         tc.apply_dtype(ret_type, expr)

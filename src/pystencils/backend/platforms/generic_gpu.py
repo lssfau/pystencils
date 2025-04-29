@@ -1,5 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+import numpy as np
 
 from ...types import constify, deconstify, PsIntegerType
 from ..exceptions import MaterializationError
@@ -7,6 +8,7 @@ from .platform import Platform
 
 from ..memory import PsSymbol
 from ..kernelcreation import (
+    KernelCreationContext,
     Typifier,
     IterationSpace,
     FullIterationSpace,
@@ -14,7 +16,7 @@ from ..kernelcreation import (
     AstFactory,
 )
 
-from ..kernelcreation.context import KernelCreationContext
+from ..constants import PsConstant
 from ..ast.structural import PsBlock, PsConditional, PsDeclaration
 from ..ast.expressions import (
     PsExpression,
@@ -27,7 +29,13 @@ from ..ast.expressions import (
 from ..ast.expressions import PsLt, PsAnd
 from ...types import PsSignedIntegerType, PsIeeeFloatType
 from ..literals import PsLiteral
-from ..functions import PsMathFunction, MathFunctions, CFunction
+from ..functions import (
+    PsMathFunction,
+    MathFunctions,
+    CFunction,
+    PsConstantFunction,
+    ConstantFunctions,
+)
 
 
 int32 = PsSignedIntegerType(width=32, const=False)
@@ -117,7 +125,7 @@ class Blockwise4DMapping(ThreadMapping):
         THREAD_IDX[0],
         BLOCK_IDX[0],
         BLOCK_IDX[1],
-        BLOCK_IDX[2]
+        BLOCK_IDX[2],
     ]
 
     def __call__(self, ispace: IterationSpace) -> dict[PsSymbol, PsExpression]:
@@ -163,7 +171,7 @@ class Blockwise4DMapping(ThreadMapping):
 
 class GenericGpu(Platform):
     """Common base platform for CUDA- and HIP-type GPU targets.
-    
+
     Args:
         ctx: The kernel creation context
         omit_range_check: If `True`, generated index translation code will not check if the point identified
@@ -184,6 +192,10 @@ class GenericGpu(Platform):
 
         self._typify = Typifier(ctx)
 
+    @property
+    def required_headers(self) -> set[str]:
+        return set()
+
     def materialize_iteration_space(
         self, body: PsBlock, ispace: IterationSpace
     ) -> PsBlock:
@@ -195,11 +207,12 @@ class GenericGpu(Platform):
             raise MaterializationError(f"Unknown type of iteration space: {ispace}")
 
     def select_function(self, call: PsCall) -> PsExpression:
-        assert isinstance(call.function, PsMathFunction)
+        assert isinstance(call.function, (PsMathFunction | PsConstantFunction))
 
         func = call.function.func
         dtype = call.get_dtype()
-        arg_types = (dtype,) * func.num_args
+        arg_types = (dtype,) * call.function.arg_count
+        expr: PsExpression | None = None
 
         if isinstance(dtype, PsIeeeFloatType):
             match func:
@@ -215,7 +228,8 @@ class GenericGpu(Platform):
                     prefix = "h" if dtype.width == 16 else ""
                     suffix = "f" if dtype.width == 32 else ""
                     name = f"{prefix}{func.function_name}{suffix}"
-                    cfunc = CFunction(name, arg_types, dtype)
+                    call.function = CFunction(name, arg_types, dtype)
+                    expr = call
 
                 case (
                     MathFunctions.Pow
@@ -230,29 +244,53 @@ class GenericGpu(Platform):
                     #   These are unavailable for fp16
                     suffix = "f" if dtype.width == 32 else ""
                     name = f"{func.function_name}{suffix}"
-                    cfunc = CFunction(name, arg_types, dtype)
+                    call.function = CFunction(name, arg_types, dtype)
+                    expr = call
 
                 case (
                     MathFunctions.Min | MathFunctions.Max | MathFunctions.Abs
                 ) if dtype.width in (32, 64):
                     suffix = "f" if dtype.width == 32 else ""
                     name = f"f{func.function_name}{suffix}"
-                    cfunc = CFunction(name, arg_types, dtype)
+                    call.function = CFunction(name, arg_types, dtype)
+                    expr = call
 
                 case MathFunctions.Abs if dtype.width == 16:
-                    cfunc = CFunction(" __habs", arg_types, dtype)
+                    call.function = CFunction(" __habs", arg_types, dtype)
+                    expr = call
+
+                case ConstantFunctions.Pi:
+                    assert dtype.numpy_dtype is not None
+                    expr = PsExpression.make(
+                        PsConstant(dtype.numpy_dtype.type(np.pi), dtype)
+                    )
+
+                case ConstantFunctions.E:
+                    assert dtype.numpy_dtype is not None
+                    expr = PsExpression.make(
+                        PsConstant(dtype.numpy_dtype.type(np.e), dtype)
+                    )
+
+                case ConstantFunctions.PosInfinity:
+                    expr = PsExpression.make(PsLiteral(f"PS_FP{dtype.width}_INFINITY", dtype))
+                    
+                case ConstantFunctions.NegInfinity:
+                    expr = PsExpression.make(PsLiteral(f"PS_FP{dtype.width}_NEG_INFINITY", dtype))
 
                 case _:
                     raise MaterializationError(
                         f"Cannot materialize call to function {func}"
                     )
 
-            call.function = cfunc
-            return call
-        
         if isinstance(dtype, PsIntegerType):
-            if (expr := self._select_integer_function(call)) is not None:
-                return expr
+            expr = self._select_integer_function(call)
+
+        if expr is not None:    
+            if expr.dtype is None:
+                typify = Typifier(self._ctx)
+                typify(expr)
+
+            return expr
 
         raise MaterializationError(
             f"No implementation available for function {func} on data type {dtype}"
