@@ -255,10 +255,6 @@ class CupyJit(JitBase):
 
         if '"pystencils_runtime/half.h"' in headers:
             headers.remove('"pystencils_runtime/half.h"')
-            if cp.cuda.runtime.is_hip:
-                headers.add("<hip/hip_fp16.h>")
-            else:
-                headers.add("<cuda_fp16.h>")
 
         code = "\n".join(f"#include {header}" for header in headers)
 

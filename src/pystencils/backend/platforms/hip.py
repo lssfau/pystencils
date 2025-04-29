@@ -8,4 +8,4 @@ class HipPlatform(GenericGpu):
 
     @property
     def required_headers(self) -> set[str]:
-        return {'"pystencils_runtime/hip.h"'}
+        return super().required_headers | {'"pystencils_runtime/hip.h"'}

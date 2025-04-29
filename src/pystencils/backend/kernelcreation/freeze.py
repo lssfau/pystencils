@@ -56,14 +56,19 @@ from ..ast.expressions import (
     PsAnd,
     PsOr,
     PsNot,
-    PsMemAcc
+    PsMemAcc,
 )
 from ..ast.vector import PsVecMemAcc
 
 from ..constants import PsConstant
 from ...types import PsNumericType, PsStructType, PsType
 from ..exceptions import PsInputError
-from ..functions import PsMathFunction, MathFunctions
+from ..functions import (
+    PsMathFunction,
+    MathFunctions,
+    PsConstantFunction,
+    ConstantFunctions,
+)
 from ..exceptions import FreezeError
 
 
@@ -109,7 +114,9 @@ class FreezeExpressions:
 
     def __call__(self, obj: AssignmentCollection | sp.Basic) -> PsAstNode:
         if isinstance(obj, AssignmentCollection):
-            return PsBlock([cast(PsStructuralNode, self.visit(asm)) for asm in obj.all_assignments])
+            return PsBlock(
+                [cast(PsStructuralNode, self.visit(asm)) for asm in obj.all_assignments]
+            )
         elif isinstance(obj, AssignmentBase):
             return cast(PsAssignment, self.visit(obj))
         elif isinstance(obj, _ExprLike):
@@ -215,7 +222,7 @@ class FreezeExpressions:
         exponent = expr.args[1]
 
         expr_frozen = self.visit_expr(base)
-        
+
         if isinstance(exponent, sp.Rational):
             #   Decompose rational exponent
             num: int = exponent.numerator
@@ -235,7 +242,7 @@ class FreezeExpressions:
                     denom = 1
 
                 assert denom == 1
-            
+
                 #   Pairwise multiplication for logarithmic runtime
                 factors = [expr_frozen] + [expr_frozen.clone() for _ in range(num - 1)]
                 while len(factors) > 1:
@@ -251,7 +258,7 @@ class FreezeExpressions:
                     expr_frozen = one / expr_frozen
 
                 return expr_frozen
-        
+
         #   If we got this far, use pow
         exponent_frozen = self.visit_expr(exponent)
         expr_frozen = PsMathFunction(MathFunctions.Pow)(expr_frozen, exponent_frozen)
@@ -271,6 +278,24 @@ class FreezeExpressions:
         denom = PsConstantExpr(PsConstant(expr.denominator))
         return num / denom
 
+    def map_NumberSymbol(self, expr: sp.Number):
+        func: ConstantFunctions
+        match expr:
+            case sp.core.numbers.Pi():
+                func = ConstantFunctions.Pi
+            case sp.core.numbers.Exp1():
+                func = ConstantFunctions.E
+            case _:
+                raise FreezeError(f"Cannot translate number symbol {expr}")
+
+        return PsCall(PsConstantFunction(func), [])
+
+    def map_Infinity(self, _: sp.core.numbers.Infinity):
+        return PsCall(PsConstantFunction(ConstantFunctions.PosInfinity), [])
+
+    def map_NegativeInfinity(self, _: sp.core.numbers.NegativeInfinity):
+        return PsCall(PsConstantFunction(ConstantFunctions.NegInfinity), [])
+
     def map_TypedSymbol(self, expr: TypedSymbol):
         dtype = self._ctx.resolve_dynamic_type(expr.dtype)
         symb = self._ctx.get_symbol(expr.name, dtype)
@@ -281,22 +306,22 @@ class FreezeExpressions:
             raise FreezeError("Cannot translate an empty tuple.")
 
         items = [self.visit_expr(item) for item in expr]
-        
+
         if any(isinstance(i, PsArrayInitList) for i in items):
             #  base case: have nested arrays
             if not all(isinstance(i, PsArrayInitList) for i in items):
                 raise FreezeError(
                     f"Cannot translate nested arrays of non-uniform shape: {expr}"
                 )
-            
+
             subarrays = cast(list[PsArrayInitList], items)
             shape_tail = subarrays[0].shape
-            
+
             if not all(s.shape == shape_tail for s in subarrays[1:]):
                 raise FreezeError(
                     f"Cannot translate nested arrays of non-uniform shape: {expr}"
                 )
-            
+
             return PsArrayInitList([s.items_grid for s in subarrays])  # type: ignore
         else:
             #  base case: no nested arrays

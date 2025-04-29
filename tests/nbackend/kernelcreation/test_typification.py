@@ -34,10 +34,12 @@ from pystencils.backend.ast.expressions import (
     PsTernary,
     PsMemAcc
 )
+from pystencils.backend.ast import dfs_preorder
+from pystencils.backend.ast.expressions import PsAdd
 from pystencils.backend.ast.vector import PsVecBroadcast
 from pystencils.backend.constants import PsConstant
-from pystencils.backend.functions import CFunction
-from pystencils.types import constify, create_type, create_numeric_type, PsVectorType
+from pystencils.backend.functions import CFunction, PsConstantFunction, ConstantFunctions
+from pystencils.types import constify, create_type, create_numeric_type, PsVectorType, PsTypeError
 from pystencils.types.quick import Fp, Int, Bool, Arr, Ptr
 from pystencils.backend.kernelcreation.context import KernelCreationContext
 from pystencils.backend.kernelcreation.freeze import FreezeExpressions
@@ -82,6 +84,60 @@ def test_typify_simple():
 
     check(fasm.lhs)
     check(fasm.rhs)
+
+
+def test_typify_constants():
+    ctx = KernelCreationContext(default_dtype=Fp(32))
+    freeze = FreezeExpressions(ctx)
+    typify = Typifier(ctx)
+
+    for constant in [sp.sympify(0), sp.sympify(1), sp.Rational(1, 2), sp.pi, sp.E, sp.oo, - sp.oo]:
+        #   Constant on its own
+        expr, _ = typify.typify_expression(freeze(constant), ctx.default_dtype)
+
+        for node in dfs_preorder(expr):
+            assert isinstance(node, PsExpression)
+            assert node.dtype == ctx.default_dtype
+            match node:
+                case PsConstantExpr(c):
+                    assert c.dtype == constify(ctx.default_dtype)
+                case PsCall(func) if isinstance(func, PsConstantFunction):
+                    assert func.dtype == constify(ctx.default_dtype)
+
+
+def test_constants_contextual_typing():
+    ctx = KernelCreationContext(default_dtype=Fp(32))
+    freeze = FreezeExpressions(ctx)
+    typify = Typifier(ctx)
+
+    fp16 = Fp(16)
+    x = TypedSymbol("x", fp16)
+
+    for constant in [sp.sympify(0), sp.sympify(1), sp.Rational(1, 2), sp.pi, sp.E, sp.oo, - sp.oo]:
+        expr = freeze(constant) + freeze(x)  # Freeze separately such that SymPy does not simplify
+        expr = typify(expr)
+
+        assert isinstance(expr, PsAdd)
+
+        for node in dfs_preorder(expr):
+            assert isinstance(node, PsExpression)
+            assert node.dtype == fp16
+            match node:
+                case PsConstantExpr(c):
+                    assert c.dtype == constify(fp16)
+                case PsCall(func) if isinstance(func, PsConstantFunction):
+                    assert func.dtype == constify(fp16)
+
+
+def test_no_integer_infinities_and_transcendentals():
+    ctx = KernelCreationContext(default_dtype=Fp(32))
+    freeze = FreezeExpressions(ctx)
+    typify = Typifier(ctx)
+
+    for sp_expr in [sp.oo, - sp.oo, sp.pi, sp.E]:
+        expr = freeze(sp_expr)
+        with pytest.raises(PsTypeError):
+            typify.typify_expression(expr, Int(32))
 
 
 def test_lhs_constness():
@@ -670,6 +726,22 @@ def test_typify_bool_vectors():
 
     result = typify(PsAnd(PsLt(x, y), PsGe(y, x)))
     assert result.get_dtype() == PsVectorType(Bool(), 4)
+
+
+def test_propagate_constant_type_in_broadcast():
+    fp16 = Fp(16)
+
+    for constant in [
+        PsConstantFunction(ConstantFunctions.E, fp16)(),
+        PsConstantFunction(ConstantFunctions.PosInfinity, fp16)(),
+        PsConstantExpr(PsConstant(3.5, fp16))
+    ]:
+        ctx = KernelCreationContext(default_dtype=Fp(32))
+        typify = Typifier(ctx)
+
+        expr = PsVecBroadcast(4, constant)
+        expr = typify(expr)
+        assert expr.dtype == PsVectorType(fp16, 4)
 
 
 def test_inference_fails():

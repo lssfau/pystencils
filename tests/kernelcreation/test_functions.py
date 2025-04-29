@@ -16,6 +16,15 @@ from pystencils.backend.ast import dfs_preorder
 from pystencils.backend.ast.expressions import PsCall
 
 
+def constant(name, dtype):
+    return {
+        "pi": (sp.pi, dtype(np.pi)),
+        "e": (sp.E, dtype(np.e)),
+        "infinity": (sp.core.numbers.Infinity(), dtype(np.inf)),
+        "neg_infinity": (sp.core.numbers.NegativeInfinity(), -dtype(np.inf)),
+    }[name]
+
+
 def unary_function(name, xp):
     return {
         "exp": (sp.exp, xp.exp),
@@ -278,6 +287,37 @@ def test_integer_binary_functions(gen_config, xp, function_name, dtype):
     kernel = create_kernel(asms, gen_config)
     kfunc = kernel.compile()
     kfunc(inp1=inp1, inp2=inp2, outp=outp)
+
+    xp.testing.assert_array_equal(outp, reference)
+
+
+@pytest.mark.parametrize("c_name", ["pi", "e", "infinity", "neg_infinity"])
+@pytest.mark.parametrize(
+    "target, dtype",
+    list(product(AVAIL_TARGETS, [np.float32, np.float64]))
+    + [
+        (t, np.float16)
+        for t in AVAIL_TARGETS
+        if t.is_gpu() or t in (Target.X86_AVX512_FP16,)
+    ],
+)
+def test_constants(c_name, dtype, gen_config, xp):
+    c_sp, c_np = constant(c_name, dtype)
+
+    outp = xp.zeros(
+        (17,), dtype=dtype
+    )  # 17 entries to run both vectorized and remainder loops
+    reference = xp.zeros_like(outp)
+    reference[:] = c_np
+
+    outp_field = Field.create_from_numpy_array("outp", outp)
+    asm = Assignment(outp_field(0), c_sp)
+
+    gen_config = replace(gen_config, default_dtype=dtype)
+
+    kernel = create_kernel(asm, gen_config)
+    kfunc = kernel.compile()
+    kfunc(outp=outp)
 
     xp.testing.assert_array_equal(outp, reference)
 

@@ -46,7 +46,7 @@ from pystencils.backend.ast.expressions import (
     PsMemAcc,
 )
 from pystencils.backend.constants import PsConstant
-from pystencils.backend.functions import PsMathFunction, MathFunctions
+from pystencils.backend.functions import PsMathFunction, MathFunctions, PsConstantFunction, ConstantFunctions
 from pystencils.backend.kernelcreation import (
     KernelCreationContext,
     FreezeExpressions,
@@ -119,6 +119,31 @@ def test_freeze_fields():
     should = PsAssignment(lhs, rhs)
 
     assert fasm.structurally_equal(should)
+
+
+def test_freeze_constants():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    expr = freeze(sp.pi)
+    assert isinstance(expr, PsCall)
+    assert isinstance(expr.function, PsConstantFunction)
+    assert expr.function.func == ConstantFunctions.Pi
+
+    expr = freeze(sp.E)
+    assert isinstance(expr, PsCall)
+    assert isinstance(expr.function, PsConstantFunction)
+    assert expr.function.func == ConstantFunctions.E
+
+    expr = freeze(sp.oo)
+    assert isinstance(expr, PsCall)
+    assert isinstance(expr.function, PsConstantFunction)
+    assert expr.function.func == ConstantFunctions.PosInfinity
+
+    expr = freeze(- sp.oo)
+    assert isinstance(expr, PsCall)
+    assert isinstance(expr.function, PsConstantFunction)
+    assert expr.function.func == ConstantFunctions.NegInfinity
 
 
 def test_freeze_integer_binops():
