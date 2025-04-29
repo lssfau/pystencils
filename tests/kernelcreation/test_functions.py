@@ -211,14 +211,14 @@ def test_binary_functions(gen_config, xp, function_name, dtype, function_domain)
 
 dtype_and_target_for_integer_funcs = pytest.mark.parametrize(
     "dtype, target",
-    list(product([np.int32], [t for t in AVAIL_TARGETS if not t.is_gpu()]))
+    list(product([np.int32], AVAIL_TARGETS))
     + list(
         product(
             [np.int64],
             [
                 t
                 for t in AVAIL_TARGETS
-                if t not in (Target.X86_SSE, Target.X86_AVX) and not t.is_gpu()
+                if t not in (Target.X86_SSE, Target.X86_AVX)
             ],
         )
     ),

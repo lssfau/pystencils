@@ -5,11 +5,8 @@ from pystencils import Assignment, Field, create_kernel
 
 
 @pytest.mark.parametrize("order", ['c', 'f'])
-@pytest.mark.parametrize("align", [True, False])
-def test_fixed_sized_field(order, align):
-    if not align:
-        pytest.xfail("Non-Aligned structs not supported")
-    dt = np.dtype([('e1', np.float32), ('e2', np.double), ('e3', np.double)], align=align)
+def test_fixed_sized_field(order):
+    dt = np.dtype([('e1', np.float32), ('e2', np.double), ('e3', np.double)], align=True)
     arr = np.zeros((3, 2), dtype=dt, order=order)
 
     f = Field.create_from_numpy_array("f", arr)
@@ -27,11 +24,8 @@ def test_fixed_sized_field(order, align):
 
 
 @pytest.mark.parametrize("order", ['c', 'f'])
-@pytest.mark.parametrize("align", [True, False])
-def test_variable_sized_field(order, align):
-    if not align:
-        pytest.xfail("Non-Aligned structs not supported")
-    dt = np.dtype([('e1', np.float32), ('e2', np.double), ('e3', np.double)], align=align)
+def test_variable_sized_field(order):
+    dt = np.dtype([('e1', np.float32), ('e2', np.double), ('e3', np.double)], align=True)
 
     f = Field.create_generic("f", 2, dt, layout=order)
     d = Field.create_generic("d", 2, dt, layout=order)
