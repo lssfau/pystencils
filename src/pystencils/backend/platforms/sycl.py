@@ -14,9 +14,6 @@ from ..ast.expressions import (
     PsLt,
     PsAnd,
     PsCall,
-    PsGe,
-    PsLe,
-    PsTernary,
     PsLookup,
     PsBufferAcc,
 )
@@ -90,17 +87,8 @@ class SyclPlatform(Platform):
             return call
 
         if isinstance(dtype, PsIntegerType):
-            match func:
-                case MathFunctions.Abs:
-                    zero = PsExpression.make(PsConstant(0, dtype))
-                    arg = call.args[0]
-                    return PsTernary(PsGe(arg, zero), arg, -arg)
-                case MathFunctions.Min:
-                    arg1, arg2 = call.args
-                    return PsTernary(PsLe(arg1, arg2), arg1, arg2)
-                case MathFunctions.Max:
-                    arg1, arg2 = call.args
-                    return PsTernary(PsGe(arg1, arg2), arg1, arg2)
+            if (expr := self._select_integer_function(call)) is not None:
+                return expr
 
         raise MaterializationError(
             f"No implementation available for function {func} on data type {dtype}"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 
-from ...types import constify, deconstify
+from ...types import constify, deconstify, PsIntegerType
 from ..exceptions import MaterializationError
 from .platform import Platform
 
@@ -249,6 +249,10 @@ class GenericGpu(Platform):
 
             call.function = cfunc
             return call
+        
+        if isinstance(dtype, PsIntegerType):
+            if (expr := self._select_integer_function(call)) is not None:
+                return expr
 
         raise MaterializationError(
             f"No implementation available for function {func} on data type {dtype}"

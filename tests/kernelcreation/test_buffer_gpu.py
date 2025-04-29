@@ -268,11 +268,8 @@ def test_buffer_indexing():
     assert len(spatial_shape_symbols) <= 3
 
 
-@pytest.mark.parametrize('gpu_indexing', ("block", "line"))
-def test_iteration_slices(gpu_indexing):
-    if gpu_indexing == "line":
-        pytest.xfail("Line indexing not available yet")
-
+@pytest.mark.parametrize('indexing_scheme', ("linear3d", "blockwise4d"))
+def test_iteration_slices(indexing_scheme):
     num_cell_values = 19
     dt = np.uint64
     fields = _generate_fields(dt=dt, stencil_directions=num_cell_values)
@@ -300,6 +297,7 @@ def test_iteration_slices(gpu_indexing):
         gpu_dst_arr.fill(0)
 
         config = CreateKernelConfig(target=Target.CurrentGPU, iteration_slice=pack_slice)
+        config.gpu.indexing_scheme = indexing_scheme
 
         pack_code = create_kernel(pack_eqs, config=config)
         pack_kernel = pack_code.compile()
@@ -312,6 +310,7 @@ def test_iteration_slices(gpu_indexing):
             unpack_eqs.append(eq)
 
         config = CreateKernelConfig(target=Target.CurrentGPU, iteration_slice=pack_slice)
+        config.gpu.indexing_scheme = indexing_scheme
 
         unpack_code = create_kernel(unpack_eqs, config=config)
         unpack_kernel = unpack_code.compile()
