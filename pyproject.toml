@@ -90,6 +90,7 @@ build-backend = "setuptools.build_meta"
 pystencils = [
     "include/**/*.h",
     "include/**/*.hpp",
+    "include/**/*.cuh",
     "jit/cpu/*.tmpl.cpp",
     "boundaries/createindexlistcython.pyx"
 ]
