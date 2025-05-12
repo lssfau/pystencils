@@ -3,7 +3,9 @@ import numpy as np
 import sympy as sp
 import pystencils
 
-from pystencils import Assignment
+import pytest
+
+from pystencils import Assignment, TypedSymbol
 from pystencils.sympyextensions import replace_second_order_products
 from pystencils.sympyextensions import remove_higher_order_terms
 from pystencils.sympyextensions import complete_the_squares_in_exp
@@ -25,6 +27,16 @@ from pystencils.sympyextensions.integer_functions import (
     round_to_multiple_towards_zero,
     ceil_to_multiple,
     div_ceil,
+)
+
+from pystencils.sympyextensions.reduction import (
+    ReductionOp,
+    AddReductionAssignment,
+    SubReductionAssignment,
+    MulReductionAssignment,
+    MinReductionAssignment,
+    MaxReductionAssignment,
+    reduction_assignment,
 )
 
 
@@ -197,6 +209,30 @@ def test_count_operations():
     assert ops["adds"] == 1
     assert ops["divs"] == 1
     assert ops["muls"] == 99
+
+
+@pytest.mark.parametrize("reduction_assignment_for_op", [
+    (ReductionOp.Add, AddReductionAssignment),
+    (ReductionOp.Sub, SubReductionAssignment),
+    (ReductionOp.Mul, MulReductionAssignment),
+    (ReductionOp.Min, MinReductionAssignment),
+    (ReductionOp.Max, MaxReductionAssignment),
+])
+def test_reduction_assignments(
+        reduction_assignment_for_op
+):
+    reduction_op, reduction_assignment_type = reduction_assignment_for_op
+
+    w = TypedSymbol("w", "float64")
+    v = sympy.symbols("v")
+
+    assignment = reduction_assignment(w, reduction_op, 0)
+
+    assert isinstance(assignment, reduction_assignment_type)
+
+    # invalid assignment since v is not a typed symbol
+    with pytest.raises(TypeError):
+        _ = reduction_assignment(v, reduction_op, 0)
 
 
 def test_common_denominator():

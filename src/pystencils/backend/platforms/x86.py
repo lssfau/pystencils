@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Sequence
+from typing import Sequence, Tuple
 from enum import Enum
 from functools import cache
 
@@ -17,8 +17,9 @@ from ..ast.expressions import (
     PsCast,
     PsCall,
 )
-from ..ast.vector import PsVecMemAcc, PsVecBroadcast
-from ...types import PsCustomType, PsVectorType, PsPointerType
+from ..ast.vector import PsVecMemAcc, PsVecBroadcast, PsVecHorizontal
+from ...sympyextensions import ReductionOp
+from ...types import PsCustomType, PsVectorType, PsPointerType, PsType
 from ..constants import PsConstant
 
 from ..exceptions import MaterializationError
@@ -132,6 +133,8 @@ class X86VectorCpu(GenericVectorCpu):
         else:
             headers = {"<immintrin.h>"}
 
+        headers.update({'"pystencils_runtime/simd_horizontal_helpers.h"'})
+
         return super().required_headers | headers
 
     def type_intrinsic(self, vector_type: PsVectorType) -> PsCustomType:
@@ -160,7 +163,14 @@ class X86VectorCpu(GenericVectorCpu):
     ) -> PsExpression:
         match expr:
             case PsUnOp() | PsBinOp():
-                func = _x86_op_intrin(self._vector_arch, expr, expr.get_dtype())
+                vtype: PsType
+                if isinstance(expr, PsVecHorizontal):
+                    # return type of expression itself is scalar, but input argument to intrinsic is a vector
+                    vtype = expr.vector_operand.get_dtype()
+                else:
+                    vtype = expr.get_dtype()
+
+                func = _x86_op_intrin(self._vector_arch, expr, vtype)
                 intrinsic = func(*operands)
                 intrinsic.dtype = func.return_type
                 return intrinsic
@@ -339,6 +349,7 @@ def _x86_op_intrin(
     prefix = varch.intrin_prefix(vtype)
     suffix = varch.intrin_suffix(vtype)
     rtype = atype = varch.intrin_type(vtype)
+    atypes: Tuple[PsType, ...] = ()
 
     match op:
         case PsVecBroadcast():
@@ -346,6 +357,16 @@ def _x86_op_intrin(
             if vtype.scalar_type == SInt(64) and vtype.vector_entries <= 4:
                 suffix += "x"
             atype = vtype.scalar_type
+        case PsVecHorizontal():
+            # horizontal add instead of sub avoids double inversion of sign
+            actual_op = (
+                ReductionOp.Add
+                if op.reduction_op == ReductionOp.Sub
+                else op.reduction_op
+            )
+            opstr = f"horizontal_{actual_op.name.lower()}"
+            rtype = vtype.scalar_type
+            atypes = (vtype.scalar_type, vtype)
         case PsAdd():
             opstr = "add"
         case PsSub():
@@ -392,7 +413,9 @@ def _x86_op_intrin(
                 case (SInt(64), Fp()) | (
                     Fp(),
                     SInt(64),
-                ) if varch < X86VectorArch.AVX512:
+                ) if (
+                    varch < X86VectorArch.AVX512
+                ):
                     panic()
                 # AVX512 only: cvtepiA_epiT if A > T
                 case (SInt(a), SInt(t)) if a > t and varch < X86VectorArch.AVX512:
@@ -408,4 +431,7 @@ def _x86_op_intrin(
             )
 
     num_args = 1 if isinstance(op, PsUnOp) else 2
-    return CFunction(f"{prefix}_{opstr}_{suffix}", (atype,) * num_args, rtype)
+    if not atypes:
+        atypes = (atype,) * num_args
+
+    return CFunction(f"{prefix}_{opstr}_{suffix}", atypes, rtype)

@@ -81,6 +81,7 @@ Topics
 
   user_manual/symbolic_language
   user_manual/kernelcreation
+  user_manual/reductions
   user_manual/gpu_kernels
   user_manual/WorkingWithTypes
 

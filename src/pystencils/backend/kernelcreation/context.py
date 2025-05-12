@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterable, Iterator, Any
 from itertools import chain, count
 from collections import namedtuple, defaultdict
 import re
 
+from ..ast.expressions import PsExpression, PsConstantExpr, PsCall
+from ..functions import PsConstantFunction, ConstantFunctions
 from ...defaults import DEFAULTS
 from ...field import Field, FieldType
+from ...sympyextensions import ReductionOp
 from ...sympyextensions.typed_sympy import TypedSymbol, DynamicType
 
 from ..memory import PsSymbol, PsBuffer
@@ -44,6 +48,26 @@ class FieldsInKernel:
 FieldArrayPair = namedtuple("FieldArrayPair", ("field", "array"))
 
 
+@dataclass(frozen=True)
+class ReductionInfo:
+    """Information about a reduction operation, its neutral element in form of an initial value
+    and the pointer used by the kernel as write-back argument.
+
+    Attributes:
+    ===========
+
+    reduction_op : Reduction operation being performed
+    init_val : Initial value used to initialize local symbol
+    local_symbol : Kernel-local symbol used to accumulate intermediate reduction result
+    writeback_ptr_symbol : Symbol that is used to export the final reduction result
+    """
+
+    op: ReductionOp
+    init_val: PsExpression
+    local_symbol: PsSymbol
+    writeback_ptr_symbol: PsSymbol
+
+
 class KernelCreationContext:
     """Manages the translation process from the SymPy frontend to the backend AST, and collects
     all necessary information for the translation:
@@ -75,6 +99,8 @@ class KernelCreationContext:
         self._symbol_ctr_pattern = re.compile(r"__[0-9]+$")
         self._symbol_dup_table: defaultdict[str, int] = defaultdict(lambda: 0)
 
+        self._reduction_data: dict[str, ReductionInfo] = dict()
+
         self._fields_and_arrays: dict[str, FieldArrayPair] = dict()
         self._fields_collection = FieldsInKernel()
 
@@ -93,7 +119,7 @@ class KernelCreationContext:
     def index_dtype(self) -> PsIntegerType:
         """Data type used by default for index expressions"""
         return self._index_dtype
-    
+
     def resolve_dynamic_type(self, dtype: DynamicType | PsType) -> PsType:
         """Selects the appropriate data type for `DynamicType` instances, and returns all other types as they are."""
         match dtype:
@@ -178,6 +204,61 @@ class KernelCreationContext:
 
         self._symbols[old.name] = new
 
+    def add_reduction_info(
+        self,
+        lhs_name: str,
+        lhs_dtype: PsNumericType,
+        reduction_op: ReductionOp,
+    ):
+        """Create ReductionInfo instance and add to its corresponding lookup table for a given symbol name."""
+
+        # make sure that lhs symbol never occurred before ReductionAssignment
+        if self.find_symbol(lhs_name):
+            raise KernelConstraintsError(
+                f"Cannot create reduction with symbol {lhs_name}: "
+                "Another symbol with the same name already exist."
+            )
+
+        # add symbol for lhs with pointer datatype for write-back mechanism
+        pointer_symb = self.get_symbol(lhs_name, PsPointerType(lhs_dtype))
+
+        # create kernel-local copy of lhs symbol
+        local_symb = self.get_new_symbol(f"{lhs_name}_local", lhs_dtype)
+
+        # match for reduction operation and set neutral init_val
+        init_val: PsExpression
+        match reduction_op:
+            case ReductionOp.Add:
+                init_val = PsConstantExpr(PsConstant(0))
+            case ReductionOp.Sub:
+                init_val = PsConstantExpr(PsConstant(0))
+            case ReductionOp.Mul:
+                init_val = PsConstantExpr(PsConstant(1))
+            case ReductionOp.Min:
+                init_val = PsCall(PsConstantFunction(ConstantFunctions.PosInfinity), [])
+            case ReductionOp.Max:
+                init_val = PsCall(PsConstantFunction(ConstantFunctions.NegInfinity), [])
+            case _:
+                raise PsInternalCompilerError(
+                    f"Unsupported kind of reduction assignment: {reduction_op}."
+                )
+
+        # create reduction info and add to set
+        reduction_info = ReductionInfo(
+            reduction_op, init_val, local_symb, pointer_symb
+        )
+        self._reduction_data[lhs_name] = reduction_info
+
+        return reduction_info
+
+    def find_reduction_info(self, name: str) -> ReductionInfo | None:
+        """Find a ReductionInfo with the given name in the lookup table, if it exists.
+
+        Returns:
+            The ReductionInfo with the given name, or `None` if it does not exist.
+        """
+        return self._reduction_data.get(name, None)
+
     def duplicate_symbol(
         self, symb: PsSymbol, new_dtype: PsType | None = None
     ) -> PsSymbol:
@@ -212,6 +293,11 @@ class KernelCreationContext:
     def symbols(self) -> Iterable[PsSymbol]:
         """Return an iterable of all symbols listed in the symbol table."""
         return self._symbols.values()
+
+    @property
+    def reduction_data(self) -> dict[str, ReductionInfo]:
+        """Return a dictionary holding kernel-local reduction information for given symbol names."""
+        return self._reduction_data
 
     #   Fields and Arrays
 

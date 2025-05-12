@@ -8,7 +8,9 @@ from ..kernelcreation import KernelCreationContext
 from ..ast import PsAstNode
 from ..ast.structural import PsBlock, PsLoop, PsPragma, PsStructuralNode
 from ..ast.expressions import PsExpression
+from ..kernelcreation.context import ReductionInfo
 
+from ...types import PsScalarType
 
 __all__ = ["InsertPragmasAtLoops", "LoopPragma", "AddOpenMP"]
 
@@ -103,12 +105,16 @@ class AddOpenMP:
     def __init__(
         self,
         ctx: KernelCreationContext,
+        reductions: Sequence[ReductionInfo] = (),
         nesting_depth: int = 0,
         num_threads: int | None = None,
         schedule: str | None = None,
         collapse: int | None = None,
         omit_parallel: bool = False,
     ) -> None:
+
+        self._reductions = reductions
+
         pragma_text = "omp"
 
         if not omit_parallel:
@@ -121,6 +127,16 @@ class AddOpenMP:
 
         if num_threads is not None:
             pragma_text += f" num_threads({str(num_threads)})"
+
+        for reduction_info in self._reductions:
+            if isinstance(reduction_info.local_symbol.dtype, PsScalarType):
+                pragma_text += (
+                    f" reduction({reduction_info.op.value}: {reduction_info.local_symbol.name})"
+                )
+            else:
+                NotImplementedError(
+                    "OMP: Reductions for non-scalar data types are not supported yet."
+                )
 
         if collapse is not None:
             if collapse <= 0:

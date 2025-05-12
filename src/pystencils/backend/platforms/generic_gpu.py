@@ -1,14 +1,21 @@
 from __future__ import annotations
+
+import operator
 from abc import ABC, abstractmethod
+from functools import reduce
 import numpy as np
 
-from ...types import constify, deconstify, PsIntegerType
+from ...types import (
+    constify,
+    deconstify,
+    PsIntegerType,
+)
+from ...types.quick import SInt
 from ..exceptions import MaterializationError
 from .platform import Platform
 
 from ..memory import PsSymbol
 from ..kernelcreation import (
-    KernelCreationContext,
     Typifier,
     IterationSpace,
     FullIterationSpace,
@@ -17,7 +24,12 @@ from ..kernelcreation import (
 )
 
 from ..constants import PsConstant
-from ..ast.structural import PsBlock, PsConditional, PsDeclaration
+from ..kernelcreation.context import KernelCreationContext
+from ..ast.structural import (
+    PsBlock,
+    PsConditional,
+    PsDeclaration,
+)
 from ..ast.expressions import (
     PsExpression,
     PsLiteralExpr,
@@ -25,18 +37,22 @@ from ..ast.expressions import (
     PsCall,
     PsLookup,
     PsBufferAcc,
+    PsConstantExpr,
+    PsAdd,
+    PsRem,
+    PsEq,
 )
 from ..ast.expressions import PsLt, PsAnd
 from ...types import PsSignedIntegerType, PsIeeeFloatType
 from ..literals import PsLiteral
+
 from ..functions import (
-    PsMathFunction,
     MathFunctions,
     CFunction,
+    PsMathFunction,
     PsConstantFunction,
     ConstantFunctions,
 )
-
 
 int32 = PsSignedIntegerType(width=32, const=False)
 
@@ -179,22 +195,28 @@ class GenericGpu(Platform):
         thread_mapping: Callback object which defines the mapping of thread indices onto iteration space points
     """
 
+    @property
+    @abstractmethod
+    def required_headers(self) -> set[str]:
+        return set()
+
     def __init__(
         self,
         ctx: KernelCreationContext,
+        assume_warp_aligned_block_size: bool,
+        warp_size: int | None,
         thread_mapping: ThreadMapping | None = None,
     ) -> None:
         super().__init__(ctx)
+
+        self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
+        self._warp_size = warp_size
 
         self._thread_mapping = (
             thread_mapping if thread_mapping is not None else Linear3DMapping()
         )
 
         self._typify = Typifier(ctx)
-
-    @property
-    def required_headers(self) -> set[str]:
-        return set()
 
     def materialize_iteration_space(
         self, body: PsBlock, ispace: IterationSpace
@@ -206,11 +228,66 @@ class GenericGpu(Platform):
         else:
             raise MaterializationError(f"Unknown type of iteration space: {ispace}")
 
-    def select_function(self, call: PsCall) -> PsExpression:
-        assert isinstance(call.function, (PsMathFunction | PsConstantFunction))
+    @staticmethod
+    def _get_condition_for_translation(ispace: IterationSpace) -> PsExpression:
+        """Return the condition that determines whether the current thread
+        lies inside the iteration space."""
 
-        func = call.function.func
+        if isinstance(ispace, FullIterationSpace):
+            conds = []
+
+            dimensions = ispace.dimensions_in_loop_order()
+
+            for dim in dimensions:
+                ctr_expr = PsExpression.make(dim.counter)
+                conds.append(PsLt(ctr_expr, dim.stop))
+
+            condition: PsExpression = conds[0]
+            for cond in conds[1:]:
+                condition = PsAnd(condition, cond)
+
+            return condition
+        elif isinstance(ispace, SparseIterationSpace):
+            sparse_ctr_expr = PsExpression.make(ispace.sparse_counter)
+            stop = PsExpression.make(ispace.index_list.shape[0])
+
+            return PsLt(sparse_ctr_expr.clone(), stop)
+        else:
+            raise MaterializationError(f"Unknown type of iteration space: {ispace}")
+
+    @staticmethod
+    def _thread_index_per_dim(ispace: IterationSpace) -> tuple[PsExpression, ...]:
+        """Returns thread indices multiplied with block dimension strides per dimension."""
+
+        return tuple(
+            idx
+            * PsConstantExpr(
+                PsConstant(reduce(operator.mul, BLOCK_DIM[:i], 1), SInt(32))
+            )
+            for i, idx in enumerate(THREAD_IDX[: ispace.rank])
+        )
+
+    def _first_thread_in_warp(self, ispace: IterationSpace) -> PsExpression:
+        """Returns expression that determines whether a thread is the first within a warp."""
+
+        tids_per_dim = GenericGpu._thread_index_per_dim(ispace)
+        tid: PsExpression = tids_per_dim[0]
+        for t in tids_per_dim[1:]:
+            tid = PsAdd(tid, t)
+
+        return PsEq(
+            PsRem(tid, PsConstantExpr(PsConstant(self._warp_size, SInt(32)))),
+            PsConstantExpr(PsConstant(0, SInt(32))),
+        )
+
+    def select_function(
+        self, call: PsCall
+    ) -> PsExpression:
+        call_func = call.function
+        assert isinstance(call_func, (PsMathFunction | PsConstantFunction))
+
         dtype = call.get_dtype()
+        func = call_func.func
         arg_types = (dtype,) * call.function.arg_count
         expr: PsExpression | None = None
 
@@ -273,7 +350,7 @@ class GenericGpu(Platform):
 
                 case ConstantFunctions.PosInfinity:
                     expr = PsExpression.make(PsLiteral(f"PS_FP{dtype.width}_INFINITY", dtype))
-                    
+
                 case ConstantFunctions.NegInfinity:
                     expr = PsExpression.make(PsLiteral(f"PS_FP{dtype.width}_NEG_INFINITY", dtype))
 
@@ -285,7 +362,7 @@ class GenericGpu(Platform):
         if isinstance(dtype, PsIntegerType):
             expr = self._select_integer_function(call)
 
-        if expr is not None:    
+        if expr is not None:
             if expr.dtype is None:
                 typify = Typifier(self._ctx)
                 typify(expr)
@@ -304,7 +381,6 @@ class GenericGpu(Platform):
         ctr_mapping = self._thread_mapping(ispace)
 
         indexing_decls = []
-        conds = []
 
         dimensions = ispace.dimensions_in_loop_order()
 
@@ -318,14 +394,9 @@ class GenericGpu(Platform):
             indexing_decls.append(
                 self._typify(PsDeclaration(ctr_expr, ctr_mapping[dim.counter]))
             )
-            conds.append(PsLt(ctr_expr, dim.stop))
 
-        condition: PsExpression = conds[0]
-        for cond in conds[1:]:
-            condition = PsAnd(condition, cond)
-        ast = PsBlock(indexing_decls + [PsConditional(condition, body)])
-
-        return ast
+        cond = self._get_condition_for_translation(ispace)
+        return PsBlock(indexing_decls + [PsConditional(cond, body)])
 
     def _prepend_sparse_translation(
         self, body: PsBlock, ispace: SparseIterationSpace
@@ -355,8 +426,5 @@ class GenericGpu(Platform):
         ]
         body.statements = mappings + body.statements
 
-        stop = PsExpression.make(ispace.index_list.shape[0])
-        condition = PsLt(sparse_ctr_expr.clone(), stop)
-        ast = PsBlock([sparse_idx_decl, PsConditional(condition, body)])
-
-        return ast
+        cond = self._get_condition_for_translation(ispace)
+        return PsBlock([sparse_idx_decl, PsConditional(cond, body)])

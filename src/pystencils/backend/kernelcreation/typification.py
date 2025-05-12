@@ -49,8 +49,13 @@ from ..ast.expressions import (
     PsNeg,
     PsNot,
 )
-from ..ast.vector import PsVecBroadcast, PsVecMemAcc
-from ..functions import PsMathFunction, CFunction, PsConstantFunction
+from ..ast.vector import PsVecBroadcast, PsVecMemAcc, PsVecHorizontal
+from ..functions import (
+    PsMathFunction,
+    CFunction,
+    PsConstantFunction,
+    PsReductionWriteBack,
+)
 from ..ast.util import determine_memory_object
 from ..exceptions import TypificationError
 
@@ -245,7 +250,7 @@ class TypeContext:
                         f"    Expression: {expr}"
                         f"  Type Context: {self._target_type}"
                     )
-                
+
                 case PsCast(cast_target, _) if cast_target is None:
                     expr.target_type = self._target_type
         # endif
@@ -604,6 +609,38 @@ class Typifier:
                 else:
                     tc.apply_dtype(PsBoolType(), expr)
 
+            case PsVecHorizontal():
+                # bin op consisting of a scalar and a vector that is converted to a scalar
+                # -> whole expression should be treated as scalar
+
+                self.visit_expr(expr.scalar_operand, tc)
+
+                vector_op_tc = TypeContext()
+                self.visit_expr(expr.vector_operand, vector_op_tc)
+
+                if tc.target_type is None or vector_op_tc.target_type is None:
+                    raise TypificationError(
+                        f"Unable to determine type of argument to vector horizontal: {expr}"
+                    )
+
+                if not isinstance(tc.target_type, PsScalarType):
+                    raise TypificationError(
+                        f"Illegal type in scalar operand (op1) to vector horizontal: {tc.target_type}"
+                    )
+
+                if not isinstance(vector_op_tc.target_type, PsVectorType):
+                    raise TypificationError(
+                        f"Illegal type in vector operand (op2) to vector horizontal: {vector_op_tc.target_type}"
+                    )
+
+                if vector_op_tc.target_type.scalar_type is not tc.target_type:
+                    raise TypificationError(
+                        f"Scalar type of vector operand {vector_op_tc.target_type} "
+                        f"does not correspond to type of scalar operand {tc.target_type}"
+                    )
+
+                tc.apply_dtype(tc.target_type, expr)
+
             case PsBinOp(op1, op2):
                 self.visit_expr(op1, tc)
                 self.visit_expr(op2, tc)
@@ -625,6 +662,36 @@ class Typifier:
                             tc.apply_dtype(function.dtype, expr)
                         else:
                             tc.infer_dtype(expr)
+
+                    case PsReductionWriteBack():
+                        ptr_expr, symbol_expr = args
+
+                        self.visit_expr(symbol_expr, tc)
+
+                        ptr_tc = TypeContext()
+                        self.visit_expr(ptr_expr, ptr_tc)
+
+                        if tc.target_type is None or ptr_tc.target_type is None:
+                            raise TypificationError(
+                                f"Unable to determine type of argument to PsReductionWriteBack: {expr}"
+                            )
+
+                        if not (isinstance(ptr_expr, PsSymbolExpr) and isinstance(symbol_expr, PsSymbolExpr)):
+                            raise TypificationError(
+                                "Arguments to PsReductionWriteBack must be instances of PsSymbolExpr."
+                            )
+
+                        if not isinstance(ptr_expr.dtype, PsPointerType):
+                            raise TypificationError(
+                                "The first argument type to PsReductionWriteBack must be PsPointerType."
+                            )
+
+                        if not isinstance(symbol_expr.dtype, PsScalarType):
+                            raise TypificationError(
+                                "The second argument type to PsReductionWriteBack must be PsScalarType."
+                            )
+
+                        tc.infer_dtype(expr)
 
                     case CFunction(_, arg_types, ret_type):
                         tc.apply_dtype(ret_type, expr)

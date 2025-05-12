@@ -7,7 +7,7 @@ from ..ast.structural import PsAstNode, PsDeclaration, PsAssignment, PsStatement
 from ..ast.expressions import PsExpression, PsCall, PsCast, PsLiteral
 from ...types import PsCustomType, PsVectorType, constify, deconstify
 from ..ast.expressions import PsSymbolExpr, PsConstantExpr, PsUnOp, PsBinOp
-from ..ast.vector import PsVecMemAcc
+from ..ast.vector import PsVecMemAcc, PsVecHorizontal
 from ..exceptions import MaterializationError
 from ..functions import CFunction, PsMathFunction
 
@@ -86,6 +86,10 @@ class SelectIntrinsics:
                 new_rhs = self.visit_expr(rhs, sc)
                 return PsStatement(self._platform.vector_store(lhs, new_rhs))
 
+            case PsAssignment(lhs, rhs) if isinstance(rhs, PsVecHorizontal):
+                new_rhs = self.visit_expr(rhs, sc)
+                return PsAssignment(lhs, new_rhs)
+
             case _:
                 node.children = [self.visit(c, sc) for c in node.children]
 
@@ -93,7 +97,15 @@ class SelectIntrinsics:
 
     def visit_expr(self, expr: PsExpression, sc: SelectionContext) -> PsExpression:
         if not isinstance(expr.dtype, PsVectorType):
-            return expr
+            # special case: result type of horizontal reduction is scalar
+            if isinstance(expr, PsVecHorizontal):
+                scalar_op = expr.scalar_operand
+                vector_op_to_scalar = self.visit_expr(expr.vector_operand, sc)
+                return self._platform.op_intrinsic(
+                    expr, [scalar_op, vector_op_to_scalar]
+                )
+            else:
+                return expr
 
         match expr:
             case PsSymbolExpr(symb):

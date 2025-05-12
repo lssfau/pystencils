@@ -19,14 +19,22 @@ from .properties import PsSymbolProperty, FieldBasePtr
 from .parameters import Parameter
 from .functions import Lambda
 from .gpu_indexing import GpuIndexing, GpuLaunchConfiguration
+from ..backend.kernelcreation.context import ReductionInfo
 
 from ..field import Field
 from ..types import PsIntegerType, PsScalarType
 
 from ..backend.memory import PsSymbol
 from ..backend.ast import PsAstNode
-from ..backend.ast.structural import PsBlock, PsLoop
-from ..backend.ast.expressions import PsExpression
+from ..backend.functions import PsReductionWriteBack
+from ..backend.ast.expressions import (
+    PsExpression,
+    PsSymbolExpr,
+    PsCall,
+    PsMemAcc,
+    PsConstantExpr,
+)
+from ..backend.ast.structural import PsBlock, PsLoop, PsDeclaration, PsAssignment, PsStructuralNode
 from ..backend.ast.analysis import collect_undefined_symbols, collect_required_headers
 from ..backend.kernelcreation import (
     KernelCreationContext,
@@ -183,6 +191,10 @@ class DefaultKernelCreationDriver:
         if self._intermediates is not None:
             self._intermediates.constants_eliminated = kernel_ast.clone()
 
+        #   Extensions for reductions
+        for _, reduction_info in self._ctx.reduction_data.items():
+            self._modify_kernel_ast_for_reductions(reduction_info, kernel_ast)
+
         #   Target-Specific optimizations
         if self._target.is_cpu():
             kernel_ast = self._transform_for_cpu(kernel_ast)
@@ -283,6 +295,31 @@ class DefaultKernelCreationDriver:
 
         return kernel_body
 
+    def _modify_kernel_ast_for_reductions(self,
+                                          reduction_info: ReductionInfo,
+                                          kernel_ast: PsBlock):
+        # typify local symbol and write-back pointer expressions and initial value
+        typify = Typifier(self._ctx)
+        symbol_expr = typify(PsSymbolExpr(reduction_info.local_symbol))
+        ptr_symbol_expr = typify(PsSymbolExpr(reduction_info.writeback_ptr_symbol))
+        init_val = typify(reduction_info.init_val)
+
+        ptr_access = PsMemAcc(
+            ptr_symbol_expr, PsConstantExpr(PsConstant(0, self._ctx.index_dtype))
+        )
+        write_back_ptr = PsCall(
+            PsReductionWriteBack(reduction_info.op),
+            [ptr_symbol_expr, symbol_expr],
+        )
+
+        # declare and init local copy with neutral element
+        prepend_ast: list[PsStructuralNode] = [PsDeclaration(symbol_expr, init_val)]
+        # write back result to reduction target variable
+        append_ast: list[PsStructuralNode] = [PsAssignment(ptr_access, write_back_ptr)]
+
+        # modify AST
+        kernel_ast.statements = prepend_ast + kernel_ast.statements + append_ast
+
     def _transform_for_cpu(self, kernel_ast: PsBlock) -> PsBlock:
         canonicalize = CanonicalizeSymbols(self._ctx, True)
         kernel_ast = cast(PsBlock, canonicalize(kernel_ast))
@@ -321,6 +358,7 @@ class DefaultKernelCreationDriver:
 
             add_omp = AddOpenMP(
                 self._ctx,
+                reductions=list(self._ctx.reduction_data.values()),
                 nesting_depth=omp_options.get_option("nesting_depth"),
                 num_threads=omp_options.get_option("num_threads"),
                 schedule=omp_options.get_option("schedule"),
@@ -381,7 +419,8 @@ class DefaultKernelCreationDriver:
                 self._target, cast(PsScalarType, self._ctx.default_dtype)
             )
 
-        vectorizer = LoopVectorizer(self._ctx, num_lanes)
+        vectorizer = LoopVectorizer(self._ctx, num_lanes,
+                                    list(self._ctx.reduction_data.values()))
 
         def loop_predicate(loop: PsLoop):
             return loop.counter.symbol == inner_loop_dim.counter
@@ -405,14 +444,18 @@ class DefaultKernelCreationDriver:
 
         idx_scheme: GpuIndexingScheme = self._cfg.gpu.get_option("indexing_scheme")
         manual_launch_grid: bool = self._cfg.gpu.get_option("manual_launch_grid")
-        assume_warp_aligned_block_size: bool = self._cfg.gpu.get_option("assume_warp_aligned_block_size")
+        assume_warp_aligned_block_size: bool = self._cfg.gpu.get_option(
+            "assume_warp_aligned_block_size"
+        )
         warp_size: int | None = self._cfg.gpu.get_option("warp_size")
 
         if warp_size is None:
             warp_size = GpuOptions.default_warp_size(self._target)
 
         if warp_size is None and assume_warp_aligned_block_size:
-            warn("GPU warp size is unknown - ignoring assumption `assume_warp_aligned_block_size`.")
+            warn(
+                "GPU warp size is unknown - ignoring assumption `assume_warp_aligned_block_size`."
+            )
 
         return GpuIndexing(
             self._ctx,
@@ -457,6 +500,11 @@ class DefaultKernelCreationDriver:
                 else None
             )
 
+            assume_warp_aligned_block_size: bool = self._cfg.gpu.get_option(
+                "assume_warp_aligned_block_size"
+            )
+            warp_size: int | None = self._cfg.gpu.get_option("warp_size")
+
             GpuPlatform: type
             match self._target:
                 case Target.CUDA:
@@ -468,6 +516,8 @@ class DefaultKernelCreationDriver:
 
             return GpuPlatform(
                 self._ctx,
+                assume_warp_aligned_block_size,
+                warp_size,
                 thread_mapping=thread_mapping,
             )
 

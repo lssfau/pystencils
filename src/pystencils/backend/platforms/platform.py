@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 
+from ..exceptions import MaterializationError
+from ...sympyextensions import ReductionOp
 from ...types import PsIntegerType
-from ..ast.structural import PsBlock
+from ..ast.structural import PsBlock, PsStructuralNode
 from ..ast.expressions import PsCall, PsExpression, PsTernary, PsGe, PsLe
 from ..functions import PsMathFunction, MathFunctions
 from ..constants import PsConstant
@@ -37,8 +39,20 @@ class Platform(ABC):
         kernel body into that structure."""
         pass
 
+    def resolve_reduction(
+        self,
+        ptr_expr: PsExpression,
+        symbol_expr: PsExpression,
+        reduction_op: ReductionOp,
+    ) -> PsStructuralNode:
+        raise MaterializationError(
+            f"Resolution of reductions for {self.__class__.__name__} not implemented."
+        )
+
     @abstractmethod
-    def select_function(self, call: PsCall) -> PsExpression:
+    def select_function(
+        self, call: PsCall
+    ) -> PsExpression:
         """Select an implementation for the given function on the given data type.
 
         If no viable implementation exists, raise a `MaterializationError`.

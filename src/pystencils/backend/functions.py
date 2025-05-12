@@ -3,9 +3,9 @@ from typing import Any, Sequence, TYPE_CHECKING
 from abc import ABC
 from enum import Enum
 
-from ..types import PsType, PsNumericType
+from ..sympyextensions import ReductionOp
+from ..types import PsType, PsNumericType, PsTypeError
 from .exceptions import PsInternalCompilerError
-from ..types import PsTypeError
 
 if TYPE_CHECKING:
     from .ast.expressions import PsExpression
@@ -70,7 +70,7 @@ class MathFunctions(Enum):
 
 
 class PsMathFunction(PsFunction):
-    """Homogenously typed mathematical functions."""
+    """Homogeneously typed mathematical functions."""
 
     __match_args__ = ("func",)
 
@@ -93,6 +93,33 @@ class PsMathFunction(PsFunction):
 
     def __hash__(self) -> int:
         return hash(self._func)
+
+
+class PsReductionWriteBack(PsFunction):
+    """Function representing a reduction kernel's write-back step supported by the backend.
+
+    Each platform has to materialize this function to a concrete implementation.
+    """
+
+    def __init__(self, reduction_op: ReductionOp) -> None:
+        super().__init__("WriteBackToPtr", 2)
+        self._reduction_op = reduction_op
+
+    @property
+    def reduction_op(self) -> ReductionOp:
+        return self._reduction_op
+
+    def __str__(self) -> str:
+        return f"{super().name}"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PsReductionWriteBack):
+            return False
+
+        return self._reduction_op == other._reduction_op
+
+    def __hash__(self) -> int:
+        return hash(self._reduction_op)
 
 
 class ConstantFunctions(Enum):
@@ -122,7 +149,7 @@ class PsConstantFunction(PsFunction):
     and will be broadcast by the vectorizer.
     """
 
-    __match_args__ = ("func,")
+    __match_args__ = ("func",)
 
     def __init__(
         self, func: ConstantFunctions, dtype: PsNumericType | None = None

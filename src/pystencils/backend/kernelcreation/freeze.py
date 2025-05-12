@@ -1,9 +1,8 @@
 from typing import overload, cast, Any
 from functools import reduce
-from operator import add, mul, sub, truediv
+from operator import add, mul, sub
 
 import sympy as sp
-import sympy.core.relational
 import sympy.logic.boolalg
 from sympy.codegen.ast import AssignmentBase, AugmentedAssignment
 
@@ -13,8 +12,10 @@ from ...sympyextensions import (
     integer_functions,
     ConditionalFieldAccess,
 )
+from ..reduction_op_mapping import reduction_op_to_expr
 from ...sympyextensions.typed_sympy import TypedSymbol, TypeCast, DynamicType
 from ...sympyextensions.pointers import AddressOf, mem_acc
+from ...sympyextensions.reduction import ReductionAssignment, ReductionOp
 from ...sympyextensions.bit_masks import bit_conditional
 from ...field import Field, FieldType
 
@@ -178,19 +179,46 @@ class FreezeExpressions:
         assert isinstance(lhs, PsExpression)
         assert isinstance(rhs, PsExpression)
 
-        match expr.op:
-            case "+=":
-                op = add
-            case "-=":
-                op = sub
-            case "*=":
-                op = mul
-            case "/=":
-                op = truediv
-            case _:
-                raise FreezeError(f"Unsupported augmented assignment: {expr.op}.")
+        # transform augmented assignment to reduction op
+        str_to_reduction_op: dict[str, ReductionOp] = {
+            "+=": ReductionOp.Add,
+            "-=": ReductionOp.Sub,
+            "*=": ReductionOp.Mul,
+            "/=": ReductionOp.Div,
+        }
 
-        return PsAssignment(lhs, op(lhs.clone(), rhs))
+        # reuse existing handling for transforming reduction ops to expressions
+        return PsAssignment(
+            lhs, reduction_op_to_expr(str_to_reduction_op[expr.op], lhs.clone(), rhs)
+        )
+
+    def map_ReductionAssignment(self, expr: ReductionAssignment):
+        assert isinstance(expr.lhs, TypedSymbol)
+
+        rhs = self.visit(expr.rhs)
+
+        assert isinstance(rhs, PsExpression)
+
+        reduction_op = expr.reduction_op
+        lhs_symbol = expr.lhs
+        lhs_dtype = self._ctx.resolve_dynamic_type(lhs_symbol.dtype)
+        lhs_name = lhs_symbol.name
+
+        if not isinstance(lhs_dtype, PsNumericType):
+            raise FreezeError("Reduction symbol must have a numeric data type.")
+
+        # get reduction info from context
+        reduction_info = self._ctx.add_reduction_info(
+            lhs_name, lhs_dtype, reduction_op
+        )
+
+        # create new lhs from newly created local lhs symbol
+        new_lhs = PsSymbolExpr(reduction_info.local_symbol)
+
+        # get new rhs from augmented assignment
+        new_rhs: PsExpression = reduction_op_to_expr(reduction_op, new_lhs, rhs)
+
+        return PsAssignment(new_lhs, new_rhs)
 
     def map_Symbol(self, spsym: sp.Symbol) -> PsSymbolExpr:
         symb = self._ctx.get_symbol(spsym.name)
@@ -563,7 +591,7 @@ class FreezeExpressions:
     def map_Not(self, neg: sympy.logic.Not) -> PsNot:
         arg = self.visit_expr(neg.args[0])
         return PsNot(arg)
-    
+
     def map_bit_conditional(self, conditional: bit_conditional):
         args = [self.visit_expr(arg) for arg in conditional.args]
         bitpos, mask, then_expr = args[:3]
