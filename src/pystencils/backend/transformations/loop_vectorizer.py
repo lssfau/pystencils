@@ -1,15 +1,22 @@
 import numpy as np
 from enum import Enum, auto
-from typing import cast, Callable, overload
+from typing import cast, Callable, overload, Sequence
 
+from ..kernelcreation.context import ReductionInfo
 from ...types import PsVectorType, PsScalarType
 
 from ..kernelcreation import KernelCreationContext
 from ..constants import PsConstant
 from ..ast import PsAstNode
-from ..ast.structural import PsLoop, PsBlock, PsDeclaration
-from ..ast.expressions import PsExpression, PsTernary, PsGt
-from ..ast.vector import PsVecBroadcast
+from ..ast.structural import (
+    PsLoop,
+    PsBlock,
+    PsDeclaration,
+    PsAssignment,
+    PsStructuralNode,
+)
+from ..ast.expressions import PsExpression, PsTernary, PsGt, PsSymbolExpr
+from ..ast.vector import PsVecBroadcast, PsVecHorizontal
 from ..ast.analysis import collect_undefined_symbols
 
 from .ast_vectorizer import VectorizationAxis, VectorizationContext, AstVectorizer
@@ -48,10 +55,12 @@ class LoopVectorizer:
         self,
         ctx: KernelCreationContext,
         lanes: int,
+        reductions: Sequence[ReductionInfo] = (),
         trailing_iters: TrailingItersTreatment = TrailingItersTreatment.SCALAR_LOOP,
     ):
         self._ctx = ctx
         self._lanes = lanes
+        self._reductions = reductions
         self._trailing_iters = trailing_iters
 
         from ..kernelcreation import Typifier
@@ -133,6 +142,44 @@ class LoopVectorizer:
 
         #   Prepare vectorization context
         vc = VectorizationContext(self._ctx, self._lanes, axis)
+
+        #   Prepare reductions found in loop body
+        simd_init_local_reduction_vars: list[PsStructuralNode] = []
+        simd_writeback_local_reduction_vars: list[PsStructuralNode] = []
+        for stmt in loop.body.statements:
+            if isinstance(stmt, PsAssignment) and isinstance(stmt.lhs, PsSymbolExpr):
+                for reduction_info in self._reductions:
+                    if stmt.lhs.symbol == reduction_info.local_symbol:
+                        # Vectorize symbol for local copy
+                        local_symbol = stmt.lhs.symbol
+                        vector_symb = vc.vectorize_symbol(local_symbol)
+
+                        # Declare and init vector
+                        simd_init_local_reduction_vars += [
+                            self._type_fold(
+                                PsDeclaration(
+                                    PsSymbolExpr(vector_symb),
+                                    PsVecBroadcast(
+                                        self._lanes,
+                                        reduction_info.init_val.clone(),
+                                    ),
+                                )
+                            )
+                        ]
+
+                        # Write back vectorization result
+                        simd_writeback_local_reduction_vars += [
+                            PsAssignment(
+                                PsSymbolExpr(local_symbol),
+                                PsVecHorizontal(
+                                    PsSymbolExpr(local_symbol),
+                                    PsSymbolExpr(vector_symb),
+                                    reduction_info.op,
+                                ),
+                            )
+                        ]
+
+                        break
 
         #   Generate vectorized loop body
         simd_body = self._vectorize_ast(loop.body, vc)
@@ -224,10 +271,10 @@ class LoopVectorizer:
                 )
 
                 return PsBlock(
-                    [
-                        simd_stop_decl,
-                        simd_step_decl,
-                        simd_loop,
+                    simd_init_local_reduction_vars
+                    + [simd_stop_decl, simd_step_decl, simd_loop]
+                    + simd_writeback_local_reduction_vars
+                    + [
                         trailing_start_decl,
                         trailing_loop,
                     ]
@@ -238,11 +285,13 @@ class LoopVectorizer:
 
             case LoopVectorizer.TrailingItersTreatment.NONE:
                 return PsBlock(
-                    [
+                    simd_init_local_reduction_vars
+                    + [
                         simd_stop_decl,
                         simd_step_decl,
                         simd_loop,
                     ]
+                    + simd_writeback_local_reduction_vars
                 )
 
     @overload

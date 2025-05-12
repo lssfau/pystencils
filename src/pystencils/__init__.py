@@ -1,10 +1,6 @@
 """Module to generate stencil kernels in C or CUDA using sympy expressions and call them as Python functions"""
 
-from .codegen import (
-    Target,
-    CreateKernelConfig,
-    AUTO
-)
+from .codegen import Target, CreateKernelConfig, AUTO
 from .defaults import DEFAULTS
 from . import fd
 from . import stencil as stencil
@@ -34,6 +30,13 @@ from .simp import AssignmentCollection
 from .sympyextensions.typed_sympy import TypedSymbol, DynamicType
 from .sympyextensions import SymbolCreator, tcast
 from .datahandling import create_data_handling
+from .sympyextensions.reduction import (
+    AddReductionAssignment,
+    SubReductionAssignment,
+    MulReductionAssignment,
+    MinReductionAssignment,
+    MaxReductionAssignment,
+)
 
 __all__ = [
     "Field",
@@ -61,6 +64,11 @@ __all__ = [
     "AssignmentCollection",
     "Assignment",
     "AddAugmentedAssignment",
+    "AddReductionAssignment",
+    "SubReductionAssignment",
+    "MulReductionAssignment",
+    "MinReductionAssignment",
+    "MaxReductionAssignment",
     "assignment_from_stencil",
     "SymbolCreator",
     "create_data_handling",
@@ -81,4 +89,5 @@ __all__ = [
 ]
 
 from . import _version
-__version__ = _version.get_versions()['version']
+
+__version__ = _version.get_versions()["version"]

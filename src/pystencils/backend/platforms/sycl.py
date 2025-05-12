@@ -52,7 +52,9 @@ class SyclPlatform(Platform):
         else:
             raise MaterializationError(f"Unknown type of iteration space: {ispace}")
 
-    def select_function(self, call: PsCall) -> PsExpression:
+    def select_function(
+        self, call: PsCall
+    ) -> PsExpression:
         assert isinstance(call.function, PsMathFunction)
 
         func = call.function.func

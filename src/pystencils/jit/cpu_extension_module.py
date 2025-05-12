@@ -92,6 +92,7 @@ class PsKernelExtensioNModule:
 
         #   Kernels and call wrappers
         from ..backend.emission import CAstPrinter
+
         printer = CAstPrinter(func_prefix="FUNC_PREFIX")
 
         for name, kernel in self._kernels.items():
@@ -200,12 +201,14 @@ if( !kwargs || !PyDict_Check(kwargs) ) {{
 """
 
     def __init__(self) -> None:
-        self._buffer_types: dict[Field, PsType] = dict()
-        self._array_extractions: dict[Field, str] = dict()
-        self._array_frees: dict[Field, str] = dict()
+        self._buffer_types: dict[Any, PsType] = dict()
+        self._array_extractions: dict[Any, str] = dict()
+        self._array_frees: dict[Any, str] = dict()
 
         self._array_assoc_var_extractions: dict[Parameter, str] = dict()
         self._scalar_extractions: dict[Parameter, str] = dict()
+
+        self._pointer_extractions: dict[Parameter, str] = dict()
 
         self._constraint_checks: list[str] = []
 
@@ -232,38 +235,42 @@ if( !kwargs || !PyDict_Check(kwargs) ) {{
         else:
             return None
 
+    def get_buffer(self, buffer_name: str) -> str:
+        """Get the Python buffer object for a given buffer name."""
+        return f"buffer_{buffer_name}"
+
     def get_field_buffer(self, field: Field) -> str:
         """Get the Python buffer object for the given field."""
-        return f"buffer_{field.name}"
+        return self.get_buffer(field.name)
 
-    def extract_field(self, field: Field) -> None:
-        """Add the necessary code to extract the NumPy array for a given field"""
-        if field not in self._array_extractions:
-            extraction_code = self.TMPL_EXTRACT_ARRAY.format(name=field.name)
-            actual_dtype = self._buffer_types[field]
+    def extract_buffer(self, buffer: Any, name: str) -> None:
+        """Add the necessary code to extract the NumPy array for a given buffer"""
+        if buffer not in self._array_extractions:
+            extraction_code = self.TMPL_EXTRACT_ARRAY.format(name=name)
+            actual_dtype = self._buffer_types[buffer]
 
             #   Check array type
             type_char = self._type_char(actual_dtype)
             if type_char is not None:
-                dtype_cond = f"buffer_{field.name}.format[0] == '{type_char}'"
+                dtype_cond = f"buffer_{name}.format[0] == '{type_char}'"
                 extraction_code += self.TMPL_CHECK_ARRAY_TYPE.format(
                     cond=dtype_cond,
                     what="data type",
-                    name=field.name,
+                    name=name,
                     expected=str(actual_dtype),
                 )
 
             #   Check item size
             itemsize = actual_dtype.itemsize
-            item_size_cond = f"buffer_{field.name}.itemsize == {itemsize}"
+            item_size_cond = f"buffer_{name}.itemsize == {itemsize}"
             extraction_code += self.TMPL_CHECK_ARRAY_TYPE.format(
-                cond=item_size_cond, what="itemsize", name=field.name, expected=itemsize
+                cond=item_size_cond, what="itemsize", name=name, expected=itemsize
             )
 
-            self._array_extractions[field] = extraction_code
+            self._array_extractions[buffer] = extraction_code
 
-            release_code = f"PyBuffer_Release(&buffer_{field.name});"
-            self._array_frees[field] = release_code
+            release_code = f"PyBuffer_Release(&buffer_{name});"
+            self._array_frees[buffer] = release_code
 
     def extract_scalar(self, param: Parameter) -> str:
         if param not in self._scalar_extractions:
@@ -274,6 +281,26 @@ if( !kwargs || !PyDict_Check(kwargs) ) {{
                 extract_function=extract_func,
             )
             self._scalar_extractions[param] = code
+
+        return param.name
+
+    def extract_ptr(self, param: Parameter) -> str:
+        if param not in self._pointer_extractions:
+            ptr = param.symbol
+            ptr_dtype = ptr.dtype
+
+            assert isinstance(ptr_dtype, PsPointerType)
+
+            self._buffer_types[ptr] = ptr_dtype.base_type
+            self.extract_buffer(ptr, param.name)
+            buffer = self.get_buffer(param.name)
+            code = (
+                f"{param.dtype.c_string()} {param.name} = ({param.dtype}) {buffer}.buf;"
+            )
+
+            assert code is not None
+
+            self._array_assoc_var_extractions[param] = code
 
         return param.name
 
@@ -321,11 +348,13 @@ if( !kwargs || !PyDict_Check(kwargs) ) {{
                     actual_field_type = field.dtype
 
                 self._buffer_types[prop.field] = actual_field_type
-                self.extract_field(prop.field)
+                self.extract_buffer(prop.field, field.name)
 
         for param in params:
             if param.is_field_parameter:
                 self.extract_array_assoc_var(param)
+            elif isinstance(param.dtype, PsPointerType):
+                self.extract_ptr(param)
             else:
                 self.extract_scalar(param)
 

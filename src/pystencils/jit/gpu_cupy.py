@@ -11,7 +11,6 @@ except ImportError:
 from ..codegen import Target
 from ..field import FieldType
 
-from ..types import PsType
 from .jit import JitBase, JitError, KernelWrapper
 from ..codegen import (
     Kernel,
@@ -20,7 +19,7 @@ from ..codegen import (
 )
 from ..codegen.gpu_indexing import GpuLaunchConfiguration
 from ..codegen.properties import FieldShape, FieldStride, FieldBasePtr
-from ..types import PsStructType, PsPointerType
+from ..types import PsType, PsStructType, PsPointerType
 
 from ..include import get_pystencils_include_path
 
@@ -186,10 +185,13 @@ class CupyKernelWrapper(KernelWrapper):
                                 arr.strides[coord] // arr.dtype.itemsize,
                             )
                             break
+            elif isinstance(kparam.dtype, PsPointerType):
+                val = kwargs[kparam.name]
+                kernel_args.append(val)
             else:
                 #   scalar parameter
-                val: Any = kwargs[param.name]
-                adder(param, val)
+                val = kwargs[kparam.name]
+                adder(kparam, val)
 
         #   Process Arguments
 

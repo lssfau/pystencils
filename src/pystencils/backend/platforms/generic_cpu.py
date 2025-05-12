@@ -2,15 +2,17 @@ from abc import ABC, abstractmethod
 from typing import Sequence
 import numpy as np
 
-from pystencils.backend.ast.expressions import PsCall
+from ..ast.expressions import PsCall, PsMemAcc, PsConstantExpr
 
 from ..functions import (
     CFunction,
-    PsMathFunction,
     MathFunctions,
+    PsMathFunction,
     PsConstantFunction,
     ConstantFunctions,
 )
+from ..reduction_op_mapping import reduction_op_to_expr
+from ...sympyextensions import ReductionOp
 from ...types import PsIntegerType, PsIeeeFloatType
 
 from .platform import Platform
@@ -24,7 +26,7 @@ from ..kernelcreation.iteration_space import (
 )
 
 from ..constants import PsConstant
-from ..ast.structural import PsDeclaration, PsLoop, PsBlock
+from ..ast.structural import PsDeclaration, PsLoop, PsBlock, PsStructuralNode, PsAssignment
 from ..ast.expressions import (
     PsSymbolExpr,
     PsExpression,
@@ -60,11 +62,42 @@ class GenericCpu(Platform):
         else:
             raise MaterializationError(f"Unknown type of iteration space: {ispace}")
 
-    def select_function(self, call: PsCall) -> PsExpression:
-        assert isinstance(call.function, (PsMathFunction | PsConstantFunction))
+    def resolve_reduction(
+        self,
+        ptr_expr: PsExpression,
+        symbol_expr: PsExpression,
+        reduction_op: ReductionOp,
+    ) -> PsStructuralNode:
 
-        func = call.function.func
+        ptr_access = PsMemAcc(
+            ptr_expr, PsConstantExpr(PsConstant(0, self._ctx.index_dtype))
+        )
+
+        # inspired by OpenMP: local reduction variable (negative sign) is added at the end
+        actual_op = ReductionOp.Add if reduction_op is ReductionOp.Sub else reduction_op
+
+        # create binop and potentially select corresponding function for e.g. min or max
+        potential_call = reduction_op_to_expr(actual_op, ptr_access, symbol_expr)
+        typify = Typifier(self._ctx)
+        potential_call = typify(potential_call)
+
+        # if rhs contains a function call, resolve it for the current platform
+        rhs: PsExpression
+        if isinstance(potential_call, PsCall):
+            rhs = self.select_function(potential_call)
+        else:
+            rhs = potential_call
+
+        return PsAssignment(ptr_access, rhs)
+
+    def select_function(
+        self, call: PsCall
+    ) -> PsExpression:
+        call_func = call.function
+        assert isinstance(call_func, (PsMathFunction | PsConstantFunction))
+
         dtype = call.get_dtype()
+        func = call_func.func
         arg_types = (dtype,) * call.function.arg_count
 
         expr: PsExpression | None = None

@@ -260,6 +260,7 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
 
     def __init__(
         self,
+        rank: int,
         num_work_items: _Dim3Lambda,
         hw_props: HardwareProperties,
         assume_warp_aligned_block_size: bool,
@@ -270,7 +271,7 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
 
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
 
-        default_bs = GpuLaunchConfiguration.get_default_block_size(len(num_work_items))
+        default_bs = GpuLaunchConfiguration.get_default_block_size(rank)
         self._default_block_size = default_bs
         self._init_block_size: dim3 = default_bs
         self._compute_block_size: (
@@ -598,6 +599,7 @@ class GpuIndexing:
 
         def factory():
             return DynamicBlockSizeLaunchConfiguration(
+                rank,
                 num_work_items,
                 self._hw_props,
                 self._assume_warp_aligned_block_size,

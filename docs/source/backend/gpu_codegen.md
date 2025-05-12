@@ -1,3 +1,4 @@
+(gpu_codegen)=
 # GPU Code Generation
 
 The code generation infrastructure for Nvidia and AMD GPUs using CUDA and HIP comprises the following components:

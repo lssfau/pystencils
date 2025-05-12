@@ -62,7 +62,7 @@ class UndefinedSymbolsCollector:
 
             case PsAssignment(lhs, rhs):
                 undefined_vars = self(lhs) | self(rhs)
-                if isinstance(lhs, PsSymbolExpr):
+                if isinstance(node, PsDeclaration) and isinstance(lhs, PsSymbolExpr):
                     undefined_vars.remove(lhs.symbol)
                 return undefined_vars
 

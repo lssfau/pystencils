@@ -10,7 +10,7 @@ from .base_printer import BasePrinter, Ops, LR
 
 from ..ast import PsAstNode
 from ..ast.expressions import PsBufferAcc
-from ..ast.vector import PsVecMemAcc, PsVecBroadcast
+from ..ast.vector import PsVecMemAcc, PsVecBroadcast, PsVecHorizontal
 
 if TYPE_CHECKING:
     from ...codegen import Kernel
@@ -24,7 +24,7 @@ def emit_ir(ir: PsAstNode | Kernel):
 
 class IRAstPrinter(BasePrinter):
     """Print the IR AST as pseudo-code.
-    
+
     This printer produces a complete pseudocode representation of a pystencils AST.
     Other than the `CAstPrinter`, the `IRAstPrinter` is capable of emitting code for
     each node defined in `ast <pystencils.backend.ast>`.
@@ -75,6 +75,17 @@ class IRAstPrinter(BasePrinter):
 
                 return pc.parenthesize(
                     f"vec_broadcast<{lanes}>({operand_code})", Ops.Weakest
+                )
+
+            case PsVecHorizontal(scalar_operand, vector_operand, reduction_op):
+                pc.push_op(Ops.Weakest, LR.Middle)
+                scalar_operand_code = self.visit(scalar_operand, pc)
+                vector_operand_code = self.visit(vector_operand, pc)
+                pc.pop_op()
+
+                return pc.parenthesize(
+                    f"vec_horizontal_{reduction_op.name.lower()}({scalar_operand_code, vector_operand_code})",
+                    Ops.Weakest,
                 )
 
             case _:

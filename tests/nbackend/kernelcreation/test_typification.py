@@ -5,6 +5,7 @@ import numpy as np
 from typing import cast
 
 from pystencils import Assignment, TypedSymbol, Field, FieldType, AddAugmentedAssignment
+from pystencils.sympyextensions import ReductionOp
 from pystencils.sympyextensions.pointers import mem_acc
 
 from pystencils.backend.ast.structural import (
@@ -34,12 +35,12 @@ from pystencils.backend.ast.expressions import (
     PsTernary,
     PsMemAcc
 )
+from pystencils.backend.ast.vector import PsVecBroadcast, PsVecHorizontal
 from pystencils.backend.ast import dfs_preorder
 from pystencils.backend.ast.expressions import PsAdd
-from pystencils.backend.ast.vector import PsVecBroadcast
 from pystencils.backend.constants import PsConstant
-from pystencils.backend.functions import CFunction, PsConstantFunction, ConstantFunctions
-from pystencils.types import constify, create_type, create_numeric_type, PsVectorType, PsTypeError
+from pystencils.backend.functions import CFunction, PsConstantFunction, ConstantFunctions, PsReductionWriteBack
+from pystencils.types import constify, create_type, create_numeric_type, PsVectorType, PsTypeError, PsPointerType
 from pystencils.types.quick import Fp, Int, Bool, Arr, Ptr
 from pystencils.backend.kernelcreation.context import KernelCreationContext
 from pystencils.backend.kernelcreation.freeze import FreezeExpressions
@@ -138,6 +139,38 @@ def test_no_integer_infinities_and_transcendentals():
         expr = freeze(sp_expr)
         with pytest.raises(PsTypeError):
             typify.typify_expression(expr, Int(32))
+
+
+def test_typify_reduction_writeback():
+    dtype = Fp(32)
+
+    def _typify(arg1, arg2):
+        ctx = KernelCreationContext(default_dtype=dtype)
+        typify = Typifier(ctx)
+        freeze = FreezeExpressions(ctx)
+
+        ptr_expr = freeze(arg1)
+        symbol_expr = freeze(arg2)
+
+        writeback = PsCall(PsReductionWriteBack(ReductionOp.Add), [ptr_expr, symbol_expr])
+        return typify(writeback)
+
+    # check types for successful usage of PsReductionWriteBack
+    successful_writeback = _typify(TypedSymbol("ptr", PsPointerType(dtype)), sp.Symbol("w"))
+
+    assert successful_writeback.dtype == dtype
+
+    ptr_arg, symbol_arg = successful_writeback.args
+    assert ptr_arg.dtype == PsPointerType(dtype)
+    assert symbol_arg.dtype == dtype
+
+    # failing case: no pointer passed as first arg
+    with pytest.raises(TypificationError):
+        _ = _typify(sp.Symbol("a"), sp.Symbol("b"))
+
+    # failing case: no scalar passed as second arg
+    with pytest.raises(TypificationError):
+        _ = _typify(TypedSymbol("c", PsPointerType(dtype)), TypedSymbol("d", PsVectorType(dtype, 4)))
 
 
 def test_lhs_constness():
@@ -742,6 +775,50 @@ def test_propagate_constant_type_in_broadcast():
         expr = PsVecBroadcast(4, constant)
         expr = typify(expr)
         assert expr.dtype == PsVectorType(fp16, 4)
+
+
+def test_typify_horizontal_vector_reductions():
+    ctx = KernelCreationContext()
+    typify = Typifier(ctx)
+
+    reduction_op = ReductionOp.Add
+    stype = Fp(32)
+    vtype = PsVectorType(stype, 4)
+
+    def create_symb_expr(name, tpe):
+        return PsExpression.make(ctx.get_symbol(name, tpe))
+
+    # create valid horizontal and check if expression type is scalar
+    result = typify(
+        PsVecHorizontal(
+            create_symb_expr("s1", stype), create_symb_expr("v1", vtype), ReductionOp.Add
+        )
+    )
+    assert result.get_dtype() == stype
+
+    # create invalid horizontal by using scalar type for expected vector type
+    with pytest.raises(TypificationError):
+        _ = typify(
+            PsVecHorizontal(
+                create_symb_expr("s2", stype), create_symb_expr("v2", stype), reduction_op
+            )
+        )
+
+    # create invalid horizontal by using vector type for expected scalar type
+    with pytest.raises(TypificationError):
+        _ = typify(
+            PsVecHorizontal(
+                create_symb_expr("s3", vtype), create_symb_expr("v3", vtype), reduction_op
+            )
+        )
+
+    # create invalid horizontal where base type of vector does not match with scalar type
+    with pytest.raises(TypificationError):
+        _ = typify(
+            PsVecHorizontal(
+                create_symb_expr("s4", Int(32)), create_symb_expr("v4", vtype), reduction_op
+            )
+        )
 
 
 def test_inference_fails():

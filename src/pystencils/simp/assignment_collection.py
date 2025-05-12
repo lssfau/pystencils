@@ -1,5 +1,6 @@
 import itertools
 from copy import copy
+
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Union
 
 import sympy as sp

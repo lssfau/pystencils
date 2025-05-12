@@ -1,6 +1,7 @@
 from .astnodes import ConditionalFieldAccess
 from .typed_sympy import TypedSymbol, CastFunc, tcast, DynamicType
 from .pointers import mem_acc
+from .reduction import reduction_assignment, ReductionOp
 from .bit_masks import bit_conditional
 
 from .math import (
@@ -28,12 +29,14 @@ from .math import (
     count_operations_in_ast,
     common_denominator,
     get_symmetric_part,
-    SymbolCreator
+    SymbolCreator,
 )
 
 
 __all__ = [
     "ConditionalFieldAccess",
+    "reduction_assignment",
+    "ReductionOp",
     "TypedSymbol",
     "CastFunc",
     "tcast",

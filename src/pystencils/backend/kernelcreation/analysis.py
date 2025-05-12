@@ -13,6 +13,8 @@ from ...simp import AssignmentCollection
 from sympy.codegen.ast import AssignmentBase
 
 from ..exceptions import PsInternalCompilerError, KernelConstraintsError
+from ...sympyextensions.reduction import ReductionAssignment
+from ...sympyextensions.typed_sympy import TypedSymbol
 
 
 class KernelAnalysis:
@@ -54,6 +56,8 @@ class KernelAnalysis:
         self._check_access_independence = check_access_independence
         self._check_double_writes = check_double_writes
 
+        self._reduction_symbols: set[TypedSymbol] = set()
+
         #   Map pairs of fields and indices to offsets
         self._field_writes: dict[KernelAnalysis.FieldAndIndex, set[Any]] = defaultdict(
             set
@@ -87,6 +91,14 @@ class KernelAnalysis:
             case [*asms]:  # lists and tuples are unpacked
                 for asm in asms:
                     self._visit(asm)
+
+            case ReductionAssignment():
+                assert isinstance(obj.lhs, TypedSymbol)
+
+                self._reduction_symbols.add(obj.lhs)
+
+                self._handle_rhs(obj.rhs)
+                self._handle_lhs(obj.lhs)
 
             case AssignmentBase():
                 self._handle_rhs(obj.rhs)
@@ -152,6 +164,11 @@ class KernelAnalysis:
                                     f"{field} is read at {offsets} and written at {write_offset}"
                                 )
                 case sp.Symbol():
+                    if expr in self._reduction_symbols:
+                        raise KernelConstraintsError(
+                            f"Illegal access to reduction symbol {expr.name} outside of ReductionAssignment. "
+                        )
+
                     self._scopes.access_symbol(expr)
 
             for arg in expr.args:

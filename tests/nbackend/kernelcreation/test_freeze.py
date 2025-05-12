@@ -8,6 +8,7 @@ from pystencils import (
     create_numeric_type,
     TypedSymbol,
     DynamicType,
+    KernelConstraintsError,
 )
 from pystencils.sympyextensions import tcast, bit_conditional
 from pystencils.sympyextensions.pointers import mem_acc
@@ -44,6 +45,7 @@ from pystencils.backend.ast.expressions import (
     PsArrayInitList,
     PsSubscript,
     PsMemAcc,
+    PsSymbolExpr,
 )
 from pystencils.backend.constants import PsConstant
 from pystencils.backend.functions import PsMathFunction, MathFunctions, PsConstantFunction, ConstantFunctions
@@ -66,6 +68,14 @@ from pystencils.sympyextensions.integer_functions import (
     ceil_to_multiple,
     div_ceil,
 )
+from pystencils.sympyextensions.reduction import (
+    AddReductionAssignment,
+    SubReductionAssignment,
+    MulReductionAssignment,
+    MinReductionAssignment,
+    MaxReductionAssignment,
+)
+from pystencils.types import PsTypeError
 
 
 def test_freeze_simple():
@@ -517,6 +527,79 @@ def test_invalid_arrays():
     symb_arr = sp.Tuple((), ())
     with pytest.raises(FreezeError):
         _ = freeze(symb_arr)
+
+
+@pytest.mark.parametrize("reduction_assignment_rhs_type",
+                         [
+                             (AddReductionAssignment, PsAdd),
+                             (SubReductionAssignment, PsSub),
+                             (MulReductionAssignment, PsMul),
+                             (MinReductionAssignment, PsCall),
+                             (MaxReductionAssignment, PsCall),
+                         ])
+def test_reduction_assignments(
+        reduction_assignment_rhs_type
+):
+    x = fields(f"x: float64[1d]")
+    w = TypedSymbol("w", "float64")
+
+    reduction_op, rhs_type = reduction_assignment_rhs_type
+
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    one = PsExpression.make(PsConstant(1, ctx.index_dtype))
+    counter = ctx.get_symbol("ctr", ctx.index_dtype)
+    ispace = FullIterationSpace(
+        ctx, [FullIterationSpace.Dimension(one, one, one, counter)]
+    )
+    ctx.set_iteration_space(ispace)
+
+    expr = freeze(reduction_op(w, 3 * x.center()))
+
+    info = ctx.find_reduction_info(w.name)
+
+    assert isinstance(expr, PsAssignment)
+    assert isinstance(expr.lhs, PsSymbolExpr)
+
+    assert expr.lhs.symbol == info.local_symbol
+    assert expr.lhs.dtype == w.dtype
+
+    assert isinstance(expr.rhs, rhs_type)
+
+
+def test_invalid_reduction_assignments():
+    x = fields(f"x: float64[1d]")
+    w = TypedSymbol("w", "float64")
+
+    assignment = Assignment(w, -1 * x.center())
+    reduction_assignment = AddReductionAssignment(w, 3 * x.center())
+
+    expected_errors_for_invalid_cases = [
+        # 1) Reduction symbol is used before ReductionAssignment.
+        #    May only be used for reductions -> KernelConstraintsError
+        ([assignment, reduction_assignment], KernelConstraintsError),
+        # 2) Reduction symbol is used after ReductionAssignment.
+        #    Reduction symbol is converted to pointer after freeze -> PsTypeError
+        ([reduction_assignment, assignment], PsTypeError),
+        # 3) Duplicate ReductionAssignment
+        #    May only be used once for now -> KernelConstraintsError
+        ([reduction_assignment, reduction_assignment], KernelConstraintsError)
+    ]
+
+    for invalid_assignment, error_class in expected_errors_for_invalid_cases:
+        ctx = KernelCreationContext()
+        freeze = FreezeExpressions(ctx)
+
+        one = PsExpression.make(PsConstant(1, ctx.index_dtype))
+        counter = ctx.get_symbol("ctr", ctx.index_dtype)
+        ispace = FullIterationSpace(
+            ctx, [FullIterationSpace.Dimension(one, one, one, counter)]
+        )
+        ctx.set_iteration_space(ispace)
+
+        with pytest.raises(error_class):
+            _ = [freeze(asm) for asm in invalid_assignment]
 
 
 def test_memory_access():

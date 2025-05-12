@@ -3,6 +3,7 @@
 #include <hip/hip_fp16.h>
 
 #include "./bits/gpu_infinities.h"
+#include "./bits/gpu_atomics.h"
 
 #ifdef __HIPCC_RTC__
 typedef __hip_uint8_t uint8_t;
