@@ -256,21 +256,18 @@ class GenericGpu(Platform):
             raise MaterializationError(f"Unknown type of iteration space: {ispace}")
 
     @staticmethod
-    def _thread_index_per_dim(ispace: IterationSpace) -> tuple[PsExpression, ...]:
+    def _block_local_thread_index_per_dim(ispace: IterationSpace) -> tuple[PsExpression, ...]:
         """Returns thread indices multiplied with block dimension strides per dimension."""
 
         return tuple(
-            idx
-            * PsConstantExpr(
-                PsConstant(reduce(operator.mul, BLOCK_DIM[:i], 1), SInt(32))
-            )
+            idx * reduce(operator.mul, BLOCK_DIM[:i]) if i > 0 else idx
             for i, idx in enumerate(THREAD_IDX[: ispace.rank])
         )
 
     def _first_thread_in_warp(self, ispace: IterationSpace) -> PsExpression:
         """Returns expression that determines whether a thread is the first within a warp."""
 
-        tids_per_dim = GenericGpu._thread_index_per_dim(ispace)
+        tids_per_dim = GenericGpu._block_local_thread_index_per_dim(ispace)
         tid: PsExpression = tids_per_dim[0]
         for t in tids_per_dim[1:]:
             tid = PsAdd(tid, t)

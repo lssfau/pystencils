@@ -88,8 +88,8 @@ create the kernel object via the {any}`create_kernel` function.
 For this example, we assume a kernel configuration for CPU platforms with no optimizations explicitly enabled.
 
 ```{code-cell} ipython3
-cfg = ps.CreateKernelConfig(target=ps.Target.CurrentCPU)
-kernel = ps.create_kernel(assign_sum, cfg)
+cpu_cfg = ps.CreateKernelConfig(target=ps.Target.CurrentCPU)
+kernel = ps.create_kernel(assign_sum, cpu_cfg)
 
 ps.inspect(kernel)
 ```
@@ -111,14 +111,14 @@ but will be incorporated in the reduction computation.
 Since our reduction result is a single scalar value, it is sufficient to set up an array comprising a singular value.
 
 ```{code-cell} ipython3
-    kernel_func = kernel.compile()
+kernel_func = kernel.compile()
 
-    x_array = np.ones((4, 4, 4), dtype="float64")
-    reduction_result = np.zeros((1,), dtype="float64")
+x_array = np.ones((4, 4, 4), dtype="float64")
+reduction_result = np.zeros((1,), dtype="float64")
 
-    kernel_func(x=x_array, r=reduction_result)
-    
-    reduction_result[0]
+kernel_func(x=x_array, r=reduction_result)
+
+reduction_result[0]
 ```
 
 ### GPU Platforms
@@ -128,11 +128,11 @@ Similar to the CPU section, a base variant for NVIDIA GPUs without
 explicitly employing any optimizations is shown:
 
 ```{code-cell} ipython3
-    cfg = ps.CreateKernelConfig(target=ps.Target.CUDA)
+gpu_cfg = ps.CreateKernelConfig(target=ps.Target.CUDA)
 
-    kernel_gpu = ps.create_kernel(assign_sum, cfg)
+kernel_gpu = ps.create_kernel(assign_sum, gpu_cfg)
 
-    ps.inspect(kernel_gpu)
+ps.inspect(kernel_gpu)
 ```
 
 The steps for running the generated code on NVIDIA GPUs are identical but the fields and the write-back pointer 
@@ -159,17 +159,17 @@ which are not supported yet.
 
 ```{code-cell} ipython3
 # configure SIMD vectorization
-cfg = ps.CreateKernelConfig(
+cpu_cfg_opt = ps.CreateKernelConfig(
   target=ps.Target.X86_AVX,
 )
-cfg.cpu.vectorize.enable = True
-cfg.cpu.vectorize.assume_inner_stride_one = True
+cpu_cfg_opt.cpu.vectorize.enable = True
+cpu_cfg_opt.cpu.vectorize.assume_inner_stride_one = True
 
 # configure OpenMP parallelization
-cfg.cpu.openmp.enable = True
-cfg.cpu.openmp.num_threads = 8
+cpu_cfg_opt.cpu.openmp.enable = True
+cpu_cfg_opt.cpu.openmp.num_threads = 8
 
-kernel_cpu_opt = ps.create_kernel(assign_sum, cfg)
+kernel_cpu_opt = ps.create_kernel(assign_sum, cpu_cfg_opt)
 
 ps.inspect(kernel_cpu_opt)
 ```
@@ -190,13 +190,14 @@ we employ a block fitting algorithm to obtain a block size that is also optimize
 You can find more detailed information about warp size alignment in {ref}`gpu_codegen`.
 
 ```{code-cell} ipython3
-    cfg = ps.CreateKernelConfig(target=ps.Target.CUDA)
-    cfg.gpu.assume_warp_aligned_block_size = True
+gpu_cfg_opt = ps.CreateKernelConfig(target=ps.Target.CUDA)
+gpu_cfg_opt.gpu.assume_warp_aligned_block_size = True
+gpu_cfg_opt.gpu.warp_size = 32
 
-    kernel_gpu_opt = ps.create_kernel(assign_sum, cfg)
-    
-    kernel_func = kernel_gpu_opt.compile()
-    kernel_func.launch_config.fit_block_size((32, 1, 1))
+kernel_gpu_opt = ps.create_kernel(assign_sum, gpu_cfg_opt)
 
-    ps.inspect(kernel_gpu_opt)
+kernel_func = kernel_gpu_opt.compile()
+kernel_func.launch_config.fit_block_size((32, 1, 1))
+
+ps.inspect(kernel_gpu_opt)
 ```
