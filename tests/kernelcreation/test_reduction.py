@@ -60,7 +60,7 @@ def get_cpu_array(dtype, op, dims):
 
 
 @pytest.mark.parametrize(
-    "target", [Target.GenericCPU] + Target.available_vector_cpu_targets()
+    "target", (Target.GenericCPU,) + Target.available_vector_cpu_targets()
 )
 @pytest.mark.parametrize("dtype", ["float64", "float32"])
 @pytest.mark.parametrize(
