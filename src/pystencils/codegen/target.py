@@ -131,7 +131,7 @@ class Target(Flag):
         """Return the most capable vector CPU target available on the current machine."""
         avail_targets = _available_vector_targets()
         if avail_targets:
-            return avail_targets.pop()
+            return avail_targets[-1]
         else:
             return Target.GenericCPU
         
@@ -153,7 +153,7 @@ class Target(Flag):
             raise RuntimeError("Cannot infer GPU target since cupy is not installed.")
         
     @staticmethod
-    def available_targets() -> list[Target]:
+    def available_targets() -> tuple[Target, ...]:
         """List available"""
         targets = [Target.GenericCPU]
         try:
@@ -163,16 +163,16 @@ class Target(Flag):
             pass
 
         targets += Target.available_vector_cpu_targets()
-        return targets
+        return tuple(targets)
 
     @staticmethod
-    def available_vector_cpu_targets() -> list[Target]:
+    def available_vector_cpu_targets() -> tuple[Target, ...]:
         """Returns a list of available vector CPU targets, ordered from least to most capable."""
         return _available_vector_targets()
 
 
 @cache
-def _available_vector_targets() -> list[Target]:
+def _available_vector_targets() -> tuple[Target, ...]:
     """Returns available vector targets, sorted from leat to most capable."""
 
     targets: list[Target] = []
@@ -188,7 +188,7 @@ def _available_vector_targets() -> list[Target]:
                 "py-cpuinfo is not available.",
                 UserWarning,
             )
-            return []
+            return ()
 
         flags = set(get_cpu_info()["flags"])
 
@@ -210,4 +210,4 @@ def _available_vector_targets() -> list[Target]:
             UserWarning,
         )
 
-    return targets
+    return tuple(targets)

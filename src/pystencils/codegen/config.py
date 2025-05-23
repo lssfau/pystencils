@@ -692,7 +692,7 @@ class CreateKernelConfig(ConfigBase):
                 vec_target: Target
                 match isa:
                     case "best":
-                        vec_target = Target.available_vector_cpu_targets().pop()
+                        vec_target = Target.available_vector_cpu_targets()[-1]
                     case "sse":
                         vec_target = Target.X86_SSE
                     case "avx":
