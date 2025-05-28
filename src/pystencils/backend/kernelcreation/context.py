@@ -21,6 +21,7 @@ from ...types import (
     PsNumericType,
     PsPointerType,
     deconstify,
+    constify,
 )
 from ..exceptions import PsInternalCompilerError, KernelConstraintsError
 
@@ -36,7 +37,7 @@ class FieldsInKernel:
 
         self.archetype_field: Field | None = None
 
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Iterator[Field]:
         return chain(
             self.domain_fields,
             self.index_fields,
@@ -45,7 +46,7 @@ class FieldsInKernel:
         )
 
 
-FieldArrayPair = namedtuple("FieldArrayPair", ("field", "array"))
+FieldBufferPair = namedtuple("FieldBufferPair", ("field", "buffer"))
 
 
 @dataclass(frozen=True)
@@ -101,7 +102,7 @@ class KernelCreationContext:
 
         self._reduction_data: dict[str, ReductionInfo] = dict()
 
-        self._fields_and_arrays: dict[str, FieldArrayPair] = dict()
+        self._fields_and_buffers: dict[str, FieldBufferPair] = dict()
         self._fields_collection = FieldsInKernel()
 
         self._ispace: IterationSpace | None = None
@@ -244,9 +245,7 @@ class KernelCreationContext:
                 )
 
         # create reduction info and add to set
-        reduction_info = ReductionInfo(
-            reduction_op, init_val, local_symb, pointer_symb
-        )
+        reduction_info = ReductionInfo(reduction_op, init_val, local_symb, pointer_symb)
         self._reduction_data[lhs_name] = reduction_info
 
         return reduction_info
@@ -306,7 +305,7 @@ class KernelCreationContext:
         """Collection of fields that occured during the current kernel translation."""
         return self._fields_collection
 
-    def add_field(self, field: Field):
+    def add_field(self, field: Field, const: bool = False):
         """Add the given field to the context's fields collection.
 
         This method adds the passed ``field`` to the context's field collection, which is
@@ -314,14 +313,22 @@ class KernelCreationContext:
         and creates the underlying buffer for the field
         which is retrievable through `get_buffer`.
         Before adding the field to the collection, various sanity and constraint checks are applied.
+
+        Args:
+            field: The field to be registered
+            const: If `True`, the field will be made read-only by setting its element type to const.
         """
 
-        if field.name in self._fields_and_arrays:
-            existing_field = self._fields_and_arrays[field.name].field
-            if existing_field != field:
+        if field.name in self._fields_and_buffers:
+            existing_pair: FieldBufferPair = self._fields_and_buffers[field.name]
+            if existing_pair.field != field:
                 raise KernelConstraintsError(
                     "Encountered two fields with the same name, but different properties: "
-                    f"{field} and {existing_field}"
+                    f"{field} and {existing_pair.field}"
+                )
+            elif existing_pair.buffer.element_type.const != const:
+                raise KernelConstraintsError(
+                    f"Field {field} was registered twice, once as writeable and once as read-only."
                 )
             else:
                 return
@@ -329,11 +336,11 @@ class KernelCreationContext:
         #   Check field constraints, create buffer, and add them to the collection
         match field.field_type:
             case FieldType.GENERIC | FieldType.STAGGERED | FieldType.STAGGERED_FLUX:
-                buf = self._create_regular_field_buffer(field)
+                buf = self._create_regular_field_buffer(field, const)
                 self._fields_collection.domain_fields.add(field)
 
             case FieldType.BUFFER:
-                buf = self._create_buffer_field_buffer(field)
+                buf = self._create_buffer_field_buffer(field, const)
                 self._fields_collection.buffer_fields.add(field)
 
             case FieldType.INDEXED:
@@ -342,22 +349,22 @@ class KernelCreationContext:
                         f"Invalid spatial shape of index field {field.name}: {field.spatial_dimensions}. "
                         "Index fields must be one-dimensional."
                     )
-                buf = self._create_regular_field_buffer(field)
+                buf = self._create_regular_field_buffer(field, const)
                 self._fields_collection.index_fields.add(field)
 
             case FieldType.CUSTOM:
-                buf = self._create_regular_field_buffer(field)
+                buf = self._create_regular_field_buffer(field, const)
                 self._fields_collection.custom_fields.add(field)
 
             case _:
                 assert False, "unreachable code"
 
-        self._fields_and_arrays[field.name] = FieldArrayPair(field, buf)
+        self._fields_and_buffers[field.name] = FieldBufferPair(field, buf)
 
     @property
-    def arrays(self) -> Iterable[PsBuffer]:
+    def buffers(self) -> Iterable[PsBuffer]:
         # return self._fields_and_arrays.values()
-        yield from (item.array for item in self._fields_and_arrays.values())
+        yield from (item.buffer for item in self._fields_and_buffers.values())
 
     def get_buffer(self, field: Field) -> PsBuffer:
         """Retrieve the underlying array for a given field.
@@ -365,17 +372,17 @@ class KernelCreationContext:
         If the given field was not previously registered using `add_field`,
         this method internally calls `add_field` to check the field for consistency.
         """
-        if field.name in self._fields_and_arrays:
-            if field != self._fields_and_arrays[field.name].field:
+        if field.name in self._fields_and_buffers:
+            if field != self._fields_and_buffers[field.name].field:
                 raise KernelConstraintsError(
                     "Encountered two fields of the same name but with different properties."
                 )
         else:
             self.add_field(field)
-        return self._fields_and_arrays[field.name].array
+        return self._fields_and_buffers[field.name].buffer
 
     def find_field(self, name: str) -> Field:
-        return self._fields_and_arrays[name].field
+        return self._fields_and_buffers[name].field
 
     #   Iteration Space
 
@@ -428,7 +435,7 @@ class KernelCreationContext:
                     f"Invalid data type for field indexing symbol {s}: {s.dtype}"
                 )
 
-    def _create_regular_field_buffer(self, field: Field) -> PsBuffer:
+    def _create_regular_field_buffer(self, field: Field, const: bool) -> PsBuffer:
         idx_types = set(
             self._normalize_type(s)
             for s in chain(field.shape, field.strides)
@@ -436,6 +443,8 @@ class KernelCreationContext:
         )
 
         entry_type = self.resolve_dynamic_type(field.dtype)
+        if const:
+            entry_type = constify(entry_type)
 
         if len(idx_types) > 1:
             raise KernelConstraintsError(
@@ -478,7 +487,7 @@ class KernelCreationContext:
 
         return PsBuffer(field.name, entry_type, base_ptr, buf_shape, buf_strides)
 
-    def _create_buffer_field_buffer(self, field: Field) -> PsBuffer:
+    def _create_buffer_field_buffer(self, field: Field, const: bool) -> PsBuffer:
         if field.spatial_dimensions != 1:
             raise KernelConstraintsError(
                 f"Invalid spatial shape of buffer field {field.name}: {field.spatial_dimensions}. "
@@ -517,6 +526,8 @@ class KernelCreationContext:
 
         buf_strides = [PsConstant(num_entries, idx_type), PsConstant(1, idx_type)]
         buf_dtype = self.resolve_dynamic_type(field.dtype)
+        if const:
+            buf_dtype = constify(buf_dtype)
 
         base_ptr = self.get_symbol(
             DEFAULTS.field_pointer_name(field.name),

@@ -13,7 +13,7 @@ import sympy as sp
 
 def test_address_of():
     x, y = pystencils.fields('x, y: int64[2d]')
-    s = pystencils.TypedSymbol('s', PsPointerType(create_type('int64')))
+    s = pystencils.TypedSymbol('s', PsPointerType(create_type('const int64')))
 
     assert AddressOf(x[0, 0]).canonical() == x[0, 0]
     assert AddressOf(x[0, 0]).dtype == PsPointerType(x[0, 0].dtype, restrict=True, const=True)

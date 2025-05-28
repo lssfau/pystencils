@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import namedtuple, defaultdict
 from typing import Any, Sequence
-from itertools import chain
 
 import sympy as sp
 
@@ -50,11 +49,13 @@ class KernelAnalysis:
         ctx: KernelCreationContext,
         check_access_independence: bool = True,
         check_double_writes: bool = True,
+        mark_readonly_fields_const: bool = True,
     ):
         self._ctx = ctx
 
         self._check_access_independence = check_access_independence
         self._check_double_writes = check_double_writes
+        self._mark_readonly_fields_const = mark_readonly_fields_const
 
         self._reduction_symbols: set[TypedSymbol] = set()
 
@@ -79,8 +80,11 @@ class KernelAnalysis:
         self._called = True
         self._visit(obj)
 
-        for field in chain(self._fields_written, self._fields_read):
-            self._ctx.add_field(field)
+        for field in self._fields_written | self._fields_read:
+            const = self._mark_readonly_fields_const and (
+                field not in self._fields_written
+            )
+            self._ctx.add_field(field, const=const)
 
     def _visit(self, obj: Any):
         match obj:

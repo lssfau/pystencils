@@ -137,3 +137,38 @@ def test_duplicate_fields():
 
     #   Base pointers must be different, though!
     assert f_buf.base_pointer != g_buf.base_pointer
+
+
+def test_field_name_conflicts():
+    ctx = KernelCreationContext()
+
+    #   Same name, different data types
+    f1 = Field.create_generic("f", 3, dtype="float32")
+    f2 = Field.create_generic("f", 3, dtype="float64")
+
+    ctx.add_field(f1)
+
+    with pytest.raises(KernelConstraintsError):
+        ctx.add_field(f2)
+
+    #   Same name and dtype, different constness
+    g = Field.create_generic("g", 3, dtype="float32")
+    ctx.add_field(g, const=True)    
+    with pytest.raises(KernelConstraintsError):
+        ctx.add_field(g, const=False)
+
+    h = Field.create_generic("h", 3, dtype="float32")
+    ctx.add_field(h, const=False)
+    with pytest.raises(KernelConstraintsError):
+        ctx.add_field(h, const=True)
+
+    k_const = Field.create_generic("k", 3, dtype="const float32")
+    k_nonconst = Field.create_generic("k", 3, dtype="float32")
+
+    ctx.add_field(k_const)
+    
+    with pytest.raises(KernelConstraintsError):
+        ctx.add_field(k_nonconst, const=True)
+
+    with pytest.raises(KernelConstraintsError):
+        ctx.add_field(k_nonconst, const=False)
