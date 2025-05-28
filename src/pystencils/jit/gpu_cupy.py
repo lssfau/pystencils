@@ -1,5 +1,6 @@
 from typing import Any, Callable
 from dataclasses import dataclass
+import numpy as np
 
 try:
     import cupy as cp
@@ -81,16 +82,22 @@ class CupyKernelWrapper(KernelWrapper):
         kernel_args = []
         valuation: dict[str, Any] = dict()
 
-        def add_arg(param: Parameter, arg: Any):
+        def add_arg(param: Parameter, arg: Any) -> np.generic:
+            """Add an argument value for the given parameter to the valuation.
+            
+            The value is first cast to the correct NumPy type.
+            The function returns the correctly typed value.
+            """
             nptype = param.dtype.numpy_dtype
             assert nptype is not None
             typecast = nptype.type
-            arg = typecast(arg)
-            valuation[param.name] = arg
+            np_arg = typecast(arg)
+            valuation[param.name] = np_arg
+            return np_arg
 
         def add_kernel_arg(param: Parameter, arg: Any):
-            add_arg(param, arg)
-            kernel_args.append(arg)
+            np_arg = add_arg(param, arg)
+            kernel_args.append(np_arg)
 
         field_shapes = set()
         index_shapes = set()
@@ -144,7 +151,7 @@ class CupyKernelWrapper(KernelWrapper):
 
         #   Collect parameter values
 
-        def process_param(param: Parameter, adder: Callable[[Parameter, Any], None]):
+        def process_param(param: Parameter, adder: Callable[[Parameter, Any], Any]):
             arr: cp.ndarray
 
             if param.is_field_parameter:
