@@ -387,6 +387,7 @@ def _x86_op_intrin(
 
             assert target_type == vtype, "type mismatch"
             assert isinstance(atype, PsVectorType)
+            assert isinstance(widest_type, PsVectorType)
 
             def panic(detail: str = ""):
                 raise MaterializationError(

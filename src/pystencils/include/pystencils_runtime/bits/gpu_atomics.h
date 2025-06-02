@@ -3,8 +3,6 @@
 // No direct implementation for all atomic operations available
 // -> add support by custom implementations using a CAS mechanism
 
-#if defined(__CUDA_ARCH__) || defined(__HIPCC_RTC__)
-
 // - atomicMul (double/float)
 //   see https://stackoverflow.com/questions/43354798/atomic-multiplication-and-division
 __device__ double atomicMul(double* address, double val) {
@@ -30,10 +28,6 @@ __device__ float atomicMul(float* address, float val) {
 
     return __int_as_float(old);
 }
-
-#endif
-
-#ifdef __CUDA_ARCH__
 
 // - atomicMin (double/float)
 //   see https://stackoverflow.com/questions/17399119/how-do-i-use-atomicmax-on-floating-point-values-in-cuda
@@ -86,5 +80,3 @@ __device__ __forceinline__ float atomicMax(float *address, float val)
     }
     return __int_as_float(ret);
 }
-
-#endif

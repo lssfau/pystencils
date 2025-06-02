@@ -448,6 +448,7 @@ class Typifier:
             case PsSymbolExpr(symb):
                 if symb.dtype is None:
                     symb.dtype = self._ctx.default_dtype
+                assert isinstance(symb.dtype, PsType)
                 tc.apply_dtype(symb.dtype, expr)
 
             case PsConstantExpr(c):

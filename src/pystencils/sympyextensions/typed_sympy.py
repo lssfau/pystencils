@@ -110,7 +110,7 @@ class TypedSymbol(sp.Symbol):
 
         return obj
 
-    __xnew__ = staticmethod(__new_stage2__)
+    __xnew__ = staticmethod(__new_stage2__)  # type: ignore
     __xnew_cached_ = staticmethod(sp.core.cacheit(__new_stage2__))
 
     @property
