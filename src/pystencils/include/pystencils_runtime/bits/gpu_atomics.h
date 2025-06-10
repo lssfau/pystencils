@@ -5,7 +5,7 @@
 
 // - atomicMul (double/float)
 //   see https://stackoverflow.com/questions/43354798/atomic-multiplication-and-division
-__device__ double atomicMul(double* address, double val) {
+__device__ __forceinline__ double atomicMul(double* address, double val) {
     unsigned long long int* address_as_ull = (unsigned long long int*)address;
     unsigned long long int oldValue = *address_as_ull, assumed;
     do {
@@ -17,7 +17,7 @@ __device__ double atomicMul(double* address, double val) {
     return __longlong_as_double(oldValue);
 }
 
-__device__ float atomicMul(float* address, float val) {
+__device__ __forceinline__ float atomicMul(float* address, float val) {
     int* address_as_int = (int*)address;
     int old = *address_as_int;
     int assumed;
