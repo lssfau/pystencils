@@ -43,7 +43,7 @@ class CupyKernelWrapper(KernelWrapper):
         self._args_cache: dict[Any, tuple] = dict()
 
     @property
-    def kernel_function(self) -> GpuKernel:
+    def kernel(self) -> GpuKernel:
         return self._kfunc
 
     @property

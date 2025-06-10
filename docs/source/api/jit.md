@@ -17,47 +17,32 @@
 .. autodata:: no_jit
 ```
 
-## Legacy CPU JIT
+## CPU Just-In-Time Compiler
 
-The legacy CPU JIT Compiler is a leftover from pystencils 1.3
-which at the moment still drives most CPU JIT-compilation within the package,
-until the new JIT compiler is ready to take over.
+The CPU JIT compiler 
+- embeds a kernel's code into a prepared C++ frame, which includes routines
+  that map NumPy arrays and Python scalars to kernel arguments,
+  and perform shape and type checks on these arguments;
+- invokes a host C++ compiler to compile and link the generated code as a
+  Python extension module;
+- dynamically loads that module and exposes the compiled kernel to the user.
 
 ```{eval-rst}
+.. module:: pystencils.jit.cpu
+
 .. autosummary::
   :toctree: generated
   :nosignatures:
   :template: autosummary/entire_class.rst
 
-  LegacyCpuJit
+  CpuJit
 ```
-
-## CPU Just-In-Time Compiler
-
-:::{note}
-The new CPU JIT compiler is still considered experimental and not yet adopted by most of pystencils.
-While the APIs described here will (probably) become the default for pystencils 2.0
-and can (and should) already be used for testing,
-the current implementation is still *very slow*.
-For more information, see [issue !120](https://i10git.cs.fau.de/pycodegen/pystencils/-/issues/120).
-:::
-
-To configure and create an instance of the CPU JIT compiler, use the `CpuJit.create` factory method:
-
-:::{card}
-```{eval-rst}
-.. autofunction:: pystencils.jit.CpuJit.create
-  :no-index:
-```
-:::
 
 ### Compiler Infos
 
-The CPU JIT compiler invokes a host C++ compiler to compile and link a Python extension
-module containing the generated kernel.
 The properties of the host compiler are defined in a `CompilerInfo` object.
 To select a custom host compiler and customize its options, set up and pass
-a custom compiler info object to `CpuJit.create`.
+a custom compiler info object to `CpuJit`.
 
 ```{eval-rst}
 .. module:: pystencils.jit.cpu.compiler_info
@@ -70,20 +55,22 @@ a custom compiler info object to `CpuJit.create`.
   CompilerInfo
   GccInfo
   ClangInfo
+  AppleClangInfo
 ```
 
-### Implementation
+### Implementation Details
 
 ```{eval-rst}
-.. module:: pystencils.jit.cpu
+.. currentmodule:: pystencils.jit.cpu
 
 .. autosummary::
   :toctree: generated
   :nosignatures:
   :template: autosummary/entire_class.rst
 
-  CpuJit
   cpujit.ExtensionModuleBuilderBase
+  default_module_builder.DefaultExtensionModuleBuilder
+  default_module_builder.DefaultCpuKernelWrapper
 ```
 
 ## CuPy-based GPU JIT

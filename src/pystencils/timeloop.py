@@ -26,8 +26,6 @@ class TimeLoop:
         self._single_step_functions.append(f)
 
     def add_call(self, functor, argument_list):
-        if hasattr(functor, 'kernel'):
-            functor = functor.kernel
         if not isinstance(argument_list, list):
             argument_list = [argument_list]
 

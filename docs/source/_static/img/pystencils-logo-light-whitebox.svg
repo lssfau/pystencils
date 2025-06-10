@@ -2,13 +2,13 @@
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
 
 <svg
-   width="49.310894mm"
-   height="48.976913mm"
-   viewBox="0 0 49.310894 48.976913"
+   width="53.913792mm"
+   height="53.913792mm"
+   viewBox="0 0 53.913792 53.913791"
    version="1.1"
    id="svg1"
    inkscape:version="1.4.1 (93de688d07, 2025-03-30)"
-   sodipodi:docname="pystencils-logo-light.svg"
+   sodipodi:docname="pystencils-logo-light-whitebox.svg"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -38,8 +38,8 @@
     <inkscape:grid
        id="grid4"
        units="mm"
-       originx="4.6554451"
-       originy="-0.837491"
+       originx="6.9568948"
+       originy="1.630949"
        spacingx="0.99999998"
        spacingy="1"
        empcolor="#0099e5"
@@ -50,22 +50,22 @@
        enabled="true"
        visible="false" />
     <sodipodi:guide
-       position="38.829267,-5.2751543"
+       position="41.130717,-7.7435943"
        orientation="1,0"
        id="guide2"
        inkscape:locked="false" />
     <sodipodi:guide
-       position="10.481264,-5.2751543"
+       position="12.782714,-7.7435943"
        orientation="1,0"
        id="guide3"
        inkscape:locked="false" />
     <sodipodi:guide
-       position="24.655266,8.8988446"
+       position="26.956716,6.4304046"
        orientation="0,-1"
        id="guide4"
        inkscape:locked="false" />
     <sodipodi:guide
-       position="24.655266,-19.449154"
+       position="26.956716,-21.917594"
        orientation="0,-1"
        id="guide5"
        inkscape:locked="false" />
@@ -386,11 +386,21 @@
          id="feBlend4642-5-8" />
     </filter>
   </defs>
+  <rect
+     style="fill:#ffffff;fill-opacity:1;stroke:#d2d2d2;stroke-width:0.509157;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+     id="rect1396-1"
+     width="53.404999"
+     height="53.404636"
+     x="0.2545785"
+     y="0.2545785"
+     ry="2.939965"
+     inkscape:export-xdpi="70.669998"
+     inkscape:export-ydpi="70.669998" />
   <g
      inkscape:label="Layer 1"
      inkscape:groupmode="layer"
      id="layer1"
-     transform="translate(4.6554451,-0.83749467)">
+     transform="translate(6.9568948,1.6309454)">
     <g
        id="g25"
        transform="translate(1.812973e-4,-8.5216229e-5)">

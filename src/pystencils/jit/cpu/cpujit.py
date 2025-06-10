@@ -10,15 +10,15 @@ from ...codegen.config import _AUTO_TYPE, AUTO
 
 from ..jit import JitError, JitBase, KernelWrapper
 from ...codegen import Kernel
-from .compiler_info import CompilerInfo, GccInfo
+from .compiler_info import CompilerInfo
 
 
 class CpuJit(JitBase):
     """Just-in-time compiler for CPU kernels.
 
-    **Creation**
-    
-    To configure and create a CPU JIT compiler instance, use the `create` factory method.
+    The `CpuJit` turns pystencils `Kernel` objects into executable Python functions
+    by wrapping them in a C++ extension module with glue code to the Python and NumPy API.
+    That module is then compiled by a host compiler and dynamically loaded into the Python session.
 
     **Implementation Details**
 
@@ -29,32 +29,23 @@ class CpuJit(JitBase):
     - The *compiler info* describes the host compiler used to compile and link that extension module.
 
     Args:
-        compiler_info: The compiler info object defining the capabilities
-            and command-line interface of the host compiler
-        ext_module_builder: Extension module builder object used to generate the kernel extension module
-        objcache: Directory to cache the generated code files and compiled modules in.
-            If `None`, a temporary directory will be used, and compilation results will not be cached.
+        compiler_info: Compiler info object defining capabilities and interface of the host compiler.
+            If `None`, a default compiler configuration will be determined from the current OS and runtime
+            environment.
+        objcache: Directory used for caching compilation results.
+            If set to `AUTO`, a persistent cache directory in the current user's home will be used.
+            If set to `None`, compilation results will not be cached--this may impact performance.
+        module_builder: Optionally, an extension module builder to be used by the JIT compiler.
+            When left at `None`, the default implementation will be used.
     """
 
-    @staticmethod
-    def create(
+    def __init__(
+        self,
         compiler_info: CompilerInfo | None = None,
         objcache: str | Path | _AUTO_TYPE | None = AUTO,
-    ) -> CpuJit:
-        """Configure and create a CPU JIT compiler object.
-        
-        Args:
-            compiler_info: Compiler info object defining capabilities and interface of the host compiler.
-                If `None`, a default compiler configuration will be determined from the current OS and runtime
-                environment.
-            objcache: Directory used for caching compilation results.
-                If set to `AUTO`, a persistent cache directory in the current user's home will be used.
-                If set to `None`, compilation results will not be cached--this may impact performance.
-
-        Returns:
-            The CPU just-in-time compiler.
-        """
-        
+        *,
+        module_builder: ExtensionModuleBuilderBase | None = None
+    ):
         if objcache is AUTO:
             from appdirs import AppDirs
 
@@ -65,24 +56,15 @@ class CpuJit(JitBase):
             objcache = Path(objcache)
 
         if compiler_info is None:
-            compiler_info = GccInfo()
+            compiler_info = CompilerInfo.get_default()
 
-        from .cpujit_pybind11 import Pybind11KernelModuleBuilder
+        if module_builder is None:
+            from .default_module_builder import DefaultExtensionModuleBuilder
+            module_builder = DefaultExtensionModuleBuilder(compiler_info)
 
-        modbuilder = Pybind11KernelModuleBuilder(compiler_info)
-
-        return CpuJit(compiler_info, modbuilder, objcache)
-
-    def __init__(
-        self,
-        compiler_info: CompilerInfo,
-        ext_module_builder: ExtensionModuleBuilderBase,
-        objcache: Path | None,
-    ):
         self._compiler_info = copy(compiler_info)
-        self._ext_module_builder = ext_module_builder
-
         self._objcache = objcache
+        self._ext_module_builder = module_builder
 
         #   Include Directories
 
@@ -194,7 +176,11 @@ class ExtensionModuleBuilderBase(ABC):
     @abstractmethod
     def include_dirs() -> list[str]:
         """List of directories that must be on the include path when compiling
-        generated extension modules."""
+        generated extension modules.
+        
+        The Python runtime include directory and the pystencils include directory
+        need not be listed here.
+        """
 
     @abstractmethod
     def render_module(self, kernel: Kernel, module_name: str) -> str:

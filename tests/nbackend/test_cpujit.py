@@ -10,7 +10,7 @@ from pystencils.backend.ast.expressions import PsBufferAcc, PsExpression
 from pystencils.backend.ast.structural import PsAssignment, PsBlock, PsLoop
 
 from pystencils.types.quick import SInt, Fp
-from pystencils.jit import LegacyCpuJit
+from pystencils.jit import CpuJit
 
 import numpy as np
 
@@ -53,7 +53,7 @@ def test_pairwise_addition():
 
     # func.add_constraints(sizes_constraint)
 
-    jit = LegacyCpuJit()
+    jit = CpuJit()
     kernel = jit.compile(func)
 
     #   Positive case

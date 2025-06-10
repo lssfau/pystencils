@@ -21,7 +21,8 @@ from pystencils.backend.transformations import (
 )
 from pystencils.backend.constants import PsConstant
 from pystencils.codegen.driver import KernelFactory
-from pystencils.jit import LegacyCpuJit
+from pystencils.jit import CpuJit
+from pystencils.jit.cpu import GccInfo
 from pystencils import Target, fields, Assignment, Field
 from pystencils.field import create_numpy_array_with_layout
 from pystencils.types import PsScalarType, PsIntegerType
@@ -135,13 +136,15 @@ def create_vector_kernel(
     lower = LowerToC(ctx)
     loop_nest = lower(loop_nest)
 
+    cinfo = GccInfo(target=setup.target)
+
     kfactory = KernelFactory(ctx)
     func = kfactory.create_generic_kernel(
         platform,
         PsBlock([loop_nest]),
         "vector_kernel",
         Target.CPU,
-        LegacyCpuJit(),
+        CpuJit(cinfo),
     )
 
     kernel = func.compile()
