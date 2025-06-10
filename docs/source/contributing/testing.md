@@ -63,15 +63,3 @@ receives the overridden `target` parameter as input:
 def test_bogus(gen_config):
     assert gen_config.target.is_vector_cpu()
 ```
-
-## Testing with the Experimental CPU JIT
-
-Currently, the testsuite by default still uses the {any}`legacy CPU JIT compiler <LegacyCpuJit>`,
-since the new CPU JIT compiler is still in an experimental stage.
-To test your code against the new JIT compiler, pass the `--experimental-cpu-jit` option to pytest:
-
-```bash
-nox -s testsuite -- --experimental-cpu-jit
-```
-
-This will alter the `gen_config` fixture, activating the experimental CPU JIT for CPU targets.

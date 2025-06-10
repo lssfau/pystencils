@@ -16,14 +16,15 @@ class CompilerInfo(ABC):
     optlevel: str | None = "fast"
     """Compiler optimization level"""
 
-    cxx_standard: str = "c++11"
+    cxx_standard: str = "c++14"
     """C++ language standard to be compiled with"""
 
     target: Target = Target.CurrentCPU
     """Hardware target to compile for.
     
-    Here, `Target.CurrentCPU` represents the current hardware,
-    which is reflected by ``-march=native`` in GNU-like compilers.
+    The value of ``target`` is used to set the ``-march`` compiler
+    option (or equivalent).
+    `Target.CurrentCPU` translates to ``-march=native``.
     """
 
     @abstractmethod
@@ -45,6 +46,22 @@ class CompilerInfo(ABC):
     @abstractmethod
     def restrict_qualifier(self) -> str:
         """*restrict* memory qualifier recognized by this compiler"""
+
+    @staticmethod
+    def get_default() -> CompilerInfo:
+        import platform
+
+        sysname = platform.system()
+        match sysname.lower():
+            case "linux":
+                #   Use GCC on Linux
+                return GccInfo()
+            case "darwin":
+                return AppleClangInfo()
+            case _:
+                raise RuntimeError(
+                    f"Cannot determine compiler information for platform {sysname}"
+                )
 
 
 class _GnuLikeCliCompiler(CompilerInfo):
@@ -70,7 +87,7 @@ class _GnuLikeCliCompiler(CompilerInfo):
                 flags += ["-march=x86-64-v4", "-mavx512fp16"]
 
         return flags
-    
+
     def linker_flags(self) -> list[str]:
         return ["-shared"]
 
@@ -91,15 +108,14 @@ class GccInfo(_GnuLikeCliCompiler):
 @dataclass
 class ClangInfo(_GnuLikeCliCompiler):
     """Compiler info for the LLVM C++ compiler (``clang``)."""
-    
-    llvm_version: int | None = None
-    """Major version number of the LLVM installation providing the compiler."""
 
     def cxx(self) -> str:
-        if self.llvm_version is None:
-            return "clang"
-        else:
-            return f"clang-{self.llvm_version}"
-        
-    def linker_flags(self) -> list[str]:
-        return super().linker_flags() + ["-lstdc++"]
+        return "clang++"
+
+
+@dataclass
+class AppleClangInfo(ClangInfo):
+    """Compiler info for the Apple Clang compiler."""
+
+    def cxxflags(self) -> list[str]:
+        return super().cxxflags() + ["-Xclang"]

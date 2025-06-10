@@ -48,7 +48,7 @@ def get_code_obj(ast: KernelWrapper | Kernel, custom_backend=None):
     Can either be displayed as HTML in Jupyter notebooks or printed as normal string.
     """
     if isinstance(ast, KernelWrapper):
-        func = ast.kernel_function
+        func = ast.kernel
     else:
         func = ast
 

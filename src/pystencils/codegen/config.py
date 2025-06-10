@@ -609,9 +609,9 @@ class CreateKernelConfig(ConfigBase):
 
         if jit is None:
             if target.is_cpu():
-                from ..jit import LegacyCpuJit
+                from ..jit import CpuJit
 
-                return LegacyCpuJit()
+                return CpuJit()
             elif target == Target.CUDA or target == Target.HIP:
                 try:
                     from ..jit.gpu_cupy import CupyJit

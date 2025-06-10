@@ -23,7 +23,6 @@ It is due to be replaced in the near future.
 """
 
 from .jit import JitBase, NoJit, KernelWrapper
-from .legacy_cpu import LegacyCpuJit
 from .cpu import CpuJit
 from .gpu_cupy import CupyJit, CupyKernelWrapper, LaunchGrid
 
@@ -33,7 +32,6 @@ no_jit = NoJit()
 __all__ = [
     "JitBase",
     "KernelWrapper",
-    "LegacyCpuJit",
     "CpuJit",
     "NoJit",
     "no_jit",

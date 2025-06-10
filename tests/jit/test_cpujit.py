@@ -1,5 +1,7 @@
 import pytest
 
+
+from itertools import product
 import sympy as sp
 import numpy as np
 from pystencils import create_kernel, Assignment, fields, Field
@@ -8,22 +10,42 @@ from pystencils.jit import CpuJit
 
 @pytest.fixture
 def cpu_jit(tmp_path) -> CpuJit:
-    return CpuJit.create(objcache=tmp_path)
+    return CpuJit(objcache=tmp_path)
 
 
 def test_basic_cpu_kernel(cpu_jit):
     f, g = fields("f, g: [2D]")
-    asm = Assignment(f.center(), 2.0 * g.center())
+    asm = Assignment(g.center(), 2.0 * f.center())
     ker = create_kernel(asm)
     kfunc = cpu_jit.compile(ker)
 
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(0x5eed)
     f_arr = rng.random(size=(34, 26), dtype="float64")
     g_arr = np.zeros_like(f_arr)
 
     kfunc(f=f_arr, g=g_arr)
 
     np.testing.assert_almost_equal(g_arr, 2.0 * f_arr)
+
+
+def test_invalid_args(cpu_jit):
+    f, g = fields("f, g: [2D]")
+    asm = Assignment(f.center(), 2.0 * g.center())
+    ker = create_kernel(asm)
+    kfunc = cpu_jit.compile(ker)
+
+    f_arr = np.zeros((34, 26), dtype="float64")
+    g_arr = np.zeros_like(f_arr)
+
+    #   Missing Arguments
+    with pytest.raises(KeyError):
+        kfunc(f=f_arr)
+
+    with pytest.raises(KeyError):
+        kfunc(g=g_arr)
+
+    #   Extra arguments are ignored
+    kfunc(f=f_arr, g=g_arr, x=2.1)
 
 
 def test_argument_type_error(cpu_jit):
@@ -45,6 +67,9 @@ def test_argument_type_error(cpu_jit):
 
     with pytest.raises(TypeError):
         kfunc(f=arr_fp16, g=arr_fp16, c=2.0)
+
+    with pytest.raises(TypeError):
+        kfunc(f=arr_fp64, g=arr_fp64, c=[2.0])
 
     #   Wrong scalar types are OK, though
     kfunc(f=arr_fp64, g=arr_fp64, c=np.float16(1.0))
@@ -95,3 +120,21 @@ def test_fixed_index_shape(cpu_jit):
         f_arr = np.zeros((12, 14, 3))
         g_arr = np.zeros((12, 14, 1, 3))
         kfunc(f=f_arr, g=g_arr)
+
+
+def test_scalar_field(cpu_jit):
+    f, g = fields("f(1), g: [2D]")
+    asm = Assignment(g(), f(0))
+    ker = create_kernel(asm)
+    kfunc = cpu_jit.compile(ker)
+
+    spatial_shape = (31, 29)
+    #   Both implicit and explicit scalar fields must be accepted
+    for ishape_f, ishape_g in product(((), (1,)), ((), (1,))):
+        rng = np.random.default_rng(0x5eed)
+        f_arr = rng.random(size=spatial_shape + ishape_f, dtype="float64")
+        g_arr = np.zeros(spatial_shape + ishape_g)
+        
+        kfunc(f=f_arr, g=g_arr)
+
+        np.testing.assert_allclose(f_arr.flatten(), g_arr.flatten())

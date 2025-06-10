@@ -2,12 +2,10 @@ from __future__ import annotations
 from typing import Sequence, TYPE_CHECKING
 from abc import ABC, abstractmethod
 
+from .error import JitError
+
 if TYPE_CHECKING:
     from ..codegen import Kernel, Parameter, Target
-
-
-class JitError(Exception):
-    """Indicates an error during just-in-time compilation"""
 
 
 class KernelWrapper(ABC):
@@ -21,7 +19,7 @@ class KernelWrapper(ABC):
         pass
 
     @property
-    def kernel_function(self) -> Kernel:
+    def kernel(self) -> Kernel:
         return self._kfunc
     
     @property

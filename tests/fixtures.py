@@ -22,14 +22,6 @@ AVAILABLE_TARGETS = ps.Target.available_targets()
 TARGET_IDS = [t.name for t in AVAILABLE_TARGETS]
 
 
-def pytest_addoption(parser: pytest.Parser):
-    parser.addoption(
-        "--experimental-cpu-jit",
-        dest="experimental_cpu_jit",
-        action="store_true"
-    )
-
-
 @pytest.fixture(params=AVAILABLE_TARGETS, ids=TARGET_IDS)
 def target(request) -> ps.Target:
     """Provides all code generation targets available on the current hardware"""
@@ -37,7 +29,7 @@ def target(request) -> ps.Target:
 
 
 @pytest.fixture
-def gen_config(request: pytest.FixtureRequest, target: ps.Target):
+def gen_config(request: pytest.FixtureRequest, target: ps.Target, tmp_path):
     """Default codegen configuration for the current target.
 
     For GPU targets, set default indexing options.
@@ -50,10 +42,16 @@ def gen_config(request: pytest.FixtureRequest, target: ps.Target):
         gen_config.cpu.vectorize.enable = True
         gen_config.cpu.vectorize.assume_inner_stride_one = True
 
-    if target.is_cpu() and request.config.getoption("experimental_cpu_jit"):
+    if target.is_cpu():
         from pystencils.jit.cpu import CpuJit, GccInfo
 
-        gen_config.jit = CpuJit.create(compiler_info=GccInfo(target=target))
+        #   Set target in compiler info such that `-march` is set accordingly
+        cinfo = GccInfo(target=target)
+
+        gen_config.jit = CpuJit(
+            compiler_info=cinfo,
+            objcache=tmp_path
+        )
 
     return gen_config
 
