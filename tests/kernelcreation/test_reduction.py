@@ -80,7 +80,13 @@ def test_reduction_cpu(
         op: str,
         dims: int):
     config = ps.CreateKernelConfig(target=target)
-    config.cpu.openmp.enable = True
+
+    if target.is_vector_cpu() and dims == 1:
+        #   TODO: Due to a bug in the interaction between OpenMP and the vectorizer,
+        #   OpenMP + vectorization + reduction in 1D doesn't currently work (issue #128)
+        config.cpu.openmp.enable = False
+    else:
+        config.cpu.openmp.enable = True
 
     if target.is_vector_cpu():
         config.cpu.vectorize.enable = True

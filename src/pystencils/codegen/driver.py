@@ -19,6 +19,7 @@ from .properties import PsSymbolProperty, FieldBasePtr
 from .parameters import Parameter
 from .functions import Lambda
 from .gpu_indexing import GpuIndexing, GpuLaunchConfiguration
+from .errors import CodegenError
 from ..backend.kernelcreation.context import ReductionInfo
 
 from ..field import Field
@@ -34,7 +35,13 @@ from ..backend.ast.expressions import (
     PsMemAcc,
     PsConstantExpr,
 )
-from ..backend.ast.structural import PsBlock, PsLoop, PsDeclaration, PsAssignment, PsStructuralNode
+from ..backend.ast.structural import (
+    PsBlock,
+    PsLoop,
+    PsDeclaration,
+    PsAssignment,
+    PsStructuralNode,
+)
 from ..backend.ast.analysis import collect_undefined_symbols, collect_required_headers
 from ..backend.kernelcreation import (
     KernelCreationContext,
@@ -192,6 +199,19 @@ class DefaultKernelCreationDriver:
             self._intermediates.constants_eliminated = kernel_ast.clone()
 
         #   Extensions for reductions
+
+        #   FIXME
+        if self._ctx.reduction_data:
+            if (
+                self._ctx.get_iteration_space().rank == 1
+                and self._cfg.cpu.openmp.get_option("enable")
+                and self._cfg.cpu.vectorize.get_option("enable")
+            ):
+                raise CodegenError(
+                    "Cannot safely apply both OpenMP and vectorization to a 1D kernel involving reductions"
+                    "due to a code generator bug; see https://i10git.cs.fau.de/pycodegen/pystencils/-/issues/128"
+                )
+
         for _, reduction_info in self._ctx.reduction_data.items():
             self._modify_kernel_ast_for_reductions(reduction_info, kernel_ast)
 
@@ -295,9 +315,9 @@ class DefaultKernelCreationDriver:
 
         return kernel_body
 
-    def _modify_kernel_ast_for_reductions(self,
-                                          reduction_info: ReductionInfo,
-                                          kernel_ast: PsBlock):
+    def _modify_kernel_ast_for_reductions(
+        self, reduction_info: ReductionInfo, kernel_ast: PsBlock
+    ):
         # typify local symbol and write-back pointer expressions and initial value
         typify = Typifier(self._ctx)
         symbol_expr = typify(PsSymbolExpr(reduction_info.local_symbol))
@@ -419,8 +439,9 @@ class DefaultKernelCreationDriver:
                 self._target, cast(PsScalarType, self._ctx.default_dtype)
             )
 
-        vectorizer = LoopVectorizer(self._ctx, num_lanes,
-                                    list(self._ctx.reduction_data.values()))
+        vectorizer = LoopVectorizer(
+            self._ctx, num_lanes, list(self._ctx.reduction_data.values())
+        )
 
         def loop_predicate(loop: PsLoop):
             return loop.counter.symbol == inner_loop_dim.counter
