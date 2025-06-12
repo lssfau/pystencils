@@ -9,6 +9,7 @@
 #include <string>
 #include <sstream>
 #include <utility>
+#include <initializer_list>
 
 ${includes}
 
@@ -32,23 +33,23 @@ struct KernelModuleError {
  * RAII proxy for a NumPy array object.
  * Supports move, but not copy construction.
  */
-template< typename T >
 struct ArrayProxy {
 private:
     //  Don't forget to adapt move constructor / assignment!
     PyArrayObject * arr_ { nullptr }; // owned by this instance -> decref in destructor
     size_t itemsize_;
+    std::string name_;
 
-    ArrayProxy(PyArrayObject * array, size_t itemsize) : arr_{array}, itemsize_{itemsize} {}
+    ArrayProxy(PyArrayObject * array, size_t itemsize, const std::string& name) : arr_{array}, itemsize_{itemsize}, name_{name} {}
 
 public:
-    static ArrayProxy< T > fromPyObject(const std::string& name, PyObject * obj, int ndim, int typeno, size_t itemsize = sizeof(T)){
+    static ArrayProxy fromPyObject(const std::string& name, PyObject * obj, int ndim, int typeno, size_t itemsize){
         if(!PyArray_Check(obj)){
             throw KernelModuleError { PyExc_TypeError, "Invalid array argument" };
         }
         auto array_object = reinterpret_cast< PyArrayObject * >(PyArray_FromArray(reinterpret_cast< PyArrayObject * >(obj), NULL, 0));
 
-        ArrayProxy< T > proxy { array_object, itemsize };
+        ArrayProxy proxy { array_object, itemsize, name };
 
         if( PyArray_TYPE(proxy.arr_) != typeno){
             std::stringstream err;
@@ -73,6 +74,11 @@ public:
         Py_XDECREF(arr_);
     }
 
+    const std::string& name() const {
+        return name_;
+    }
+
+    template< typename T >
     T * data() {
         T * ptr = (T*) PyArray_DATA(arr_);
         return ptr;
@@ -120,36 +126,60 @@ T scalarFromPyObject(PyObject * obj, std::string name = ""){
     return val;
 }
 
-template< typename T >
-void checkFieldShape(const std::string& name, const std::string& expected, const ArrayProxy< T > & arr, size_t coord, ssize_t desired) {
+void checkFieldShape(const std::string& expected, const ArrayProxy& arr, size_t coord, ssize_t desired) {
     if(arr.ndim() <= coord || arr.shape(coord) != desired){
         std::stringstream err;
-        err << "Invalid shape of array argument '" << name
+        err << "Invalid shape of array argument '" << arr.name()
             << "': expected " << expected << ".";
         throw KernelModuleError{ PyExc_ValueError, err.str() };
     }
 }
 
-template< typename T >
-void checkFieldStride(const std::string& name, const std::string& expected, const ArrayProxy< T > & arr, size_t coord, ssize_t desired) {
+void checkFieldStride(const std::string& expected, const ArrayProxy& arr, size_t coord, ssize_t desired) {
     if(arr.ndim() <= coord || arr.stride(coord) != desired){
         std::stringstream err;
-        err << "Invalid stride of array argument '" << name
+        err << "Invalid stride of array argument '" << arr.name()
             << "': expected " << expected << ".";
         throw KernelModuleError{ PyExc_ValueError, err.str() };
     }
 }
 
-template< typename T >
-void checkTrivialIndexShape(const std::string& name, const std::string& expected, const ArrayProxy< T > & arr, size_t spatial_rank) {
+void checkTrivialIndexShape(const std::string& expected, const ArrayProxy& arr, size_t spatial_rank) {
     const size_t ndim = arr.ndim();
     if(ndim > spatial_rank){
         for(size_t c = spatial_rank; c < ndim; ++c){
             if(arr.shape(c) != 1) {
                 std::stringstream err;
-                err << "Invalid shape of array argument '" << name
+                err << "Invalid shape of array argument '" << arr.name()
                     << "': expected " << expected << ".";
                 throw KernelModuleError{ PyExc_ValueError, err.str() };
+            }
+        }
+    }
+}
+
+
+void checkSameShape(std::initializer_list< const ArrayProxy * > arrays, size_t spatial_dims) {
+    const ArrayProxy * fst { nullptr };
+    for(const auto arr : arrays) {
+        if(arr->ndim() < spatial_dims) {
+            std::stringstream err;
+            err << "Invalid dimensionality of array argument '" << arr->name()
+                << "'. Expected " << spatial_dims;
+            throw KernelModuleError{ PyExc_ValueError, err.str() };
+        }
+
+        if(fst == nullptr) {
+            fst = arr;
+        } else {
+            for(size_t c = 0; c < spatial_dims; ++c){
+                if(fst->shape(c) != arr->shape(c)){
+                    throw KernelModuleError{
+                        PyExc_ValueError,
+                        "Incompatible shapes of array arguments: "
+                        "All domain field arrays must have the same spatial shape."
+                    };
+                }
             }
         }
     }
