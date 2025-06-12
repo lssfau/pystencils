@@ -75,6 +75,37 @@ def test_argument_type_error(cpu_jit):
     kfunc(f=arr_fp64, g=arr_fp64, c=np.float16(1.0))
 
 
+def test_shape_check(cpu_jit):
+    f, g = fields("f, g: [2D]")
+    asm = Assignment(g.center(), 2.0 * f.center())
+    ker = create_kernel(asm)
+    kfunc = cpu_jit.compile(ker)
+
+    f_arr = np.zeros((41, 32))
+    g_arr = np.zeros_like(f_arr)
+    kfunc(f=f_arr, g=g_arr)
+
+    #   Trivial scalar dimensions are OK
+    f_arr = np.zeros((41, 32, 1))
+    g_arr = np.zeros_like(f_arr)
+    kfunc(f=f_arr, g=g_arr)
+
+    with pytest.raises(ValueError):
+        f_arr = np.zeros((41, 32))
+        g_arr = np.zeros((40, 32))
+        kfunc(f=f_arr, g=g_arr)
+
+    with pytest.raises(ValueError):
+        f_arr = np.zeros((41, 1))
+        g_arr = np.zeros((40, 32))
+        kfunc(f=f_arr, g=g_arr)
+
+    with pytest.raises(ValueError):
+        f_arr = np.zeros((41, 1))
+        g_arr = np.zeros((40,))
+        kfunc(f=f_arr, g=g_arr)
+
+
 def test_fixed_shape(cpu_jit):
     a = np.zeros((12, 23), dtype="float64")
     b = np.zeros((13, 21), dtype="float64")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import ModuleType
-from typing import cast
+from typing import cast, Sequence
 from pathlib import Path
 from dataclasses import dataclass, field
 from textwrap import indent
@@ -12,10 +12,8 @@ from ...types import (
     PsPointerType,
     PsType,
     deconstify,
-    PsStructType,
-    PsUnsignedIntegerType,
 )
-from ...field import Field
+from ...field import Field, FieldType
 from ...sympyextensions import DynamicType
 from ...codegen import Kernel, Parameter
 from ...codegen.properties import FieldBasePtr, FieldShape, FieldStride
@@ -34,8 +32,6 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
 
     @dataclass
     class ParamExtraction:
-        actual_field_types: dict[Field, PsType] = field(default_factory=dict)
-
         argstruct_members: list[str] = field(default_factory=list)
 
         kernel_kwarg_refs: list[str] = field(default_factory=list)
@@ -77,20 +73,19 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             else:
                 elem_type = field.dtype
 
-            self.actual_field_types[field] = elem_type
-
             parg_name = self.add_kwarg(field.name)
             self._init_array_proxy(field.name, elem_type, len(field.shape), parg_name)
 
         def add_pointer_param(self, ptr_param: Parameter):
             ptr_type = ptr_param.dtype
             assert isinstance(ptr_type, PsPointerType)
+            elem_type = deconstify(ptr_type.base_type)
 
             parg_name = self.add_kwarg(ptr_param.name)
-            proxy_name = self._init_array_proxy(
-                ptr_param.name, ptr_type.base_type, 1, parg_name
+            proxy_name = self._init_array_proxy(ptr_param.name, elem_type, 1, parg_name)
+            self._add_kernel_argument(
+                ptr_param, f"{proxy_name}.data< {elem_type.c_string()} >()"
             )
-            self._add_kernel_argument(ptr_param, f"{proxy_name}.data()")
 
         def _array_proxy_name(self, name: str) -> str:
             return f"array_proxy_{name}"
@@ -110,18 +105,15 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             if itemsize is None:
                 itemsize = dtype.itemsize
 
-            proxy_ctor_args = [f'"{name}"', pyobj, str(ndim), typeno]
+            if itemsize is None:
+                raise JitError(
+                    f"Cannot set up array proxy for data type with unknown size: {dtype}"
+                )
 
-            if itemsize is not None:
-                proxy_ctor_args.append(str(itemsize))
-
-            #   Anonymous structs lowered to uint8
-            if isinstance(elem_type, PsStructType) and elem_type.anonymous:
-                elem_type = PsUnsignedIntegerType(8, const=elem_type.const)
+            proxy_ctor_args = [f'"{name}"', pyobj, str(ndim), typeno, str(itemsize)]
 
             self.array_proxy_defs.append(
-                f"ArrayProxy< {elem_type.c_string()} > {proxy_name} = "
-                f"ArrayProxy< {elem_type.c_string()} >::fromPyObject( {', '.join(proxy_ctor_args)} ) ;"
+                f"ArrayProxy {proxy_name} = ArrayProxy::fromPyObject( {', '.join(proxy_ctor_args)} ) ;"
             )
             return proxy_name
 
@@ -138,13 +130,18 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             )
             self.kernel_invocation_args.append(f"kernel_args.{param.name}")
             self.extract_kernel_args.append(f"{param.name} = {extraction};")
-            # f'std::cout << "{param.name} = " << {param.name} << std::endl;')
 
         def add_field_base_pointer(self, param: Parameter, ptr_prop: FieldBasePtr):
             field_name = ptr_prop.field.name
             proxy_name = self._array_proxy_name(field_name)
 
-            self._add_kernel_argument(param, f"{proxy_name}.data()")
+            ptr_type = param.dtype
+            assert isinstance(ptr_type, PsPointerType)
+            elem_type = deconstify(ptr_type.base_type)
+
+            self._add_kernel_argument(
+                param, f"{proxy_name}.data< {elem_type.c_string()} >()"
+            )
 
         def add_scalar_param(self, param: Parameter):
             parg_name = self.add_kwarg(param.name)
@@ -170,16 +167,17 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             field_name = stride_prop.field.name
             proxy_name = self._array_proxy_name(field_name)
             stype = deconstify(param.dtype)
-            actual_type = self.actual_field_types[stride_prop.field]
-            itemsize = actual_type.itemsize
-            if itemsize is None:
-                raise JitError(
-                    f"Cannot compute array strides for element type of unknown width: {actual_type}"
-                )
 
             self._add_kernel_argument(
                 param,
                 f"{proxy_name}.stride< {stype.c_string()} > ({stride_prop.coordinate})",
+            )
+
+        def check_same_shape(self, fields: Sequence[Field]):
+            check_args = ", ".join("&" + self._array_proxy_name(f.name) for f in fields)
+            rank = fields[0].spatial_dimensions
+            self.precondition_checks.append(
+                f"checkSameShape({{ {check_args} }}, {rank});"
             )
 
         def check_fixed_shape_and_strides(self, field: Field):
@@ -202,12 +200,12 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             for coord, size in enumerate(field_shape):
                 if isinstance(size, int):
                     self.precondition_checks.append(
-                        f'checkFieldShape("{field.name}", "{expect_shape}", {proxy_name}, {coord}, {size});'
+                        f'checkFieldShape("{expect_shape}", {proxy_name}, {coord}, {size});'
                     )
 
             if scalar_field:
                 self.precondition_checks.append(
-                    f'checkTrivialIndexShape("{field.name}", "{expect_shape}", {proxy_name}, {len(field_shape)});'
+                    f'checkTrivialIndexShape("{expect_shape}", {proxy_name}, {len(field_shape)});'
                 )
 
             expect_strides = (
@@ -220,7 +218,7 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             for coord, stride in enumerate(field.strides[: len(field_shape)]):
                 if isinstance(stride, int):
                     self.precondition_checks.append(
-                        f'checkFieldStride("{field.name}", "{expect_strides}", {proxy_name}, {coord}, {stride});'
+                        f'checkFieldStride("{expect_strides}", {proxy_name}, {coord}, {stride});'
                     )
 
         @staticmethod
@@ -289,8 +287,11 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             else:
                 extr.add_scalar_param(param)
 
-        for f in kernel.get_fields():
+        fields = kernel.get_fields()
+        for f in fields:
             extr.check_fixed_shape_and_strides(f)
+
+        extr.check_same_shape([f for f in fields if f.field_type == FieldType.GENERIC])
 
         return extr
 
