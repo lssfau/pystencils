@@ -87,6 +87,8 @@ class InsertPragmasAtLoops:
 
                         for pragma in self._insertions[nest.depth]:
                             new_children.append(PsPragma(pragma.text))
+                    else:
+                        self.visit(c, nest)
 
                     new_children.append(c)
                 node.children = new_children
