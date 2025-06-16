@@ -57,16 +57,16 @@ class Target(Flag):
     """Alias for backward-compatibility"""
 
     X86_SSE = _CPU | _VECTOR | _X86 | _SSE
-    """x86 architecture with SSE vector extensions."""
+    """x86 architecture with SSE vector extensions (architecture level x86-64-v2)."""
 
     X86_AVX = _CPU | _VECTOR | _X86 | _AVX
-    """x86 architecture with AVX vector extensions."""
+    """x86 architecture with AVX vector extensions (architecture level x86-64-v3)."""
 
     X86_AVX512 = _CPU | _VECTOR | _X86 | _AVX512
-    """x86 architecture with AVX512 vector extensions."""
+    """x86 architecture with AVX512 vector extensions (architecture level x86-64-v4)."""
 
     X86_AVX512_FP16 = _CPU | _VECTOR | _X86 | _AVX512 | _FP16
-    """x86 architecture with AVX512 vector extensions and fp16-support."""
+    """x86 architecture with AVX512 vector extensions (architecture level x86-64-v4) and fp16-support."""
 
     ARM_NEON = _CPU | _VECTOR | _ARM | _NEON
     """ARM architecture with NEON vector extensions"""

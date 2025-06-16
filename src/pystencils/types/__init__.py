@@ -9,6 +9,7 @@ from .meta import PsType, constify, deconstify
 
 from .types import (
     PsCustomType,
+    PsVoidType,
     PsStructType,
     PsNumericType,
     PsScalarType,
@@ -30,6 +31,7 @@ from .exception import PsTypeError
 __all__ = [
     "PsType",
     "PsCustomType",
+    "PsVoidType",
     "PsStructType",
     "PsDereferencableType",
     "PsPointerType",

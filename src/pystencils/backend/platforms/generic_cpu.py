@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Sequence
 import numpy as np
 
 from ..ast.expressions import PsCall, PsMemAcc, PsConstantExpr
@@ -26,16 +25,21 @@ from ..kernelcreation.iteration_space import (
 )
 
 from ..constants import PsConstant
-from ..ast.structural import PsDeclaration, PsLoop, PsBlock, PsStructuralNode, PsAssignment
+from ..ast.structural import (
+    PsDeclaration,
+    PsLoop,
+    PsBlock,
+    PsStructuralNode,
+    PsAssignment,
+)
 from ..ast.expressions import (
     PsSymbolExpr,
     PsExpression,
     PsBufferAcc,
     PsLookup,
 )
-from ..ast.vector import PsVecMemAcc
 from ..kernelcreation import Typifier
-from ...types import PsVectorType, PsCustomType
+from ..transformations import SelectIntrinsics
 
 
 class GenericCpu(Platform):
@@ -90,9 +94,7 @@ class GenericCpu(Platform):
 
         return PsAssignment(ptr_access, rhs)
 
-    def select_function(
-        self, call: PsCall
-    ) -> PsExpression:
+    def select_function(self, call: PsCall) -> PsExpression:
         call_func = call.function
         assert isinstance(call_func, (PsMathFunction | PsConstantFunction))
 
@@ -221,35 +223,8 @@ class GenericVectorCpu(GenericCpu, ABC):
     """Base class for CPU platforms with vectorization support through intrinsics."""
 
     @abstractmethod
-    def type_intrinsic(self, vector_type: PsVectorType) -> PsCustomType:
-        """Return the intrinsic vector type for the given generic vector type,
-        or raise a `MaterializationError` if type is not supported."""
-
-    @abstractmethod
-    def constant_intrinsic(self, c: PsConstant) -> PsExpression:
-        """Return an expression that initializes a constant vector,
-        or raise a `MaterializationError` if not supported."""
-
-    @abstractmethod
-    def op_intrinsic(
-        self, expr: PsExpression, operands: Sequence[PsExpression]
-    ) -> PsExpression:
-        """Return an expression intrinsically invoking the given operation
-        or raise a `MaterializationError` if not supported."""
-
-    @abstractmethod
-    def math_func_intrinsic(
-        self, expr: PsCall, operands: Sequence[PsExpression]
-    ) -> PsExpression:
-        """Return an expression intrinsically invoking the given mathematical
-        function or raise a `MaterializationError` if not supported."""
-
-    @abstractmethod
-    def vector_load(self, acc: PsVecMemAcc) -> PsExpression:
-        """Return an expression intrinsically performing a vector load,
-        or raise a `MaterializationError` if not supported."""
-
-    @abstractmethod
-    def vector_store(self, acc: PsVecMemAcc, arg: PsExpression) -> PsExpression:
-        """Return an expression intrinsically performing a vector store,
-        or raise a `MaterializationError` if not supported."""
+    def get_intrinsic_selector(
+        self, use_builtin_convertvector: bool = False
+    ) -> SelectIntrinsics:
+        """Return an instance of a subclass of `SelectIntrinsics`
+        to perform vector intrinsic selection for this platform."""

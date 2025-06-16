@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Sequence, TYPE_CHECKING
+from typing import Sequence, TYPE_CHECKING
 from abc import ABC
 from enum import Enum
 
@@ -8,7 +8,7 @@ from ..types import PsType, PsNumericType, PsTypeError
 from .exceptions import PsInternalCompilerError
 
 if TYPE_CHECKING:
-    from .ast.expressions import PsExpression
+    from .ast.expressions import PsExpression, PsCall
 
 
 class PsFunction(ABC):
@@ -30,7 +30,7 @@ class PsFunction(ABC):
         "Number of arguments this function takes"
         return self._num_args
 
-    def __call__(self, *args: PsExpression) -> Any:
+    def __call__(self, *args: PsExpression) -> PsCall:
         from .ast.expressions import PsCall
 
         return PsCall(self, args)

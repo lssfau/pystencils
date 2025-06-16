@@ -1,7 +1,9 @@
 from __future__ import annotations
-from typing import cast
+from typing import cast, Sequence
+from abc import ABC, abstractmethod
 
 from ..kernelcreation import KernelCreationContext
+from ..constants import PsConstant
 from ..memory import PsSymbol
 from ..ast.structural import PsAstNode, PsDeclaration, PsAssignment, PsStatement
 from ..ast.expressions import PsExpression, PsCall, PsCast, PsLiteral
@@ -11,23 +13,21 @@ from ..ast.vector import PsVecMemAcc, PsVecHorizontal
 from ..exceptions import MaterializationError
 from ..functions import CFunction, PsMathFunction
 
-from ..platforms import GenericVectorCpu
-
 
 __all__ = ["SelectIntrinsics"]
 
 
 class SelectionContext:
-    def __init__(self, ctx: KernelCreationContext, platform: GenericVectorCpu):
-        self._ctx = ctx
-        self._platform = platform
+    def __init__(self, visitor: SelectIntrinsics):
+        self._visitor = visitor
+        self._ctx = visitor._ctx
         self._intrin_symbols: dict[PsSymbol, PsSymbol] = dict()
         self._lane_mask: PsSymbol | None = None
 
     def get_intrin_symbol(self, symb: PsSymbol) -> PsSymbol:
         if symb not in self._intrin_symbols:
             assert isinstance(symb.dtype, PsVectorType)
-            intrin_type = self._platform.type_intrinsic(deconstify(symb.dtype))
+            intrin_type = self._visitor.type_intrinsic(deconstify(symb.dtype), self)
 
             if symb.dtype.const:
                 intrin_type = constify(intrin_type)
@@ -38,15 +38,18 @@ class SelectionContext:
         return self._intrin_symbols[symb]
 
 
-class SelectIntrinsics:
+class SelectIntrinsics(ABC):
     """Lower IR vector types to intrinsic vector types, and IR vector operations to intrinsic vector operations.
 
-    This transformation will replace all vectorial IR elements by conforming implementations using
+    Implementations of this transformation will replace all vectorial IR elements
+    by conforming implementations using
     compiler intrinsics for the given execution platform.
+
+    A subclass implementing this visitor's abstract methods must be set up
+    for each vector CPU platform.
 
     Args:
         ctx: The current kernel creation context
-        platform: Platform object representing the target hardware, which provides the intrinsics
         use_builtin_convertvector: If `True`, type conversions between SIMD
             vectors use the compiler builtin ``__builtin_convertvector``
             instead of instrinsics. It is supported by Clang >= 3.7, GCC >= 9.1,
@@ -59,18 +62,54 @@ class SelectIntrinsics:
             on the given platform
     """
 
+    #   Selection methods to be implemented by subclasses
+
+    @abstractmethod
+    def type_intrinsic(self, vector_type: PsVectorType, sc: SelectionContext) -> PsCustomType:
+        """Return the intrinsic vector type for the given generic vector type,
+        or raise a `MaterializationError` if type is not supported."""
+
+    @abstractmethod
+    def constant_intrinsic(self, c: PsConstant, sc: SelectionContext) -> PsExpression:
+        """Return an expression that initializes a constant vector,
+        or raise a `MaterializationError` if not supported."""
+
+    @abstractmethod
+    def op_intrinsic(
+        self, expr: PsExpression, operands: Sequence[PsExpression], sc: SelectionContext
+    ) -> PsExpression:
+        """Return an expression intrinsically invoking the given operation
+        or raise a `MaterializationError` if not supported."""
+
+    @abstractmethod
+    def math_func_intrinsic(
+        self, expr: PsCall, operands: Sequence[PsExpression], sc: SelectionContext
+    ) -> PsExpression:
+        """Return an expression intrinsically invoking the given mathematical
+        function or raise a `MaterializationError` if not supported."""
+
+    @abstractmethod
+    def vector_load(self, acc: PsVecMemAcc, sc: SelectionContext) -> PsExpression:
+        """Return an expression intrinsically performing a vector load,
+        or raise a `MaterializationError` if not supported."""
+
+    @abstractmethod
+    def vector_store(self, acc: PsVecMemAcc, arg: PsExpression, sc: SelectionContext) -> PsExpression:
+        """Return an expression intrinsically performing a vector store,
+        or raise a `MaterializationError` if not supported."""
+
+    #   Visitor
+
     def __init__(
         self,
         ctx: KernelCreationContext,
-        platform: GenericVectorCpu,
         use_builtin_convertvector: bool = False,
     ):
         self._ctx = ctx
-        self._platform = platform
         self._use_builtin_convertvector = use_builtin_convertvector
 
     def __call__(self, node: PsAstNode) -> PsAstNode:
-        return self.visit(node, SelectionContext(self._ctx, self._platform))
+        return self.visit(node, SelectionContext(self))
 
     def visit(self, node: PsAstNode, sc: SelectionContext) -> PsAstNode:
         match node:
@@ -84,7 +123,7 @@ class SelectIntrinsics:
 
             case PsAssignment(lhs, rhs) if isinstance(lhs, PsVecMemAcc):
                 new_rhs = self.visit_expr(rhs, sc)
-                return PsStatement(self._platform.vector_store(lhs, new_rhs))
+                return PsStatement(self.vector_store(lhs, new_rhs, sc))
 
             case PsAssignment(lhs, rhs) if isinstance(rhs, PsVecHorizontal):
                 new_rhs = self.visit_expr(rhs, sc)
@@ -101,8 +140,8 @@ class SelectIntrinsics:
             if isinstance(expr, PsVecHorizontal):
                 scalar_op = expr.scalar_operand
                 vector_op_to_scalar = self.visit_expr(expr.vector_operand, sc)
-                return self._platform.op_intrinsic(
-                    expr, [scalar_op, vector_op_to_scalar]
+                return self.op_intrinsic(
+                    expr, [scalar_op, vector_op_to_scalar], sc
                 )
             else:
                 return expr
@@ -112,7 +151,7 @@ class SelectIntrinsics:
                 return PsSymbolExpr(sc.get_intrin_symbol(symb))
 
             case PsConstantExpr(c):
-                return self._platform.constant_intrinsic(c)
+                return self.constant_intrinsic(c, sc)
 
             case PsCast(target_type, operand) if self._use_builtin_convertvector:
                 assert isinstance(target_type, PsVectorType)
@@ -132,20 +171,20 @@ class SelectIntrinsics:
 
             case PsUnOp(operand):
                 op = self.visit_expr(operand, sc)
-                return self._platform.op_intrinsic(expr, [op])
+                return self.op_intrinsic(expr, [op], sc)
 
             case PsBinOp(operand1, operand2):
                 op1 = self.visit_expr(operand1, sc)
                 op2 = self.visit_expr(operand2, sc)
 
-                return self._platform.op_intrinsic(expr, [op1, op2])
+                return self.op_intrinsic(expr, [op1, op2], sc)
 
             case PsVecMemAcc():
-                return self._platform.vector_load(expr)
+                return self.vector_load(expr, sc)
 
             case PsCall(function, args) if isinstance(function, PsMathFunction):
                 arguments = [self.visit_expr(a, sc) for a in args]
-                return self._platform.math_func_intrinsic(expr, arguments)
+                return self.math_func_intrinsic(expr, arguments, sc)
 
             case _:
                 raise MaterializationError(

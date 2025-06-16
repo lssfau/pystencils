@@ -39,6 +39,22 @@ class PsCustomType(PsType):
 
     def __repr__(self) -> str:
         return f"CustomType( {self.name}, const={self.const} )"
+    
+
+class PsVoidType(PsType):
+    """C++ void type."""
+
+    def __init__(self, const: bool = False):
+        super().__init__(False)
+
+    def __args__(self) -> tuple[Any, ...]:
+        return ()
+
+    def c_string(self) -> str:
+        return "void"
+
+    def __repr__(self) -> str:
+        return "VoidType()"
 
 
 class PsDereferencableType(PsType, ABC):
