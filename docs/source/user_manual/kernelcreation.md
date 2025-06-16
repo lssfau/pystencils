@@ -348,6 +348,7 @@ cfg = ps.CreateKernelConfig(
 _show_ispace(cfg)
 ```
 
+(section_iteration_slices)=
 #### Iteration Slices
 
 Using the `iteration_slice` option, we can assert much finer control on the kernel's iteration space
@@ -368,6 +369,7 @@ cfg = ps.CreateKernelConfig(
 _show_ispace(cfg)
 ```
 
+(section_strided_iteration)=
 ##### Strided Iteration
 
 It is also possible to set up a strided iteration that skips over a fixed number of elements.

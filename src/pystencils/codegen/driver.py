@@ -400,7 +400,7 @@ class DefaultKernelCreationDriver:
         if not enable_vec:
             return kernel_ast
 
-        from ..backend.transformations import LoopVectorizer, SelectIntrinsics
+        from ..backend.transformations import LoopVectorizer
 
         assert isinstance(self._platform, GenericVectorCpu)
 
@@ -451,7 +451,7 @@ class DefaultKernelCreationDriver:
         if self._intermediates is not None:
             self._intermediates.cpu_vectorize = kernel_ast.clone()
 
-        select_intrin = SelectIntrinsics(self._ctx, self._platform)
+        select_intrin = self._platform.get_intrinsic_selector()
         kernel_ast = cast(PsBlock, select_intrin(kernel_ast))
 
         if self._intermediates is not None:

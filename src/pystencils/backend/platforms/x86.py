@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Callable
 from enum import Enum
 from functools import cache
 
@@ -19,15 +19,23 @@ from ..ast.expressions import (
 )
 from ..ast.vector import PsVecMemAcc, PsVecBroadcast, PsVecHorizontal
 from ...sympyextensions import ReductionOp
-from ...types import PsCustomType, PsVectorType, PsPointerType, PsType
+from ...types import (
+    PsCustomType,
+    PsVectorType,
+    PsPointerType,
+    PsType,
+    PsVoidType,
+)
 from ..constants import PsConstant
 
 from ..exceptions import MaterializationError
 from .generic_cpu import GenericVectorCpu
-from ..kernelcreation import KernelCreationContext
+from ..kernelcreation import KernelCreationContext, Typifier
 
 from ...types.quick import Fp, UInt, SInt
 from ..functions import CFunction, PsMathFunction, MathFunctions
+from ..transformations import SelectIntrinsics, EliminateConstants
+from ..transformations.select_intrinsics import SelectionContext
 
 
 class X86VectorArch(Enum):
@@ -137,29 +145,47 @@ class X86VectorCpu(GenericVectorCpu):
 
         return super().required_headers | headers
 
-    def type_intrinsic(self, vector_type: PsVectorType) -> PsCustomType:
-        return self._vector_arch.intrin_type(vector_type)
-
-    def constant_intrinsic(self, c: PsConstant) -> PsExpression:
-        vtype = c.dtype
-        assert isinstance(vtype, PsVectorType)
-        stype = vtype.scalar_type
-
-        prefix = self._vector_arch.intrin_prefix(vtype)
-        suffix = self._vector_arch.intrin_suffix(vtype)
-
-        if stype == SInt(64) and vtype.vector_entries <= 4:
-            suffix += "x"
-
-        set_func = CFunction(
-            f"{prefix}_set_{suffix}", (stype,) * vtype.vector_entries, vtype
+    def get_intrinsic_selector(
+        self, use_builtin_convertvector: bool = False
+    ) -> SelectIntrinsics:
+        return SelectIntrinsicsX86(
+            self._ctx, self._vector_arch, use_builtin_convertvector
         )
 
-        values = [PsConstantExpr(PsConstant(v, stype)) for v in c.value]
-        return set_func(*values[::-1])
+
+class SelectIntrinsicsX86(SelectIntrinsics):
+    def __init__(
+        self,
+        ctx: KernelCreationContext,
+        varch: X86VectorArch,
+        use_builtin_convertvector: bool = False,
+    ):
+        super().__init__(ctx, use_builtin_convertvector)
+        self._vector_arch = varch
+
+        typify = Typifier(ctx)
+        elim_constants = EliminateConstants(ctx)
+
+        def type_fold(expr):
+            return elim_constants(typify(expr))
+
+        self._type_fold = type_fold
+
+    def type_intrinsic(
+        self, vector_type: PsVectorType, sc: SelectionContext
+    ) -> PsCustomType:
+        return self._vector_arch.intrin_type(vector_type)
+
+    def constant_intrinsic(self, c: PsConstant, sc: SelectionContext) -> PsExpression:
+        vtype = c.dtype
+        assert isinstance(vtype, PsVectorType)
+
+        set_func = _x86_set_intrin(self._vector_arch, vtype)
+        values = [PsConstantExpr(PsConstant(v, vtype.scalar_type)) for v in c.value]
+        return set_func(*values)
 
     def op_intrinsic(
-        self, expr: PsExpression, operands: Sequence[PsExpression]
+        self, expr: PsExpression, operands: Sequence[PsExpression], sc: SelectionContext
     ) -> PsExpression:
         match expr:
             case PsUnOp() | PsBinOp():
@@ -178,7 +204,7 @@ class X86VectorCpu(GenericVectorCpu):
                 raise MaterializationError(f"Cannot map {type(expr)} to x86 intrinsic")
 
     def math_func_intrinsic(
-        self, expr: PsCall, operands: Sequence[PsExpression]
+        self, expr: PsCall, operands: Sequence[PsExpression], sc: SelectionContext
     ) -> PsExpression:
         assert isinstance(expr.function, PsMathFunction)
 
@@ -243,7 +269,7 @@ class X86VectorCpu(GenericVectorCpu):
                             )
 
                     case Fp():
-                        neg_zero = self.constant_intrinsic(PsConstant(-0.0, vtype))
+                        neg_zero = self.constant_intrinsic(PsConstant(-0.0, vtype), sc)
 
                         opstr = "andnot"
                         func = CFunction(
@@ -269,31 +295,73 @@ class X86VectorCpu(GenericVectorCpu):
         func = CFunction(f"{prefix}_{opstr}_{suffix}", (atype,) * num_args, rtype)
         return func(*operands)
 
-    def vector_load(self, acc: PsVecMemAcc) -> PsExpression:
+    def vector_load(self, acc: PsVecMemAcc, sc: SelectionContext) -> PsExpression:
+        addr: PsExpression = PsAddressOf(PsMemAcc(acc.pointer, acc.offset))
+        vtype = acc.dtype
+        assert isinstance(vtype, PsVectorType)
+
         if acc.stride is None:
-            load_func, addr_type = _x86_packed_load(self._vector_arch, acc.dtype, False)
-            addr: PsExpression = PsAddressOf(PsMemAcc(acc.pointer, acc.offset))
+            load_func, addr_type = _x86_packed_load(self._vector_arch, vtype, False)
             if addr_type:
                 addr = PsCast(addr_type, addr)
             intrinsic = load_func(addr)
             intrinsic.dtype = load_func.return_type
             return intrinsic
         else:
-            raise NotImplementedError("Gather loads not implemented yet.")
-
-    def vector_store(self, acc: PsVecMemAcc, arg: PsExpression) -> PsExpression:
-        if acc.stride is None:
-            store_func, addr_type = _x86_packed_store(
-                self._vector_arch, acc.dtype, False
+            gather_func, rtype, idx_type = _x86_gather_for_strided_load(
+                self._vector_arch, vtype
             )
-            addr: PsExpression = PsAddressOf(PsMemAcc(acc.pointer, acc.offset))
+
+            if vtype.scalar_type.is_int() and vtype.scalar_type.width == 64:
+                #   `__int64` is an alias for `long long int,
+                #   while `int64_t` aliases `long int`;`
+                #   although they have the same width, we need to cast here.
+                addr = self._type_fold(
+                    PsCast(PsPointerType(PsCustomType("long long int")), addr)
+                )
+
+            offsets = [
+                self._type_fold(PsConstantExpr(PsConstant(steps, idx_type.scalar_type)) * acc.stride.clone())
+                for steps in range(idx_type.vector_entries)
+            ]
+
+            vindex = _x86_set_intrin(self._vector_arch, idx_type)(*offsets)
+            scale = PsConstantExpr(PsConstant(vtype.scalar_type.itemsize, SInt(32)))
+
+            gather_intrin = gather_func(addr, vindex, scale)
+            gather_intrin.dtype = rtype
+            return gather_intrin
+
+    def vector_store(
+        self, acc: PsVecMemAcc, arg: PsExpression, sc: SelectionContext
+    ) -> PsExpression:
+        addr: PsExpression = PsAddressOf(PsMemAcc(acc.pointer, acc.offset))
+        vtype = acc.dtype
+        assert isinstance(vtype, PsVectorType)
+
+        if acc.stride is None:
+            store_func, addr_type = _x86_packed_store(self._vector_arch, vtype, False)
             if addr_type:
                 addr = PsCast(addr_type, addr)
             intrinsic = store_func(addr, arg)
             intrinsic.dtype = store_func.return_type
             return intrinsic
         else:
-            raise NotImplementedError("Scatter stores not implemented yet.")
+            scatter_func, idx_type = _x86_scatter_for_strided_store(
+                self._vector_arch, vtype
+            )
+
+            offsets = [
+                self._type_fold(PsConstantExpr(PsConstant(steps, idx_type.scalar_type)) * acc.stride.clone())
+                for steps in range(idx_type.vector_entries)
+            ]
+
+            vindex = _x86_set_intrin(self._vector_arch, idx_type)(*offsets)
+            scale = PsConstantExpr(PsConstant(vtype.scalar_type.itemsize, SInt(32)))
+
+            scatter_intrin = scatter_func(addr, vindex, arg, scale)
+            scatter_intrin.dtype = scatter_func.return_type
+            return scatter_intrin
 
 
 @cache
@@ -310,9 +378,11 @@ def _x86_packed_load(
         suffix = varch.intrin_suffix(vtype)
         addr_type = None
 
+    rtype = varch.intrin_type(vtype)
+
     return (
         CFunction(
-            f"{prefix}_load{'' if aligned else 'u'}_{suffix}", (ptr_type,), vtype
+            f"{prefix}_load{'' if aligned else 'u'}_{suffix}", (ptr_type,), rtype
         ),
         addr_type,
     )
@@ -336,10 +406,136 @@ def _x86_packed_store(
         CFunction(
             f"{prefix}_store{'' if aligned else 'u'}_{suffix}",
             (ptr_type, vtype),
-            PsCustomType("void"),
+            PsVoidType(),
         ),
         addr_type,
     )
+
+
+@cache
+def _x86_gather_for_strided_load(varch: X86VectorArch, vtype: PsVectorType) -> tuple[
+    Callable[[PsExpression, PsExpression, PsExpression], PsCall],
+    PsCustomType,
+    PsVectorType,
+]:
+    """Gather intrinsic for strided loads.
+
+    Uses the integer type of the same width as the gathered scalar type
+    for the index argument.
+    """
+    if varch < X86VectorArch.AVX:
+        raise MaterializationError("x86 gather instructions require at least AVX2")
+
+    scalar_width = vtype.scalar_type.width
+
+    if scalar_width not in (32, 64):
+        raise MaterializationError(
+            f"No gather-instruction available for vector type {vtype} on x86"
+        )
+
+    prefix = varch.intrin_prefix(vtype)
+    suffix = varch.intrin_suffix(vtype)
+
+    scalar_type: PsType
+    if vtype.scalar_type.is_int() and scalar_width == 64:
+        scalar_type = PsCustomType("long long int")
+    else:
+        scalar_type = vtype.scalar_type
+
+    ptr_type = PsPointerType(scalar_type, const=True)
+    idx_type = PsVectorType(SInt(scalar_width), vtype.vector_entries)
+    int_type = SInt(32)
+
+    rtype = varch.intrin_type(vtype)
+
+    #   For some reason, or maybe no reason at all,
+    #   the order of the pointer and vindex arguments to gather
+    #   swaps between AVX and AVX512.
+
+    if varch == X86VectorArch.AVX512 and vtype.width == 512:
+        intrin = CFunction(
+            f"{prefix}_i{scalar_width}gather_{suffix}",
+            (varch.intrin_type(idx_type), ptr_type, int_type),
+            rtype,
+        )
+
+        def make_call(ptr, vindex, scale):
+            return intrin(vindex, ptr, scale)
+
+    else:
+        intrin = CFunction(
+            f"{prefix}_i{scalar_width}gather_{suffix}",
+            (ptr_type, varch.intrin_type(idx_type), int_type),
+            rtype,
+        )
+
+        def make_call(ptr, vindex, scale):
+            return intrin(ptr, vindex, scale)
+
+    return make_call, rtype, idx_type
+
+
+@cache
+def _x86_scatter_for_strided_store(
+    varch: X86VectorArch, vtype: PsVectorType
+) -> tuple[CFunction, PsVectorType]:
+    """Scatter intrinsic for strided stores.
+
+    Uses the integer type of the same width as the gathered scalar type
+    for the index argument.
+    """
+    if varch < X86VectorArch.AVX512:
+        raise MaterializationError("x86 scatter instructions require at least AVX512")
+
+    scalar_width = vtype.scalar_type.width
+
+    if scalar_width not in (32, 64):
+        raise MaterializationError(
+            f"No scatter-instruction available for vector type {vtype} on x86"
+        )
+
+    prefix = varch.intrin_prefix(vtype)
+    suffix = varch.intrin_suffix(vtype)
+
+    scalar_type: PsType
+    if vtype.scalar_type.is_int() and scalar_width == 64:
+        scalar_type = PsCustomType("__int64")
+    else:
+        scalar_type = vtype.scalar_type
+
+    ptr_type = PsPointerType(scalar_type, const=True)
+    idx_type = PsVectorType(SInt(scalar_width), vtype.vector_entries)
+    int_type = SInt(32)
+    a_type = varch.intrin_type(vtype)
+
+    return (
+        CFunction(
+            f"{prefix}_i{scalar_width}scatter_{suffix}",
+            (ptr_type, varch.intrin_type(idx_type), a_type, int_type),
+            PsVoidType(),
+        ),
+        idx_type,
+    )
+
+
+@cache
+def _x86_set_intrin(varch: X86VectorArch, vtype: PsVectorType) -> Callable[..., PsCall]:
+    stype = vtype.scalar_type
+
+    prefix = varch.intrin_prefix(vtype)
+    suffix = varch.intrin_suffix(vtype)
+
+    if stype == SInt(64) and vtype.vector_entries <= 4:
+        suffix += "x"
+
+    set_func = CFunction(
+        f"{prefix}_set_{suffix}", (stype,) * vtype.vector_entries, vtype
+    )
+
+    def make(*args):
+        return set_func(*args[::-1])
+    
+    return make
 
 
 @cache

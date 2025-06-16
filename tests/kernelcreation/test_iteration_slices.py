@@ -11,9 +11,9 @@ from pystencils import (
     TypedSymbol,
     create_kernel,
     make_slice,
-    Target,
     CreateKernelConfig,
     DynamicType,
+    Target,
 )
 from pystencils.sympyextensions.integer_functions import int_rem
 from pystencils.simp import sympy_cse_on_assignment_list
@@ -56,6 +56,14 @@ def test_sliced_iteration():
 
 
 @pytest.mark.parametrize(
+    "target",
+    [
+        t
+        for t in Target.available_targets()
+        if t not in (Target.X86_SSE, Target.X86_AVX)  # don't have scatter stores
+    ],
+)
+@pytest.mark.parametrize(
     "islice",
     [
         make_slice[1:-1, 1:-1],
@@ -63,11 +71,11 @@ def test_sliced_iteration():
         make_slice[2:-2:2, ::3],
         make_slice[10:, :-5:2],
         make_slice[-5:-1, -1],
-        make_slice[-3, -1]
+        make_slice[-3, -1],
     ],
 )
 def test_numerical_slices(gen_config: CreateKernelConfig, xp, islice):
-    shape = (16, 16)
+    shape = (64, 64)
 
     f_arr = xp.zeros(shape)
     expected = xp.zeros_like(f_arr)
@@ -78,12 +86,7 @@ def test_numerical_slices(gen_config: CreateKernelConfig, xp, islice):
     update = Assignment(f.center(), 1)
     gen_config = replace(gen_config, iteration_slice=islice)
 
-    try:
-        kernel = create_kernel(update, gen_config).compile()
-    except NotImplementedError:
-        if gen_config.get_target().is_vector_cpu():
-            #   TODO Gather/Scatter not implemented yet
-            pytest.xfail("Gather/Scatter not available yet")
+    kernel = create_kernel(update, gen_config).compile()
 
     kernel(f=f_arr)
 
@@ -91,7 +94,7 @@ def test_numerical_slices(gen_config: CreateKernelConfig, xp, islice):
 
 
 def test_symbolic_slice(gen_config: CreateKernelConfig, xp):
-    shape = (16, 16)
+    shape = (64, 64)
 
     sx, sy, ex, ey = [
         TypedSymbol(n, DynamicType.INDEX_TYPE) for n in ("sx", "sy", "ex", "ey")
@@ -104,8 +107,6 @@ def test_symbolic_slice(gen_config: CreateKernelConfig, xp):
     update = Assignment(f.center(), 1)
     islice = make_slice[sy:ey, sx:ex]
     gen_config = replace(gen_config, iteration_slice=islice)
-
-    print(repr(gen_config))
 
     kernel = create_kernel(update, gen_config).compile()
 
@@ -144,7 +145,7 @@ def test_triangle_pattern(gen_config: CreateKernelConfig, xp):
     islice = make_slice[:, slow_counter:]
     gen_config = replace(gen_config, iteration_slice=islice)
 
-    if gen_config.target.is_gpu():
+    if gen_config.get_target().is_gpu():
         gen_config.gpu.manual_launch_grid = True
 
     kernel = create_kernel(update, gen_config).compile()
@@ -160,6 +161,14 @@ def test_triangle_pattern(gen_config: CreateKernelConfig, xp):
     xp.testing.assert_array_equal(f_arr, expected)
 
 
+@pytest.mark.parametrize(
+    "target",
+    [
+        t
+        for t in Target.available_targets()
+        if t not in (Target.X86_SSE, Target.X86_AVX)  # don't have scatter stores
+    ],
+)
 def test_red_black_pattern(gen_config: CreateKernelConfig, xp):
     shape = (16, 16)
 
@@ -177,14 +186,10 @@ def test_red_black_pattern(gen_config: CreateKernelConfig, xp):
     islice = make_slice[:, start::2]
     gen_config.iteration_slice = islice
 
-    if gen_config.target.is_gpu():
+    if gen_config.get_target().is_gpu():
         gen_config.gpu.manual_launch_grid = True
 
-    try:
-        kernel = create_kernel(update, gen_config).compile()
-    except NotImplementedError:
-        if gen_config.get_target().is_vector_cpu():
-            pytest.xfail("Gather/Scatter not implemented yet")
+    kernel = create_kernel(update, gen_config).compile()
 
     if isinstance(kernel, CupyKernelWrapper):
         assert isinstance(kernel.launch_config, ManualLaunchConfiguration)
