@@ -17,6 +17,8 @@ import pytest
 from types import ModuleType
 
 import pystencils as ps
+from pystencils.jit import CpuJit
+from pystencils.jit.cpu import GccInfo
 
 AVAILABLE_TARGETS = ps.Target.available_targets()
 TARGET_IDS = [t.name for t in AVAILABLE_TARGETS]
@@ -29,7 +31,18 @@ def target(request) -> ps.Target:
 
 
 @pytest.fixture
-def gen_config(request: pytest.FixtureRequest, target: ps.Target, tmp_path):
+def cpujit(target: ps.Target, tmp_path) -> CpuJit:
+    #   Set target in compiler info such that `-march` is set accordingly
+    cinfo = GccInfo(target=target)
+
+    return CpuJit(
+        compiler_info=cinfo,
+        objcache=tmp_path
+    )
+
+
+@pytest.fixture
+def gen_config(request: pytest.FixtureRequest, target: ps.Target, cpujit: CpuJit):
     """Default codegen configuration for the current target.
 
     For GPU targets, set default indexing options.
@@ -43,15 +56,7 @@ def gen_config(request: pytest.FixtureRequest, target: ps.Target, tmp_path):
         gen_config.cpu.vectorize.assume_inner_stride_one = True
 
     if target.is_cpu():
-        from pystencils.jit.cpu import CpuJit, GccInfo
-
-        #   Set target in compiler info such that `-march` is set accordingly
-        cinfo = GccInfo(target=target)
-
-        gen_config.jit = CpuJit(
-            compiler_info=cinfo,
-            objcache=tmp_path
-        )
+        gen_config.jit = cpujit
 
     return gen_config
 
