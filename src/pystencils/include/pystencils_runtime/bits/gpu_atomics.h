@@ -1,5 +1,7 @@
 #pragma once
 
+namespace pystencils::runtime::gpu {
+
 // No direct implementation for all atomic operations available
 // -> add support by custom implementations using a CAS mechanism
 
@@ -80,3 +82,5 @@ __device__ __forceinline__ float atomicMax(float *address, float val)
     }
     return __int_as_float(ret);
 }
+
+} // pystencils::runtime::gpu
