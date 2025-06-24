@@ -10,7 +10,7 @@ from pystencils.jit import CpuJit
 
 @pytest.fixture
 def cpu_jit(tmp_path) -> CpuJit:
-    return CpuJit(objcache=tmp_path)
+    return CpuJit(objcache=tmp_path, emit_warnings=True)
 
 
 def test_basic_cpu_kernel(cpu_jit):

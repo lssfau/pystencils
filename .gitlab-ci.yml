@@ -276,6 +276,9 @@ typecheck:
 
 # -------------------- Unit Tests ---------------------------------------------------------------------
 
+# TODO: Combine coverage information from these tasks into a single report
+# to get more accurate numbers
+
 .testsuite-base:
   stage: "Unit Tests"
   needs: []
@@ -283,7 +286,7 @@ typecheck:
   artifacts:
     when: always
     paths:
-      - coverage_report
+      - htmlcov
       - test-report
     reports:
       coverage_report:
@@ -301,7 +304,8 @@ typecheck:
     - nox --session "testsuite-3.10(cupy12)"
   tags:
     - docker
-    - cuda11
+    - cuda
+    - cudaComputeCapability6.1
     - AVX
 
 "testsuite-cpu-py3.13":
@@ -312,6 +316,17 @@ typecheck:
   tags:
     - docker
     - AVX
+
+  
+"testsuite-macOS-arm64-py3.11":
+  extends: .testsuite-base
+  before_script:
+    - python -m pip install nox
+  script:
+    - python -m nox -s "testsuite-3.11(cpu)" -- --cov-fail-under=70
+  tags:
+    - macmini
+    - arm64
 
 
 # -------------------- Documentation ---------------------------------------------------------------------
@@ -325,7 +340,8 @@ build-documentation:
     - nox --session docs -- --fail-on-warnings
   tags:
     - docker
-    - cuda11
+    - cuda
+    - cudaComputeCapability6.1
   artifacts:
     paths:
       - docs/build/html
