@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from types import ModuleType
 from pathlib import Path
 import subprocess
@@ -44,7 +45,8 @@ class CpuJit(JitBase):
         compiler_info: CompilerInfo | None = None,
         objcache: str | Path | _AUTO_TYPE | None = AUTO,
         *,
-        module_builder: ExtensionModuleBuilderBase | None = None
+        module_builder: ExtensionModuleBuilderBase | None = None,
+        emit_warnings: bool = False
     ):
         if objcache is AUTO:
             from appdirs import AppDirs
@@ -65,6 +67,7 @@ class CpuJit(JitBase):
         self._compiler_info = copy(compiler_info)
         self._objcache = objcache
         self._ext_module_builder = module_builder
+        self._emit_warnings = emit_warnings
 
         #   Include Directories
 
@@ -155,7 +158,14 @@ class CpuJit(JitBase):
                 "Compilation failed: C++ compiler terminated with an error.\n"
                 + result.stderr.decode()
             )
-
+        else:
+            if self._emit_warnings and result.stderr:
+                warnings.warn(
+                    "Warnings occured while compiling the kernel:\n"
+                    + result.stderr.decode(),
+                    RuntimeWarning
+                )
+                
     def _load_extension_module(self, module_name: str, module_loc: Path) -> ModuleType:
         from importlib import util as iutil
 

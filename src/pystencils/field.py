@@ -303,7 +303,8 @@ class Field:
                 "Use `memory_strides` instead; "
                 "beware that `memory_strides` takes the number of *elements* to skip, "
                 "instead of the number of bytes.",
-                FutureWarning
+                FutureWarning,
+                stacklevel=2
             )
 
             if memory_strides is not None:

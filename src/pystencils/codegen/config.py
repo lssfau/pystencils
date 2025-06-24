@@ -654,6 +654,7 @@ class CreateKernelConfig(ConfigBase):
                 "Setting the deprecated `data_type` will override the value of `default_dtype`. "
                 "Set `default_dtype` instead.",
                 UserWarning,
+                stacklevel=3
             )
             self.default_dtype = data_type
 
@@ -663,6 +664,7 @@ class CreateKernelConfig(ConfigBase):
                 "Setting the deprecated `cpu_openmp` option will override any options "
                 "passed in the `cpu.openmp` category.",
                 UserWarning,
+                stacklevel=3
             )
 
             deprecated_omp = OpenMpOptions()
@@ -711,6 +713,7 @@ class CreateKernelConfig(ConfigBase):
                     "will override the `target` option. "
                     f"Set `target` to {vec_target} instead.",
                     UserWarning,
+                    stacklevel=3
                 )
 
                 self.target = vec_target
@@ -719,6 +722,7 @@ class CreateKernelConfig(ConfigBase):
                 "Setting the deprecated `cpu_vectorize_info` will override any options "
                 "passed in the `cpu.vectorize` category.",
                 UserWarning,
+                stacklevel=3
             )
 
             deprecated_vec_opts = VectorizationOptions(
@@ -737,6 +741,7 @@ class CreateKernelConfig(ConfigBase):
             warn(
                 "Setting the deprecated `gpu_indexing` will override the `gpu.indexing_scheme` option",
                 UserWarning,
+                stacklevel=3
             )
             self.gpu.indexing_scheme = gpu_indexing
 
@@ -746,6 +751,7 @@ class CreateKernelConfig(ConfigBase):
                 "Setting the deprecated `gpu_indexing_params` will override any options "
                 "passed in the `gpu` category.",
                 UserWarning,
+                stacklevel=3
             )
 
             self.gpu = GpuOptions()
@@ -758,4 +764,5 @@ def _deprecated_option(name, instead):  # pragma: no cover
         f"The `{name}` option of CreateKernelConfig is deprecated and will be removed in pystencils 2.1. "
         f"Use `{instead}` instead.",
         FutureWarning,
+        stacklevel=4
     )

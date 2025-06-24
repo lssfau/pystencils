@@ -47,6 +47,9 @@ def test_filter_kernel(gen_config, xp, dtype):
     cfg = gen_config.copy()
     cfg.default_dtype = dtype
 
+    if cfg.get_target().is_cpu():
+        cfg.cpu.openmp.enable = True
+
     ker = create_kernel(asms, cfg)
 
     for param in ker.parameters:
@@ -89,6 +92,10 @@ def test_filter_kernel_fixedsize(gen_config, xp, dtype):
 
     cfg = gen_config.copy()
     cfg.default_dtype = dtype
+
+    if cfg.get_target().is_cpu():
+        cfg.cpu.openmp.enable = True
+
     ker = create_kernel(asms, cfg)
 
     for param in ker.parameters:

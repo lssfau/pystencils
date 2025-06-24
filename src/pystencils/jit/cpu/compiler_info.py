@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Sequence
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 
 from ...codegen.target import Target
 
@@ -48,16 +49,21 @@ class CompilerInfo(ABC):
         """*restrict* memory qualifier recognized by this compiler"""
 
     @staticmethod
-    def get_default() -> CompilerInfo:
+    def get_default(**kwargs) -> CompilerInfo:
+        """Create a default compiler info object for the current runtime environment.
+        
+        Args:
+            kwargs: Are forwarded to the constructor of the selected `CompilerInfo` subclass.
+        """
         import platform
 
         sysname = platform.system()
         match sysname.lower():
             case "linux":
                 #   Use GCC on Linux
-                return GccInfo()
+                return GccInfo(**kwargs)
             case "darwin":
-                return AppleClangInfo()
+                return AppleClangInfo(**kwargs)
             case _:
                 raise RuntimeError(
                     f"Cannot determine compiler information for platform {sysname}"
@@ -111,6 +117,14 @@ class ClangInfo(_GnuLikeCliCompiler):
 
     def cxx(self) -> str:
         return "clang++"
+    
+    def cxxflags(self):
+        flags = super().cxxflags()
+        if self.optlevel == "fast":
+            #   clang deprecates -Ofast
+            flags.remove("-Ofast")
+            flags += ["-O3", "-ffast-math"]
+        return flags
 
 
 @dataclass
@@ -118,4 +132,35 @@ class AppleClangInfo(ClangInfo):
     """Compiler info for the Apple Clang compiler."""
 
     def cxxflags(self) -> list[str]:
-        return super().cxxflags() + ["-Xclang"]
+        flags = super().cxxflags()
+
+        if self.openmp:
+            #   AppleClang requires the `-Xclang -fopenmp` in exactly that order for OpenMP to work
+            flags.remove("-fopenmp")
+            flags += ["-Xclang", "-fopenmp"]
+
+        return flags
+    
+    def linker_flags(self):
+        ldflags = super().linker_flags()
+        
+        #   Link against libpython
+        import sysconfig
+        libpython_file = Path(sysconfig.get_config_var("LIBRARY")).with_suffix(".dylib")
+        libpython_dir = Path(sysconfig.get_config_var("LIBDIR"))
+        libpython = libpython_dir / libpython_file
+
+        ldflags += [str(libpython)]
+
+        #   Find an appropriate OpenMP dylib to link against
+        omp_candidates = [
+            Path("/opt/local/lib/libomp/libomp.dylib"),
+            Path("/usr/local/lib/libomp.dylib"),
+            Path("/opt/homebrew/lib/libomp.dylib"),
+        ]
+        for omplib in omp_candidates:
+            if omplib.exists():
+                ldflags.append(str(omplib))
+                break
+
+        return ldflags

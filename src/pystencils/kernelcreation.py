@@ -8,6 +8,7 @@ warn(
     "and the module will be removed in pystencils 2.1. "
     "Import from `pystencils` instead.",
     FutureWarning,
+    stacklevel=2
 )
 
 

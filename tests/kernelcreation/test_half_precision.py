@@ -1,18 +1,32 @@
 import pytest
 import platform
+import sys
 
 import numpy as np
 import pystencils as ps
 
+from pystencils.jit.cpu import CpuJit, ClangInfo, AppleClangInfo
+
+
+@pytest.fixture
+def cpujit(target: ps.Target, tmp_path) -> CpuJit:
+    #   Set target in compiler info such that `-march` is set accordingly
+    if sys.platform == "darwin":
+        cinfo = AppleClangInfo(target=target)
+    else:
+        cinfo = ClangInfo(target=target)
+
+    return CpuJit(
+        compiler_info=cinfo,
+        objcache=tmp_path
+    )
+
 
 @pytest.mark.parametrize('target', (ps.Target.CPU, ps.Target.CurrentGPU))
-def test_half_precison(target):
+def test_half_precison(target, cpujit):
     if target == ps.Target.CPU:
         if not platform.machine() in ['arm64', 'aarch64']:
             pytest.xfail("skipping half precision test on non arm platform")
-
-        if 'clang' not in ps.cpu.cpujit.get_compiler_config()['command']:
-            pytest.xfail("skipping half precision because clang compiler is not used")
 
     if target.is_gpu():
         pytest.importorskip("cupy")
@@ -30,6 +44,8 @@ def test_half_precison(target):
     up = ps.Assignment(f3.center, f1.center + 2.1 * f2.center)
 
     config = ps.CreateKernelConfig(target=dh.default_target, default_dtype=np.float32)
+    if target.is_cpu():
+        config.jit = cpujit
     ast = ps.create_kernel(up, config=config)
 
     kernel = ast.compile()

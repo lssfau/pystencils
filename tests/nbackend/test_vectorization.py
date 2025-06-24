@@ -19,7 +19,7 @@ from pystencils.backend.transformations import LoopVectorizer, LowerToC
 from pystencils.backend.constants import PsConstant
 from pystencils.codegen.driver import KernelFactory
 from pystencils.jit import CpuJit
-from pystencils.jit.cpu import GccInfo
+from pystencils.jit.cpu import CompilerInfo
 from pystencils import Target, fields, Assignment, Field, FieldType
 from pystencils.field import create_numpy_array_with_layout
 from pystencils.types.quick import SInt, Fp
@@ -141,10 +141,10 @@ def create_vector_kernel(
     lower = LowerToC(ctx)
     loop_nest = lower(loop_nest)
 
-    cinfo = GccInfo(target=setup.target)
+    cinfo = CompilerInfo.get_default(target=setup.target)
 
     kfactory = KernelFactory(ctx)
-    func = kfactory.create_generic_kernel(
+    kernel = kfactory.create_generic_kernel(
         platform,
         PsBlock([loop_nest]),
         "vector_kernel",
@@ -152,7 +152,6 @@ def create_vector_kernel(
         CpuJit(cinfo),
     )
 
-    kernel = func.compile()
     return kernel
 
 
@@ -174,7 +173,7 @@ def test_update_kernel(vectorization_setup: VectorTestSetup, ghost_layers: int):
         Assignment(dst.center(3), x[3]),
     ]
 
-    kernel = create_vector_kernel(update, src, setup, ghost_layers)
+    kernel = create_vector_kernel(update, src, setup, ghost_layers).compile()
 
     shape = (23, 17)
 
@@ -220,7 +219,7 @@ def test_trailing_iterations(vectorization_setup: VectorTestSetup):
 
     update = [Assignment(f(0), 2 * f(0))]
 
-    kernel = create_vector_kernel(update, f, setup)
+    kernel = create_vector_kernel(update, f, setup).compile()
 
     for trailing_iters in range(setup.lanes):
         shape = (setup.lanes * 12 + trailing_iters, 1)
@@ -241,7 +240,7 @@ def test_only_trailing_iterations(vectorization_setup: VectorTestSetup):
 
     update = [Assignment(f(0), 2 * f(0))]
 
-    kernel = create_vector_kernel(update, f, setup)
+    kernel = create_vector_kernel(update, f, setup).compile()
 
     for trailing_iters in range(1, setup.lanes):
         shape = (trailing_iters, 1)
@@ -262,7 +261,7 @@ def test_set(vectorization_setup: VectorTestSetup):
 
     update = [Assignment(f(0), DEFAULTS.spatial_counters[0])]
 
-    kernel = create_vector_kernel(update, f, setup)
+    kernel = create_vector_kernel(update, f, setup).compile()
 
     shape = (23, 1)
     f_arr = create_numpy_array_with_layout(
@@ -310,7 +309,7 @@ def test_strided_load(vectorization_setup: VectorTestSetup, int_or_float):
         )
     ]
 
-    kernel = create_vector_kernel(update, f, setup)
+    kernel = create_vector_kernel(update, f, setup).compile()
 
     f_shape = (21, 17)
     f_arr = create_numpy_array_with_layout(
@@ -388,10 +387,11 @@ def test_strided_store(vectorization_setup: VectorTestSetup, int_or_float):
 
     scatter_pattern = f"{prefix}_i{setup.type_width}scatter_{suffix}" + r"\(.*,.*,.*,\s*" + str(setup.type_width // 8) + r"\);"
     
-    assert len(re.findall(scatter_pattern, kernel.code)) == 3
+    assert len(re.findall(scatter_pattern, kernel.get_c_code())) == 3
 
     if Target.X86_AVX512 in Target.available_vector_cpu_targets():
         #   We don't have AVX512 CPUs on the CI runners
+        kernel = kernel.compile()
 
         f_shape = (21, 17)
         f_arr = create_numpy_array_with_layout(
