@@ -248,7 +248,7 @@ class CupyJit(JitBase):
         return CupyKernelWrapper(kernel, raw_kernel)
 
     def _compiler_options(self) -> tuple[str, ...]:
-        options = ["-w", "-std=c++11"]
+        options = ["-w", "-std=c++17"]
         options.append("-I" + get_pystencils_include_path())
         return tuple(options)
 

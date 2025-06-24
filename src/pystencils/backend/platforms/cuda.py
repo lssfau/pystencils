@@ -109,8 +109,14 @@ class CudaPlatform(GenericGpu):
             cond = is_valid_thread
 
         # use atomic operation
+        match actual_reduction_op:
+            case ReductionOp.Min | ReductionOp.Max | ReductionOp.Mul:
+                impl_namespace = "pystencils::runtime::gpu::"
+            case _:
+                impl_namespace = ""
+
         func = CFunction(
-            f"atomic{actual_reduction_op.name}", [ptrtype, stype], PsCustomType("void")
+            f"{impl_namespace}atomic{actual_reduction_op.name}", [ptrtype, stype], PsCustomType("void")
         )
         func_args = (ptr_expr, symbol_expr)
 
