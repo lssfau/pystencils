@@ -29,6 +29,7 @@ from .assignment import Assignment, AddAugmentedAssignment, assignment_from_sten
 from .simp import AssignmentCollection
 from .sympyextensions.typed_sympy import TypedSymbol, DynamicType
 from .sympyextensions import SymbolCreator, tcast
+from .sympyextensions import random
 from .datahandling import create_data_handling
 from .sympyextensions.reduction import (
     AddReductionAssignment,
@@ -86,6 +87,7 @@ __all__ = [
     "fd",
     "stencil",
     "tcast",
+    "random",
 ]
 
 from . import _version

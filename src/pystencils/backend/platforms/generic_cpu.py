@@ -6,9 +6,12 @@ from ..ast.expressions import PsCall, PsMemAcc, PsConstantExpr
 from ..functions import (
     CFunction,
     MathFunctions,
+    PsIrFunction,
     PsMathFunction,
     PsConstantFunction,
     ConstantFunctions,
+    PsRngEngineFunction,
+    RngSpec,
 )
 from ..reduction_op_mapping import reduction_op_to_expr
 from ...sympyextensions import ReductionOp
@@ -54,7 +57,7 @@ class GenericCpu(Platform):
 
     @property
     def required_headers(self) -> set[str]:
-        return {"<cmath>", "<limits>"}
+        return {"<cmath>", "<limits>", '"pystencils_runtime/generic_cpu.hpp"'}
 
     def materialize_iteration_space(
         self, body: PsBlock, ispace: IterationSpace
@@ -96,68 +99,88 @@ class GenericCpu(Platform):
 
     def select_function(self, call: PsCall) -> PsExpression:
         call_func = call.function
-        assert isinstance(call_func, (PsMathFunction | PsConstantFunction))
+        assert isinstance(call_func, PsIrFunction)
 
         dtype = call.get_dtype()
-        func = call_func.func
         arg_types = (dtype,) * call.function.arg_count
 
         expr: PsExpression | None = None
 
-        if isinstance(dtype, PsIeeeFloatType):
-            if dtype.width in (32, 64):
+        if isinstance(call_func, PsMathFunction | PsConstantFunction):
+            func = call_func.func
+
+            if isinstance(dtype, PsIeeeFloatType):
+                if dtype.width in (32, 64):
+                    match func:
+                        case (
+                            MathFunctions.Exp
+                            | MathFunctions.Log
+                            | MathFunctions.Sin
+                            | MathFunctions.Cos
+                            | MathFunctions.Tan
+                            | MathFunctions.Sinh
+                            | MathFunctions.Cosh
+                            | MathFunctions.ASin
+                            | MathFunctions.ACos
+                            | MathFunctions.ATan
+                            | MathFunctions.ATan2
+                            | MathFunctions.Pow
+                            | MathFunctions.Sqrt
+                            | MathFunctions.Floor
+                            | MathFunctions.Ceil
+                        ):
+                            call.function = CFunction(
+                                func.function_name, arg_types, dtype
+                            )
+                            expr = call
+                        case MathFunctions.Abs | MathFunctions.Min | MathFunctions.Max:
+                            call.function = CFunction(
+                                "f" + func.function_name, arg_types, dtype
+                            )
+                            expr = call
+
                 match func:
-                    case (
-                        MathFunctions.Exp
-                        | MathFunctions.Log
-                        | MathFunctions.Sin
-                        | MathFunctions.Cos
-                        | MathFunctions.Tan
-                        | MathFunctions.Sinh
-                        | MathFunctions.Cosh
-                        | MathFunctions.ASin
-                        | MathFunctions.ACos
-                        | MathFunctions.ATan
-                        | MathFunctions.ATan2
-                        | MathFunctions.Pow
-                        | MathFunctions.Sqrt
-                        | MathFunctions.Floor
-                        | MathFunctions.Ceil
-                    ):
-                        call.function = CFunction(func.function_name, arg_types, dtype)
-                        expr = call
-                    case MathFunctions.Abs | MathFunctions.Min | MathFunctions.Max:
-                        call.function = CFunction(
-                            "f" + func.function_name, arg_types, dtype
+                    case ConstantFunctions.Pi:
+                        assert dtype.numpy_dtype is not None
+                        expr = PsExpression.make(
+                            PsConstant(dtype.numpy_dtype.type(np.pi), dtype)
                         )
-                        expr = call
 
-            match func:
-                case ConstantFunctions.Pi:
-                    assert dtype.numpy_dtype is not None
-                    expr = PsExpression.make(
-                        PsConstant(dtype.numpy_dtype.type(np.pi), dtype)
+                    case ConstantFunctions.E:
+                        assert dtype.numpy_dtype is not None
+                        expr = PsExpression.make(
+                            PsConstant(dtype.numpy_dtype.type(np.e), dtype)
+                        )
+
+                    case ConstantFunctions.PosInfinity | ConstantFunctions.NegInfinity:
+                        call.function = CFunction(
+                            f"std::numeric_limits< {dtype.c_string()} >::infinity",
+                            [],
+                            dtype,
+                        )
+                        if func == ConstantFunctions.NegInfinity:
+                            expr = -call
+                        else:
+                            expr = call
+
+            elif isinstance(dtype, PsIntegerType):
+                expr = self._select_integer_function(call)
+
+        elif isinstance(call.function, PsRngEngineFunction):
+            spec = call.function.rng_spec
+            atypes = (spec.int_arg_type,) * call.function.arg_count
+
+            match spec:
+                case RngSpec.PhiloxFp32:
+                    rng_func = CFunction(
+                        "pystencils::runtime::random::philox_fp32x4", atypes, spec.dtype
+                    )
+                case RngSpec.PhiloxFp64:
+                    rng_func = CFunction(
+                        "pystencils::runtime::random::philox_fp64x2", atypes, spec.dtype
                     )
 
-                case ConstantFunctions.E:
-                    assert dtype.numpy_dtype is not None
-                    expr = PsExpression.make(
-                        PsConstant(dtype.numpy_dtype.type(np.e), dtype)
-                    )
-
-                case ConstantFunctions.PosInfinity | ConstantFunctions.NegInfinity:
-                    call.function = CFunction(
-                        f"std::numeric_limits< {dtype.c_string()} >::infinity",
-                        [],
-                        dtype,
-                    )
-                    if func == ConstantFunctions.NegInfinity:
-                        expr = -call
-                    else:
-                        expr = call
-
-        elif isinstance(dtype, PsIntegerType):
-            expr = self._select_integer_function(call)
+            expr = rng_func(*call.args)
 
         if expr is not None:
             if expr.dtype is None:

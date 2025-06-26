@@ -386,6 +386,11 @@ class KernelCreationContext:
 
     #   Iteration Space
 
+    @property
+    def iteration_space(self) -> IterationSpace | None:
+        """The iteration space for the current kernel, or `None` if none was set."""
+        return self._ispace
+
     def set_iteration_space(self, ispace: IterationSpace):
         """Set the iteration space used for the current kernel."""
         self._ispace = ispace

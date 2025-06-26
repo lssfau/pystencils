@@ -17,7 +17,7 @@ class CompilerInfo(ABC):
     optlevel: str | None = "fast"
     """Compiler optimization level"""
 
-    cxx_standard: str = "c++14"
+    cxx_standard: str = "c++17"
     """C++ language standard to be compiled with"""
 
     target: Target = Target.CurrentCPU

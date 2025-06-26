@@ -74,7 +74,7 @@ testsuite = [
     'ipython',
     'matplotlib',
     'py-cpuinfo',
-    'randomgen>=1.18',
+    'randomgen>=2.1',
     'scipy',
 ]
 

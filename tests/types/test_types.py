@@ -193,6 +193,18 @@ def test_array_types():
         _ = PsArrayType(PsArrayType(Bool(), (2,)), (3, 1))
 
 
+def test_named_array_types():
+    t = PsNamedArrayType("MyVector< Fp32, 3 >", Fp(32), (3,))
+    assert t.name == "MyVector< Fp32, 3 >"
+    assert t.dim == 1
+    assert t.shape == (3,)
+    assert not t.const
+    assert t.c_string() == "MyVector< Fp32, 3 >"
+    
+    assert t == PsNamedArrayType("MyVector< Fp32, 3 >", Fp(32), (3,))
+    assert t != PsArrayType(Fp(32), (3,))
+
+
 def test_pickle():
     types = [
         Bool(const=True),
@@ -208,7 +220,8 @@ def test_pickle():
         PsStructType([("x", UInt(32)), ("y", UInt(32)), ("val", Fp(64))], "myStruct"),
         PsStructType([("data", Fp(32))], "None"),
         PsArrayType(Fp(16), (42,), const=True),
-        PsArrayType(PsVectorType(Fp(32), 8), (42,))
+        PsArrayType(PsVectorType(Fp(32), 8), (42,)),
+        PsNamedArrayType("Fp64Matrix", Fp(64), (31, 11)),
     ]
 
     dumped = pickle.dumps(types)

@@ -105,3 +105,16 @@ Bit Masks and Bit-Set Conditionals
     :template: autosummary/sympy_class.rst
 
     bit_masks.bit_conditional
+
+Random Number Generation
+------------------------
+
+.. module:: pystencils.sympyextensions.random
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: autosummary/entire_class.rst
+
+    RngBase
+    Philox

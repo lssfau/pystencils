@@ -172,6 +172,43 @@ class PsArrayType(PsDereferencableType):
         return f"PsArrayType(element_type={repr(self._base_type)}, shape={self._shape}, const={self._const})"
 
 
+class PsNamedArrayType(PsArrayType):
+    """Named multidimensional fixed-size array type.
+    
+    Extends `PsArrayType` with a custom name to model
+    C++ containers with an nd-array interface.
+    Only through named array-types can arrays be treated fully as first-class
+    objects with the same value semantics as scalars and structs.
+
+    Args:
+        name: Full name of the array type
+        element_type: Data type of array entries
+        shape: Array shape
+        const: Constness of the array object
+    """
+
+    def __init__(
+        self,
+        name: str,
+        element_type: PsType,
+        shape: SupportsIndex | Sequence[SupportsIndex],
+        const: bool = False,
+    ):
+        self._name = name
+        super().__init__(element_type, shape, const)
+
+    def __args__(self):
+        return (self._name,) + super().__args__()
+
+    @property
+    def name(self) -> str:
+        """Name of this array type"""
+        return self._name
+
+    def c_string(self) -> str:
+        return self._const_string() + self._name
+
+
 class PsStructType(PsType):
     """Named or anonymous structured data type.
 

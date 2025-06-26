@@ -17,6 +17,7 @@ from ...sympyextensions.typed_sympy import TypedSymbol, TypeCast, DynamicType
 from ...sympyextensions.pointers import AddressOf, mem_acc
 from ...sympyextensions.reduction import ReductionAssignment, ReductionOp
 from ...sympyextensions.bit_masks import bit_conditional
+from ...sympyextensions.random import RngBase
 from ...field import Field, FieldType
 
 from .context import KernelCreationContext
@@ -69,6 +70,7 @@ from ..functions import (
     MathFunctions,
     PsConstantFunction,
     ConstantFunctions,
+    PsRngEngineFunction,
 )
 from ..exceptions import FreezeError
 
@@ -208,9 +210,7 @@ class FreezeExpressions:
             raise FreezeError("Reduction symbol must have a numeric data type.")
 
         # get reduction info from context
-        reduction_info = self._ctx.add_reduction_info(
-            lhs_name, lhs_dtype, reduction_op
-        )
+        reduction_info = self._ctx.add_reduction_info(lhs_name, lhs_dtype, reduction_op)
 
         # create new lhs from newly created local lhs symbol
         new_lhs = PsSymbolExpr(reduction_info.local_symbol)
@@ -499,6 +499,19 @@ class FreezeExpressions:
                 return PsAddressOf(*args)
             case mem_acc():
                 return PsMemAcc(*args)
+            case RngBase.RngFunc():
+                ir_func = PsRngEngineFunction.get_for_rng(func.rng)
+
+                ispace = self._ctx.iteration_space
+                if ispace is not None:
+                    rank = ispace.rank
+                else:
+                    rank = 0
+
+                counters = [self.visit_expr_or_builtin(c) for c in func.rng.get_counters(func, rank)]
+                keys = [self.visit_expr_or_builtin(k) for k in func.rng.get_keys(func)]
+
+                return ir_func(*counters, *keys)
             case _:
                 raise FreezeError(f"Unsupported function: {func}")
 

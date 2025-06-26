@@ -4,7 +4,8 @@ from abc import ABC
 from enum import Enum
 
 from ..sympyextensions import ReductionOp
-from ..types import PsType, PsNumericType, PsTypeError
+from ..sympyextensions.random import RngBase, Philox
+from ..types import PsType, PsNumericType, PsTypeError, PsIeeeFloatType, PsIntegerType, PsUnsignedIntegerType
 from .exceptions import PsInternalCompilerError
 
 if TYPE_CHECKING:
@@ -34,6 +35,10 @@ class PsFunction(ABC):
         from .ast.expressions import PsCall
 
         return PsCall(self, args)
+    
+
+class PsIrFunction(PsFunction):
+    """Base class for IR functions that must be lowered to target-specific implementations."""
 
 
 class MathFunctions(Enum):
@@ -69,7 +74,7 @@ class MathFunctions(Enum):
         self.num_args = num_args
 
 
-class PsMathFunction(PsFunction):
+class PsMathFunction(PsIrFunction):
     """Homogeneously typed mathematical functions."""
 
     __match_args__ = ("func",)
@@ -95,7 +100,7 @@ class PsMathFunction(PsFunction):
         return hash(self._func)
 
 
-class PsReductionWriteBack(PsFunction):
+class PsReductionWriteBack(PsIrFunction):
     """Function representing a reduction kernel's write-back step supported by the backend.
 
     Each platform has to materialize this function to a concrete implementation.
@@ -137,7 +142,7 @@ class ConstantFunctions(Enum):
         self.function_name = func_name
 
 
-class PsConstantFunction(PsFunction):
+class PsConstantFunction(PsIrFunction):
     """Data-type-specific numerical constants.
 
     Represents numerical constants which need to be exactly represented,
@@ -205,6 +210,88 @@ class PsConstantFunction(PsFunction):
                     )
 
         self._dtype = dtype
+
+
+class RngSpec(Enum):
+    """Random number generator specifications for `PsRngEngineFunction`."""
+
+    PhiloxFp32 = ("philox_fp32", Philox._get_vector_type(PsIeeeFloatType(32)), 4, 2, PsUnsignedIntegerType(32))
+    """Philox W=32, N=4 RNG engine returning four float32-values"""
+
+    PhiloxFp64 = ("philox_fp64", Philox._get_vector_type(PsIeeeFloatType(64)), 4, 2, PsUnsignedIntegerType(32))
+    """Philox W=32, N=4 RNG engine returning two float64-values"""
+
+    def __init__(self, rng_name: str, dtype: PsType, num_ctrs: int, num_keys: int, int_arg_type: PsIntegerType):
+        self.rng_name = rng_name
+        self.dtype = dtype
+        self.num_ctrs = num_ctrs
+        self.num_keys = num_keys
+        self.int_arg_type = int_arg_type
+
+
+class PsRngEngineFunction(PsIrFunction):
+    """IR function that represents the invocation of a random number generation engine.
+    
+    This is the IR representation of the symbolic random number generators
+    implemented in `pystencils.sympyextensions.random`.
+    Each symbolic RNG invocation is mapped onto an RNG engine function
+    through `get_for_rng`.
+
+    Each engine is a function with the signature
+
+    .. code-block::
+
+        engine(ctr_0, ..., ctr_n, key_0, ..., key_m) -> Vec< value_type, K >
+
+    which takes n+1 *counter* arguments, and m+1 *key* arguments,
+    all of which have the same integer data type (the ``int_arg_type`` parameter of the `RngSpec`).
+    It returns a k-vector of random values of type ``value_type``,
+    modelled using an appropriate `PsNamedArrayType`.
+
+    RNG engine functions must be handled by several transformers, including:
+
+    - `vectorization <AstVectorizer>` (if applicable)
+    - lowering to target-specific implementations by the `Platform` classes.
+
+    Args:
+        rng_spec: Specification defining the RNG's properties
+    """
+
+    __match_args__ = ("rng_spec",)
+
+    @staticmethod
+    def get_for_rng(rng: RngBase) -> PsRngEngineFunction:
+        """Retrieve the function to be invoked for the given symbolic RNG."""
+        match rng:
+            case Philox():
+                match rng.dtype.width:
+                    case 32: spec = RngSpec.PhiloxFp32
+                    case 64: spec = RngSpec.PhiloxFp64
+                    case _: raise ValueError(f"Data type {rng.dtype} not supported in Philox RNG")
+            case _:
+                raise ValueError(f"Unexpected RNG type: {type(rng)}")
+            
+        return PsRngEngineFunction(spec)
+
+    def __init__(self, rng_spec: RngSpec):
+        self._rng_spec = rng_spec
+        super().__init__(rng_spec.rng_name, rng_spec.num_ctrs + rng_spec.num_keys)
+
+    @property
+    def rng_spec(self) -> RngSpec:
+        return self._rng_spec
+
+    def __str__(self) -> str:
+        return f"{self._rng_spec.rng_name}"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PsRngEngineFunction):
+            return False
+
+        return self._rng_spec == other._rng_spec
+
+    def __hash__(self) -> int:
+        return hash(self._rng_spec)
 
 
 class CFunction(PsFunction):
