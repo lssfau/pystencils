@@ -3,7 +3,7 @@ from ..exceptions import MaterializationError
 from ..platforms import Platform
 from ..ast import PsAstNode
 from ..ast.expressions import PsCall, PsExpression
-from ..functions import PsMathFunction, PsConstantFunction, PsReductionWriteBack
+from ..functions import PsIrFunction, PsReductionWriteBack
 
 
 class SelectFunctions:
@@ -26,7 +26,9 @@ class SelectFunctions:
             ):
                 ptr_expr, symbol_expr = call.args
                 op = call.function.reduction_op
-                reduction_func = self._platform.resolve_reduction(ptr_expr, symbol_expr, op)
+                reduction_func = self._platform.resolve_reduction(
+                    ptr_expr, symbol_expr, op
+                )
 
                 match reduction_func:
                     case PsStructuralNode():
@@ -37,8 +39,10 @@ class SelectFunctions:
                         )
             else:
                 return node
-        elif isinstance(node, PsCall) and isinstance(
-                node.function, (PsMathFunction | PsConstantFunction)
+        elif (
+            isinstance(node, PsCall)
+            and isinstance(node.function, PsIrFunction)
+            and not isinstance(node.function, PsReductionWriteBack)
         ):
             resolved_func = self._platform.select_function(node)
             assert isinstance(resolved_func, PsExpression)

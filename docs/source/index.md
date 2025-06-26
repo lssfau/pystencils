@@ -54,6 +54,7 @@ user_manual/cpu_optimization
 user_manual/gpu_kernels
 user_manual/WorkingWithTypes
 user_manual/reductions
+user_manual/random_numbers
 :::
 
 :::{toctree}

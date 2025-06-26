@@ -55,6 +55,7 @@ from ..functions import (
     CFunction,
     PsConstantFunction,
     PsReductionWriteBack,
+    PsRngEngineFunction,
 )
 from ..ast.util import determine_memory_object
 from ..exceptions import TypificationError
@@ -693,6 +694,13 @@ class Typifier:
                             )
 
                         tc.infer_dtype(expr)
+
+                    case PsRngEngineFunction(rng_spec):
+                        tc.apply_dtype(rng_spec.dtype, expr)
+
+                        arg_tc = TypeContext(rng_spec.int_arg_type)
+                        for arg in expr.args:
+                            self.visit_expr(arg, arg_tc)
 
                     case CFunction(_, arg_types, ret_type):
                         tc.apply_dtype(ret_type, expr)

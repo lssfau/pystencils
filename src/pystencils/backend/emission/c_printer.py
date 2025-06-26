@@ -41,7 +41,7 @@ class CAstPrinter(BasePrinter):
     def _symbol_decl(self, symb: PsSymbol):
         dtype = symb.get_dtype()
 
-        if isinstance(dtype, PsArrayType):
+        if type(dtype) is PsArrayType:
             array_dims = dtype.shape
             dtype = dtype.base_type
         else:

@@ -52,6 +52,8 @@ from ..functions import (
     PsMathFunction,
     PsConstantFunction,
     ConstantFunctions,
+    PsRngEngineFunction,
+    RngSpec,
 )
 
 int32 = PsSignedIntegerType(width=32, const=False)
@@ -196,9 +198,8 @@ class GenericGpu(Platform):
     """
 
     @property
-    @abstractmethod
     def required_headers(self) -> set[str]:
-        return set()
+        return {'"pystencils_runtime/generic_gpu.hpp"'}
 
     def __init__(
         self,
@@ -281,83 +282,99 @@ class GenericGpu(Platform):
         self, call: PsCall
     ) -> PsExpression:
         call_func = call.function
-        assert isinstance(call_func, (PsMathFunction | PsConstantFunction))
 
         dtype = call.get_dtype()
-        func = call_func.func
         arg_types = (dtype,) * call.function.arg_count
         expr: PsExpression | None = None
 
-        if isinstance(dtype, PsIeeeFloatType):
-            match func:
-                case (
-                    MathFunctions.Exp
-                    | MathFunctions.Log
-                    | MathFunctions.Sin
-                    | MathFunctions.Cos
-                    | MathFunctions.Sqrt
-                    | MathFunctions.Ceil
-                    | MathFunctions.Floor
-                ) if dtype.width in (16, 32, 64):
-                    prefix = "h" if dtype.width == 16 else ""
-                    suffix = "f" if dtype.width == 32 else ""
-                    name = f"{prefix}{func.function_name}{suffix}"
-                    call.function = CFunction(name, arg_types, dtype)
-                    expr = call
+        if isinstance(call_func, PsMathFunction | PsConstantFunction):
+            func = call_func.func
+            if isinstance(dtype, PsIeeeFloatType):
+                match func:
+                    case (
+                        MathFunctions.Exp
+                        | MathFunctions.Log
+                        | MathFunctions.Sin
+                        | MathFunctions.Cos
+                        | MathFunctions.Sqrt
+                        | MathFunctions.Ceil
+                        | MathFunctions.Floor
+                    ) if dtype.width in (16, 32, 64):
+                        prefix = "h" if dtype.width == 16 else ""
+                        suffix = "f" if dtype.width == 32 else ""
+                        name = f"{prefix}{func.function_name}{suffix}"
+                        call.function = CFunction(name, arg_types, dtype)
+                        expr = call
 
-                case (
-                    MathFunctions.Pow
-                    | MathFunctions.Tan
-                    | MathFunctions.Sinh
-                    | MathFunctions.Cosh
-                    | MathFunctions.ASin
-                    | MathFunctions.ACos
-                    | MathFunctions.ATan
-                    | MathFunctions.ATan2
-                ) if dtype.width in (32, 64):
-                    #   These are unavailable for fp16
-                    suffix = "f" if dtype.width == 32 else ""
-                    name = f"{func.function_name}{suffix}"
-                    call.function = CFunction(name, arg_types, dtype)
-                    expr = call
+                    case (
+                        MathFunctions.Pow
+                        | MathFunctions.Tan
+                        | MathFunctions.Sinh
+                        | MathFunctions.Cosh
+                        | MathFunctions.ASin
+                        | MathFunctions.ACos
+                        | MathFunctions.ATan
+                        | MathFunctions.ATan2
+                    ) if dtype.width in (32, 64):
+                        #   These are unavailable for fp16
+                        suffix = "f" if dtype.width == 32 else ""
+                        name = f"{func.function_name}{suffix}"
+                        call.function = CFunction(name, arg_types, dtype)
+                        expr = call
 
-                case (
-                    MathFunctions.Min | MathFunctions.Max | MathFunctions.Abs
-                ) if dtype.width in (32, 64):
-                    suffix = "f" if dtype.width == 32 else ""
-                    name = f"f{func.function_name}{suffix}"
-                    call.function = CFunction(name, arg_types, dtype)
-                    expr = call
+                    case (
+                        MathFunctions.Min | MathFunctions.Max | MathFunctions.Abs
+                    ) if dtype.width in (32, 64):
+                        suffix = "f" if dtype.width == 32 else ""
+                        name = f"f{func.function_name}{suffix}"
+                        call.function = CFunction(name, arg_types, dtype)
+                        expr = call
 
-                case MathFunctions.Abs if dtype.width == 16:
-                    call.function = CFunction(" __habs", arg_types, dtype)
-                    expr = call
+                    case MathFunctions.Abs if dtype.width == 16:
+                        call.function = CFunction(" __habs", arg_types, dtype)
+                        expr = call
 
-                case ConstantFunctions.Pi:
-                    assert dtype.numpy_dtype is not None
-                    expr = PsExpression.make(
-                        PsConstant(dtype.numpy_dtype.type(np.pi), dtype)
+                    case ConstantFunctions.Pi:
+                        assert dtype.numpy_dtype is not None
+                        expr = PsExpression.make(
+                            PsConstant(dtype.numpy_dtype.type(np.pi), dtype)
+                        )
+
+                    case ConstantFunctions.E:
+                        assert dtype.numpy_dtype is not None
+                        expr = PsExpression.make(
+                            PsConstant(dtype.numpy_dtype.type(np.e), dtype)
+                        )
+
+                    case ConstantFunctions.PosInfinity:
+                        expr = PsExpression.make(PsLiteral(f"PS_FP{dtype.width}_INFINITY", dtype))
+
+                    case ConstantFunctions.NegInfinity:
+                        expr = PsExpression.make(PsLiteral(f"PS_FP{dtype.width}_NEG_INFINITY", dtype))
+
+                    case _:
+                        raise MaterializationError(
+                            f"Cannot materialize call to function {func}"
+                        )
+
+            if isinstance(dtype, PsIntegerType):
+                expr = self._select_integer_function(call)
+        
+        elif isinstance(call.function, PsRngEngineFunction):
+            spec = call.function.rng_spec
+            atypes = (spec.int_arg_type,) * call.function.arg_count
+
+            match spec:
+                case RngSpec.PhiloxFp32:
+                    rng_func = CFunction(
+                        "pystencils::runtime::random::philox_fp32x4", atypes, spec.dtype
+                    )
+                case RngSpec.PhiloxFp64:
+                    rng_func = CFunction(
+                        "pystencils::runtime::random::philox_fp64x2", atypes, spec.dtype
                     )
 
-                case ConstantFunctions.E:
-                    assert dtype.numpy_dtype is not None
-                    expr = PsExpression.make(
-                        PsConstant(dtype.numpy_dtype.type(np.e), dtype)
-                    )
-
-                case ConstantFunctions.PosInfinity:
-                    expr = PsExpression.make(PsLiteral(f"PS_FP{dtype.width}_INFINITY", dtype))
-
-                case ConstantFunctions.NegInfinity:
-                    expr = PsExpression.make(PsLiteral(f"PS_FP{dtype.width}_NEG_INFINITY", dtype))
-
-                case _:
-                    raise MaterializationError(
-                        f"Cannot materialize call to function {func}"
-                    )
-
-        if isinstance(dtype, PsIntegerType):
-            expr = self._select_integer_function(call)
+            expr = rng_func(*call.args)
 
         if expr is not None:
             if expr.dtype is None:
