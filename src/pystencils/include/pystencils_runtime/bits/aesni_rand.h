@@ -30,6 +30,8 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#pragma once
+
 #include <emmintrin.h> // SSE2
 #include <wmmintrin.h> // AES
 #ifdef __AVX__
@@ -803,3 +805,4 @@ QUALIFIERS void aesni_double2(uint32 ctr0, __m512i ctr1, uint32 ctr2, uint32 ctr
 }
 #endif
 
+#undef QUALIFIERS
