@@ -30,6 +30,8 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#pragma once
+
 #if !defined(__OPENCL_VERSION__) && !defined(__HIPCC_RTC__)
 #if defined(__SSE2__) || (defined(_MSC_VER) && !defined(_M_ARM64))
 #include <emmintrin.h> // SSE2
@@ -1374,3 +1376,5 @@ QUALIFIERS void philox_double2(uint32 ctr0, __m512i ctr1, uint32 ctr2, uint32 ct
 #endif
 
 } // namespace pystencils::runtime::random::detail
+
+#undef QUALIFIERS
