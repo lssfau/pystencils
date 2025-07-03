@@ -158,11 +158,11 @@ ubuntu:
     - sed -i 's/--doctest-modules //g' pytest.ini
     - env
     - pip3 list
-    - python3 -m pytest -v -n $NUM_CORES --cov-report html --cov-report xml --cov=. --junitxml=report.xml tests/test_*vec*.py tests/test_random.py tests/test_half_precision.py
+    - python3 -m pytest -v -n $NUM_CORES --reruns 2 --cov-report html --cov-report xml --cov=. --junitxml=report.xml tests/test_*vec*.py tests/test_random.py tests/test_half_precision.py
     - python3 -m coverage xml
   tags:
     - docker
-    - AVX
+    - multiarch
   artifacts:
     when: always
     paths:
@@ -180,23 +180,23 @@ arm64v8:
     QEMU_CPU: "cortex-a76"
   before_script:
     - *multiarch_before_script
-    - sed -i s/march=native/march=armv8-a/g ~/.config/pystencils/config.json
 
 ppc64le:
   extends: .multiarch_template
   image: i10git.cs.fau.de:5005/pycodegen/pycodegen/ppc64le
   before_script:
     - *multiarch_before_script
-    - sed -i s/mcpu=native/mcpu=power8/g ~/.config/pystencils/config.json
 
 arm64v9:
-  # SVE support is still unreliable in GCC 11 (incorrect code for fixed-width vectors, internal compiler errors).
+  # SVE support is still unreliable in GCC 13 (incorrect code for fixed-width vectors, internal compiler errors).
   # For half precision Clang is necessary
   extends: .multiarch_template
   image: i10git.cs.fau.de:5005/pycodegen/pycodegen/arm64
+  variables:
+    # disable pointer authentication to speed up emulation by 3x
+    QEMU_CPU: "max,pauth-impdef=on"
   before_script:
     - *multiarch_before_script
-    - sed -i s/march=native/march=armv9-a+sve2+sme/g ~/.config/pystencils/config.json
     - sed -i s/g\+\+/clang++/g ~/.config/pystencils/config.json
 
 riscv64:
