@@ -45,6 +45,7 @@ Then 'cl.exe' is used to compile.
 """
 from appdirs import user_cache_dir, user_config_dir
 from collections import OrderedDict
+from ctypes import CDLL
 import hashlib
 import importlib.util
 import json
@@ -152,9 +153,36 @@ def read_config():
             ('flags', '-Ofast -DNDEBUG -fPIC -march=native -fopenmp -std=c++11'),
             ('restrict_qualifier', '__restrict__')
         ])
-        if platform.machine().startswith('ppc64') or platform.machine() == 'arm64':
-            default_compiler_config['flags'] = default_compiler_config['flags'].replace('-march=native',
-                                                                                        '-mcpu=native')
+        if platform.machine().startswith('ppc64'):
+            # -mcpu=native is available, but only works when the compiler recognizes the exact CPU model. This fails in
+            # QEMU or when the compiler is older than the CPU, so we do our own detection here.
+            libc = CDLL('libc.so.6')
+            hwcap2 = libc.getauxval(26)  # AT_HWCAP2
+            if hwcap2 & 0x00040000:  # PPC_FEATURE2_ARCH_3_1
+                flag = '-mcpu=power10'
+            elif hwcap2 & 0x00800000:  # PPC_FEATURE2_ARCH_3_00
+                flag = '-mcpu=power9'
+            elif hwcap2 & 0x80000000:  # PPC_FEATURE2_ARCH_2_07
+                flag = '-mcpu=power8'
+            else:
+                flag = '-mcpu=native'
+            default_compiler_config['flags'] = default_compiler_config['flags'].replace('-march=native', flag)
+        elif platform.machine() == 'aarch64':
+            # -mcpu=native is available, but only works when the compiler recognizes the exact CPU model. This fails in
+            # QEMU or when the compiler is older than the CPU, so we do our own detection here.
+            flag = '-march=armv8-a+crypto'
+            if any(i.startswith('sve2') and i not in ('sve256', 'sve2048') for i in get_supported_instruction_sets()):
+                flag += '+sve2'
+            elif any(i.startswith('sve') for i in get_supported_instruction_sets()):
+                flag += '+sve'
+            if 'sme' in get_supported_instruction_sets():
+                flag += '+sme'
+            if '+sve' in flag:
+                libc = CDLL('libc.so.6')
+                hwcap2 = libc.getauxval(26)  # AT_HWCAP2
+                if hwcap2 & (1 << 2):  # HWCAP2_SVEAES
+                    flag += '+sve2-aes'
+            default_compiler_config['flags'] = default_compiler_config['flags'].replace('-march=native', flag)
     elif platform.system().lower() == 'windows':
         default_compiler_config = OrderedDict([
             ('os', 'windows'),
@@ -175,7 +203,7 @@ def read_config():
         ])
         if platform.machine() == 'arm64':
             if 'sme' in get_supported_instruction_sets():
-                flag = '-march=armv8.7-a+sme '
+                flag = '-march=armv8.7-a+sme+aes '
             else:
                 flag = ''
             default_compiler_config['flags'] = default_compiler_config['flags'].replace('-march=native ', flag)

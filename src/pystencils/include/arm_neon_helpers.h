@@ -29,9 +29,13 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#pragma once
+
 #if defined(_MSC_VER)
 #define __ARM_NEON
 #endif
+
+#include <cstddef>
 
 #ifdef __ARM_NEON
 #include <arm_neon.h>

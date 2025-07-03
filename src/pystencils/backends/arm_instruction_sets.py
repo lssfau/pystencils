@@ -140,7 +140,7 @@ def get_vector_instruction_set_arm(data_type='double', instruction_set='neon'):
         result['streamFence'] = '__dmb(15)'
 
         if instruction_set == 'sme':
-            result['function_prefix'] = '__attribute__((arm_locally_streaming))'
+            result['function_prefix'] = '__arm_locally_streaming'
         elif instruction_set not in ['sve', 'sve2', 'sme']:
             result['compile_flags'] = [f'-msve-vector-bits={bitwidth}']
     else:

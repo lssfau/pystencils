@@ -30,6 +30,8 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#pragma once
+
 #if !defined(__OPENCL_VERSION__) && !defined(__HIPCC_RTC__)
 #if defined(__SSE2__) || (defined(_MSC_VER) && !defined(_M_ARM64))
 #include <emmintrin.h> // SSE2
@@ -70,6 +72,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 #endif
 
+#if defined(__ARM_FEATURE_SME) && defined(__ARM_FEATURE_SVE)
+#define SVE_QUALIFIERS __arm_streaming_compatible
+#elif defined(__ARM_FEATURE_SME)
+#define SVE_QUALIFIERS __arm_streaming
+#else
+#define SVE_QUALIFIERS
+#endif
+
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #define QUALIFIERS static __forceinline__ __device__
 #elif defined(__OPENCL_VERSION__)
@@ -77,12 +87,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #else
 #define QUALIFIERS inline
 #include "myintrin.h"
-#endif
-
-#if defined(__ARM_FEATURE_SME)
-#define SVE_QUALIFIERS __attribute__((arm_streaming_compatible)) QUALIFIERS
-#else
-#define SVE_QUALIFIERS QUALIFIERS
 #endif
 
 #define PHILOX_W32_0   (0x9E3779B9)
@@ -753,7 +757,8 @@ QUALIFIERS void philox_double2(uint32 ctr0, int32x4_t ctr1, uint32 ctr2, uint32 
 
 
 #if defined(__ARM_FEATURE_SVE) || defined(__ARM_FEATURE_SME)
-SVE_QUALIFIERS void _philox4x32round(svuint32x4_t & ctr, svuint32x2_t & key)
+QUALIFIERS void _philox4x32round(svuint32x4_t & ctr, svuint32x2_t & key)
+SVE_QUALIFIERS
 {
     svuint32_t lo0 = svmul_u32_x(svptrue_b32(), svget4_u32(ctr, 0), svdup_u32(PHILOX_M4x32_0));
     svuint32_t hi0 = svmulh_u32_x(svptrue_b32(), svget4_u32(ctr, 0), svdup_u32(PHILOX_M4x32_0));
@@ -766,14 +771,16 @@ SVE_QUALIFIERS void _philox4x32round(svuint32x4_t & ctr, svuint32x2_t & key)
     ctr = svset4_u32(ctr, 3, lo0);
 }
 
-SVE_QUALIFIERS void _philox4x32bumpkey(svuint32x2_t & key)
+QUALIFIERS void _philox4x32bumpkey(svuint32x2_t & key)
+SVE_QUALIFIERS
 {
     key = svset2_u32(key, 0, svadd_u32_x(svptrue_b32(), svget2_u32(key, 0), svdup_u32(PHILOX_W32_0)));
     key = svset2_u32(key, 1, svadd_u32_x(svptrue_b32(), svget2_u32(key, 1), svdup_u32(PHILOX_W32_1)));
 }
 
 template<bool high>
-SVE_QUALIFIERS svfloat64_t _uniform_double_hq(svuint32_t x, svuint32_t y)
+QUALIFIERS svfloat64_t _uniform_double_hq(svuint32_t x, svuint32_t y)
+SVE_QUALIFIERS
 {
     // convert 32 to 64 bit
     if (high)
@@ -800,9 +807,10 @@ SVE_QUALIFIERS svfloat64_t _uniform_double_hq(svuint32_t x, svuint32_t y)
 }
 
 
-SVE_QUALIFIERS void philox_float4(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
-                                  uint32 key0, uint32 key1,
-                                  svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+QUALIFIERS void philox_float4(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
+                              uint32 key0, uint32 key1,
+                              svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+SVE_QUALIFIERS
 {
     svuint32x2_t key = svcreate2_u32(svdup_u32(key0), svdup_u32(key1));
     svuint32x4_t ctr = svcreate4_u32(ctr0, ctr1, ctr2, ctr3);
@@ -830,9 +838,10 @@ SVE_QUALIFIERS void philox_float4(svuint32_t ctr0, svuint32_t ctr1, svuint32_t c
 }
 
 
-SVE_QUALIFIERS void philox_double2(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
-                                   uint32 key0, uint32 key1,
-                                   svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+QUALIFIERS void philox_double2(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
+                               uint32 key0, uint32 key1,
+                               svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+SVE_QUALIFIERS
 {
     svuint32x2_t key = svcreate2_u32(svdup_u32(key0), svdup_u32(key1));
     svuint32x4_t ctr = svcreate4_u32(ctr0, ctr1, ctr2, ctr3);
@@ -853,9 +862,10 @@ SVE_QUALIFIERS void philox_double2(svuint32_t ctr0, svuint32_t ctr1, svuint32_t 
     rnd2hi = _uniform_double_hq<true>(svget4_u32(ctr, 2), svget4_u32(ctr, 3));
 }
 
-SVE_QUALIFIERS void philox_float4(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
-                                  uint32 key0, uint32 key1,
-                                  svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+QUALIFIERS void philox_float4(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                              uint32 key0, uint32 key1,
+                              svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+SVE_QUALIFIERS
 {
     svuint32_t ctr0v = svdup_u32(ctr0);
     svuint32_t ctr2v = svdup_u32(ctr2);
@@ -864,16 +874,18 @@ SVE_QUALIFIERS void philox_float4(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uin
     philox_float4(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1, rnd2, rnd3, rnd4);
 }
 
-SVE_QUALIFIERS void philox_float4(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
-                                  uint32 key0, uint32 key1,
-                                  svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+QUALIFIERS void philox_float4(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                              uint32 key0, uint32 key1,
+                              svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+SVE_QUALIFIERS
 {
     philox_float4(ctr0, svreinterpret_u32_s32(ctr1), ctr2, ctr3, key0, key1, rnd1, rnd2, rnd3, rnd4);
 }
 
-SVE_QUALIFIERS void philox_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
-                                   uint32 key0, uint32 key1,
-                                   svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+QUALIFIERS void philox_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                               uint32 key0, uint32 key1,
+                               svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+SVE_QUALIFIERS
 {
     svuint32_t ctr0v = svdup_u32(ctr0);
     svuint32_t ctr2v = svdup_u32(ctr2);
@@ -882,9 +894,10 @@ SVE_QUALIFIERS void philox_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, ui
     philox_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1lo, rnd1hi, rnd2lo, rnd2hi);
 }
 
-SVE_QUALIFIERS void philox_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
-                                   uint32 key0, uint32 key1,
-                                   svfloat64_st & rnd1, svfloat64_st & rnd2)
+QUALIFIERS void philox_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                               uint32 key0, uint32 key1,
+                               svfloat64_st & rnd1, svfloat64_st & rnd2)
+SVE_QUALIFIERS
 {
     svuint32_t ctr0v = svdup_u32(ctr0);
     svuint32_t ctr2v = svdup_u32(ctr2);
@@ -894,9 +907,10 @@ SVE_QUALIFIERS void philox_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, ui
     philox_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1, ignore, rnd2, ignore);
 }
 
-SVE_QUALIFIERS void philox_double2(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
-                                   uint32 key0, uint32 key1,
-                                   svfloat64_st & rnd1, svfloat64_st & rnd2)
+QUALIFIERS void philox_double2(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                               uint32 key0, uint32 key1,
+                               svfloat64_st & rnd1, svfloat64_st & rnd2)
+SVE_QUALIFIERS
 {
     philox_double2(ctr0, svreinterpret_u32_s32(ctr1), ctr2, ctr3, key0, key1, rnd1, rnd2);
 }
@@ -1376,3 +1390,11 @@ QUALIFIERS void philox_double2(uint32 ctr0, __m512i ctr1, uint32 ctr2, uint32 ct
 #endif
 #endif
 
+#undef QUALIFIERS
+#undef SVE_QUALIFIERS
+#undef PHILOX_W32_0
+#undef PHILOX_W32_1
+#undef PHILOX_M4x32_0
+#undef PHILOX_M4x32_1
+#undef TWOPOW53_INV_DOUBLE
+#undef TWOPOW32_INV_FLOAT

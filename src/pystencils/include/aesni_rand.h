@@ -1,6 +1,6 @@
 /*
 Copyright 2010-2011, D. E. Shaw Research. All rights reserved.
-Copyright 2019-2023, Michael Kuron.
+Copyright 2019-2025, Michael Kuron.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are
@@ -30,6 +30,19 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#pragma once
+
+#if defined(_MSC_VER) && defined(_M_ARM64)
+#define __ARM_NEON
+#endif
+
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#if defined(__ARM_FEATURE_SVE)
+#include <arm_sve.h>
+#include <arm_neon_sve_bridge.h>
+#endif
+#else
 #include <emmintrin.h> // SSE2
 #include <wmmintrin.h> // AES
 #ifdef __AVX__
@@ -38,6 +51,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <smmintrin.h>  // SSE4
 #ifdef __FMA__
 #include <immintrin.h> // FMA
+#endif
 #endif
 #endif
 #include <cstdint>
@@ -52,6 +66,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 typedef std::uint32_t uint32;
 typedef std::uint64_t uint64;
+
+#if defined(__ARM_FEATURE_SVE) && defined(__ARM_FEATURE_SVE_BITS) && __ARM_FEATURE_SVE_BITS > 0
+typedef svfloat32_t svfloat32_st __attribute__((arm_sve_vector_bits(__ARM_FEATURE_SVE_BITS)));
+typedef svfloat64_t svfloat64_st __attribute__((arm_sve_vector_bits(__ARM_FEATURE_SVE_BITS)));
+#elif defined(__ARM_FEATURE_SVE)
+typedef svfloat32_t svfloat32_st;
+typedef svfloat64_t svfloat64_st;
+#endif
 
 template <typename T, std::size_t Alignment>
 class AlignedAllocator
@@ -68,7 +90,14 @@ public:
         if (n == 0) {
             return nullptr;
         }
-        void * const p = _mm_malloc(n*sizeof(T), Alignment);
+#ifdef _WIN32
+        void * const p = _aligned_malloc(n*sizeof(T), Alignment);
+#else
+        void * p;
+        if (posix_memalign(&p, Alignment, n*sizeof(T)) != 0) {
+          p = nullptr;
+        }
+#endif
         if (p == nullptr) {
             throw std::bad_alloc();
         }
@@ -76,7 +105,11 @@ public:
     }
 
     void deallocate(T * const p, const std::size_t n) const {
-        _mm_free(p);
+#ifdef _WIN32
+        _aligned_free(p);
+#else
+        free(p);
+#endif
     }
 };
 
@@ -86,7 +119,7 @@ using AlignedMap = std::map<Key, T, std::less<Key>, AlignedAllocator<std::pair<c
 #if defined(__AES__) || defined(_MSC_VER)
 QUALIFIERS __m128i aesni_keygen_assist(__m128i temp1, __m128i temp2) {
     __m128i temp3; 
-    temp2 = _mm_shuffle_epi32(temp2 ,0xff); 
+    temp2 = _mm_shuffle_epi32(temp2, 0xff); 
     temp3 = _mm_slli_si128(temp1, 0x4);
     temp1 = _mm_xor_si128(temp1, temp3);
     temp3 = _mm_slli_si128(temp3, 0x4);
@@ -273,6 +306,19 @@ QUALIFIERS __m128d _uniform_double_hq(__m128i x, __m128i y)
     return rs;
 }
 
+QUALIFIERS void transpose128(__m128i & R0, __m128i & R1, __m128i & R2, __m128i & R3)
+{
+    __m128i T0, T1, T2, T3;
+    T0  = _mm_unpacklo_epi32(R0, R1);
+    T1  = _mm_unpacklo_epi32(R2, R3);
+    T2  = _mm_unpackhi_epi32(R0, R1);
+    T3  = _mm_unpackhi_epi32(R2, R3);
+    R0  = _mm_unpacklo_epi64(T0, T1);
+    R1  = _mm_unpackhi_epi64(T0, T1);
+    R2  = _mm_unpacklo_epi64(T2, T3);
+    R3  = _mm_unpackhi_epi64(T2, T3);
+}
+
 
 QUALIFIERS void aesni_float4(__m128i ctr0, __m128i ctr1, __m128i ctr2, __m128i ctr3,
                               uint32 key0, uint32 key1, uint32 key2, uint32 key3,
@@ -281,12 +327,12 @@ QUALIFIERS void aesni_float4(__m128i ctr0, __m128i ctr1, __m128i ctr2, __m128i c
     // pack input and call AES
     __m128i k128 = _mm_set_epi32(key3, key2, key1, key0);
     __m128i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
-    _MY_TRANSPOSE4_EPI32(ctr[0], ctr[1], ctr[2], ctr[3]);
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
     for (int i = 0; i < 4; ++i)
     {
         ctr[i] = aesni1xm128i(ctr[i], k128);
     }
-    _MY_TRANSPOSE4_EPI32(ctr[0], ctr[1], ctr[2], ctr[3]);
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
 
     // convert uint32 to float
     rnd1 = _my_cvtepu32_ps(ctr[0]);
@@ -319,12 +365,12 @@ QUALIFIERS void aesni_double2(__m128i ctr0, __m128i ctr1, __m128i ctr2, __m128i 
     // pack input and call AES
     __m128i k128 = _mm_set_epi32(key3, key2, key1, key0);
     __m128i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
-    _MY_TRANSPOSE4_EPI32(ctr[0], ctr[1], ctr[2], ctr[3]);
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
     for (int i = 0; i < 4; ++i)
     {
         ctr[i] = aesni1xm128i(ctr[i], k128);
     }
-    _MY_TRANSPOSE4_EPI32(ctr[0], ctr[1], ctr[2], ctr[3]);
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
 
     rnd1lo = _uniform_double_hq<false>(ctr[0], ctr[1]);
     rnd1hi = _uniform_double_hq<true>(ctr[0], ctr[1]);
@@ -440,6 +486,20 @@ QUALIFIERS __m256d _uniform_double_hq(__m256i x, __m256i y)
 }
 
 
+QUALIFIERS void transpose128(__m256i & R0, __m256i & R1, __m256i & R2, __m256i & R3)
+{
+    __m256i T0, T1, T2, T3;
+    T0  = _mm256_unpacklo_epi32(R0, R1);
+    T1  = _mm256_unpacklo_epi32(R2, R3);
+    T2  = _mm256_unpackhi_epi32(R0, R1);
+    T3  = _mm256_unpackhi_epi32(R2, R3);
+    R0  = _mm256_unpacklo_epi64(T0, T1);
+    R1  = _mm256_unpackhi_epi64(T0, T1);
+    R2  = _mm256_unpacklo_epi64(T2, T3);
+    R3  = _mm256_unpackhi_epi64(T2, T3);
+}
+
+
 QUALIFIERS void aesni_float4(__m256i ctr0, __m256i ctr1, __m256i ctr2, __m256i ctr3,
                               uint32 key0, uint32 key1, uint32 key2, uint32 key3,
                               __m256 & rnd1, __m256 & rnd2, __m256 & rnd3, __m256 & rnd4)
@@ -447,33 +507,12 @@ QUALIFIERS void aesni_float4(__m256i ctr0, __m256i ctr1, __m256i ctr2, __m256i c
     // pack input and call AES
     __m256i k256 = _mm256_set_epi32(key3, key2, key1, key0, key3, key2, key1, key0);
     __m256i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
-    __m128i a[4], b[4];
-    for (int i = 0; i < 4; ++i)
-    {
-        a[i] = _mm256_extractf128_si256(ctr[i], 0);
-        b[i] = _mm256_extractf128_si256(ctr[i], 1);
-    }
-    _MY_TRANSPOSE4_EPI32(a[0], a[1], a[2], a[3]);
-    _MY_TRANSPOSE4_EPI32(b[0], b[1], b[2], b[3]);
-    for (int i = 0; i < 4; ++i)
-    {
-        ctr[i] = _my256_set_m128i(b[i], a[i]);
-    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
     for (int i = 0; i < 4; ++i)
     {
         ctr[i] = aesni1xm128i(ctr[i], k256);
     }
-    for (int i = 0; i < 4; ++i)
-    {
-        a[i] = _mm256_extractf128_si256(ctr[i], 0);
-        b[i] = _mm256_extractf128_si256(ctr[i], 1);
-    }
-    _MY_TRANSPOSE4_EPI32(a[0], a[1], a[2], a[3]);
-    _MY_TRANSPOSE4_EPI32(b[0], b[1], b[2], b[3]);
-    for (int i = 0; i < 4; ++i)
-    {
-        ctr[i] = _my256_set_m128i(b[i], a[i]);
-    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
 
     // convert uint32 to float
     rnd1 = _my256_cvtepu32_ps(ctr[0]);
@@ -506,33 +545,12 @@ QUALIFIERS void aesni_double2(__m256i ctr0, __m256i ctr1, __m256i ctr2, __m256i 
     // pack input and call AES
     __m256i k256 = _mm256_set_epi32(key3, key2, key1, key0, key3, key2, key1, key0);
     __m256i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
-    __m128i a[4], b[4];
-    for (int i = 0; i < 4; ++i)
-    {
-        a[i] = _mm256_extractf128_si256(ctr[i], 0);
-        b[i] = _mm256_extractf128_si256(ctr[i], 1);
-    }
-    _MY_TRANSPOSE4_EPI32(a[0], a[1], a[2], a[3]);
-    _MY_TRANSPOSE4_EPI32(b[0], b[1], b[2], b[3]);
-    for (int i = 0; i < 4; ++i)
-    {
-        ctr[i] = _my256_set_m128i(b[i], a[i]);
-    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
     for (int i = 0; i < 4; ++i)
     {
         ctr[i] = aesni1xm128i(ctr[i], k256);
     }
-    for (int i = 0; i < 4; ++i)
-    {
-        a[i] = _mm256_extractf128_si256(ctr[i], 0);
-        b[i] = _mm256_extractf128_si256(ctr[i], 1);
-    }
-    _MY_TRANSPOSE4_EPI32(a[0], a[1], a[2], a[3]);
-    _MY_TRANSPOSE4_EPI32(b[0], b[1], b[2], b[3]);
-    for (int i = 0; i < 4; ++i)
-    {
-        ctr[i] = _my256_set_m128i(b[i], a[i]);
-    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
 
     rnd1lo = _uniform_double_hq<false>(ctr[0], ctr[1]);
     rnd1hi = _uniform_double_hq<true>(ctr[0], ctr[1]);
@@ -654,6 +672,20 @@ QUALIFIERS __m512d _uniform_double_hq(__m512i x, __m512i y)
 }
 
 
+QUALIFIERS void transpose128(__m512i & R0, __m512i & R1, __m512i & R2, __m512i & R3)
+{
+    __m512i T0, T1, T2, T3;
+    T0  = _mm512_unpacklo_epi32(R0, R1);
+    T1  = _mm512_unpacklo_epi32(R2, R3);
+    T2  = _mm512_unpackhi_epi32(R0, R1);
+    T3  = _mm512_unpackhi_epi32(R2, R3);
+    R0  = _mm512_unpacklo_epi64(T0, T1);
+    R1  = _mm512_unpackhi_epi64(T0, T1);
+    R2  = _mm512_unpacklo_epi64(T2, T3);
+    R3  = _mm512_unpackhi_epi64(T2, T3);
+}
+
+
 QUALIFIERS void aesni_float4(__m512i ctr0, __m512i ctr1, __m512i ctr2, __m512i ctr3,
                               uint32 key0, uint32 key1, uint32 key2, uint32 key3,
                               __m512 & rnd1, __m512 & rnd2, __m512 & rnd3, __m512 & rnd4)
@@ -662,41 +694,12 @@ QUALIFIERS void aesni_float4(__m512i ctr0, __m512i ctr1, __m512i ctr2, __m512i c
     __m512i k512 = _mm512_set_epi32(key3, key2, key1, key0, key3, key2, key1, key0,
                                     key3, key2, key1, key0, key3, key2, key1, key0);
     __m512i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
-    __m128i a[4], b[4], c[4], d[4];
-    for (int i = 0; i < 4; ++i)
-    {
-        a[i] = _mm512_extracti32x4_epi32(ctr[i], 0);
-        b[i] = _mm512_extracti32x4_epi32(ctr[i], 1);
-        c[i] = _mm512_extracti32x4_epi32(ctr[i], 2);
-        d[i] = _mm512_extracti32x4_epi32(ctr[i], 3);
-    }
-    _MY_TRANSPOSE4_EPI32(a[0], a[1], a[2], a[3]);
-    _MY_TRANSPOSE4_EPI32(b[0], b[1], b[2], b[3]);
-    _MY_TRANSPOSE4_EPI32(c[0], c[1], c[2], c[3]);
-    _MY_TRANSPOSE4_EPI32(d[0], d[1], d[2], d[3]);
-    for (int i = 0; i < 4; ++i)
-    {
-        ctr[i] = _my512_set_m128i(d[i], c[i], b[i], a[i]);
-    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
     for (int i = 0; i < 4; ++i)
     {
         ctr[i] = aesni1xm128i(ctr[i], k512);
     }
-    for (int i = 0; i < 4; ++i)
-    {
-        a[i] = _mm512_extracti32x4_epi32(ctr[i], 0);
-        b[i] = _mm512_extracti32x4_epi32(ctr[i], 1);
-        c[i] = _mm512_extracti32x4_epi32(ctr[i], 2);
-        d[i] = _mm512_extracti32x4_epi32(ctr[i], 3);
-    }
-    _MY_TRANSPOSE4_EPI32(a[0], a[1], a[2], a[3]);
-    _MY_TRANSPOSE4_EPI32(b[0], b[1], b[2], b[3]);
-    _MY_TRANSPOSE4_EPI32(c[0], c[1], c[2], c[3]);
-    _MY_TRANSPOSE4_EPI32(d[0], d[1], d[2], d[3]);
-    for (int i = 0; i < 4; ++i)
-    {
-        ctr[i] = _my512_set_m128i(d[i], c[i], b[i], a[i]);
-    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
 
     // convert uint32 to float
     rnd1 = _mm512_cvtepu32_ps(ctr[0]);
@@ -719,41 +722,12 @@ QUALIFIERS void aesni_double2(__m512i ctr0, __m512i ctr1, __m512i ctr2, __m512i 
     __m512i k512 = _mm512_set_epi32(key3, key2, key1, key0, key3, key2, key1, key0,
                                     key3, key2, key1, key0, key3, key2, key1, key0);
     __m512i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
-    __m128i a[4], b[4], c[4], d[4];
-    for (int i = 0; i < 4; ++i)
-    {
-        a[i] = _mm512_extracti32x4_epi32(ctr[i], 0);
-        b[i] = _mm512_extracti32x4_epi32(ctr[i], 1);
-        c[i] = _mm512_extracti32x4_epi32(ctr[i], 2);
-        d[i] = _mm512_extracti32x4_epi32(ctr[i], 3);
-    }
-    _MY_TRANSPOSE4_EPI32(a[0], a[1], a[2], a[3]);
-    _MY_TRANSPOSE4_EPI32(b[0], b[1], b[2], b[3]);
-    _MY_TRANSPOSE4_EPI32(c[0], c[1], c[2], c[3]);
-    _MY_TRANSPOSE4_EPI32(d[0], d[1], d[2], d[3]);
-    for (int i = 0; i < 4; ++i)
-    {
-        ctr[i] = _my512_set_m128i(d[i], c[i], b[i], a[i]);
-    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
     for (int i = 0; i < 4; ++i)
     {
         ctr[i] = aesni1xm128i(ctr[i], k512);
     }
-    for (int i = 0; i < 4; ++i)
-    {
-        a[i] = _mm512_extracti32x4_epi32(ctr[i], 0);
-        b[i] = _mm512_extracti32x4_epi32(ctr[i], 1);
-        c[i] = _mm512_extracti32x4_epi32(ctr[i], 2);
-        d[i] = _mm512_extracti32x4_epi32(ctr[i], 3);
-    }
-    _MY_TRANSPOSE4_EPI32(a[0], a[1], a[2], a[3]);
-    _MY_TRANSPOSE4_EPI32(b[0], b[1], b[2], b[3]);
-    _MY_TRANSPOSE4_EPI32(c[0], c[1], c[2], c[3]);
-    _MY_TRANSPOSE4_EPI32(d[0], d[1], d[2], d[3]);
-    for (int i = 0; i < 4; ++i)
-    {
-        ctr[i] = _my512_set_m128i(d[i], c[i], b[i], a[i]);
-    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
 
     rnd1lo = _uniform_double_hq<false>(ctr[0], ctr[1]);
     rnd1hi = _uniform_double_hq<true>(ctr[0], ctr[1]);
@@ -803,3 +777,466 @@ QUALIFIERS void aesni_double2(uint32 ctr0, __m512i ctr1, uint32 ctr2, uint32 ctr
 }
 #endif
 
+#if defined(__ARM_NEON)
+QUALIFIERS uint32x4_t aesni_keygen_assist(uint32x4_t temp1, uint32x4_t temp2) {
+    uint32x4_t temp3; 
+    temp2 = vdupq_laneq_u32(temp2, 3); 
+    temp3 = vextq_u32(vdupq_n_u32(0), temp1,  4 - 1);
+    temp1 = veorq_u32(temp1, temp3);
+    temp3 = vextq_u32(vdupq_n_u32(0), temp3,  4 - 1);
+    temp1 = veorq_u32(temp1, temp3);
+    temp3 = vextq_u32(vdupq_n_u32(0), temp3,  4 - 1);
+    temp1 = veorq_u32(temp1, temp3);
+    temp1 = veorq_u32(temp1, temp2); 
+    return temp1; 
+}
+
+QUALIFIERS uint32x4_t aesni_keygen_assist(uint32x4_t k, const unsigned char imm8)
+{
+    uint8x16_t a = vreinterpretq_u8_u32(k);
+    a = vaeseq_u8(a, vdupq_n_u8(0));
+    uint8x16_t dest = {
+        a[0x4], a[0x1], a[0xE], a[0xB],
+        a[0x1], a[0xE], a[0xB], a[0x4],
+        a[0xC], a[0x9], a[0x6], a[0x3],
+        a[0x9], a[0x6], a[0x3], a[0xC],
+    };
+    return vreinterpretq_u32_u8(veorq_u8(dest, vreinterpretq_u8_u32(uint32x4_t{0, imm8, 0, imm8})));
+}
+
+QUALIFIERS std::array<uint32x4_t,11> aesni_keygen(uint32x4_t k) {
+    std::array<uint32x4_t,11> rk;
+    uint32x4_t tmp;
+    
+    rk[0] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x1);
+    k = aesni_keygen_assist(k, tmp);
+    rk[1] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x2);
+    k = aesni_keygen_assist(k, tmp);
+    rk[2] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x4);
+    k = aesni_keygen_assist(k, tmp);
+    rk[3] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x8);
+    k = aesni_keygen_assist(k, tmp);
+    rk[4] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x10);
+    k = aesni_keygen_assist(k, tmp);
+    rk[5] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x20);
+    k = aesni_keygen_assist(k, tmp);
+    rk[6] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x40);
+    k = aesni_keygen_assist(k, tmp);
+    rk[7] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x80);
+    k = aesni_keygen_assist(k, tmp);
+    rk[8] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x1b);
+    k = aesni_keygen_assist(k, tmp);
+    rk[9] = k;
+    
+    tmp = aesni_keygen_assist(k, 0x36);
+    k = aesni_keygen_assist(k, tmp);
+    rk[10] = k;
+    
+    return rk;
+}
+
+QUALIFIERS const std::array<uint32x4_t,11> & aesni_roundkeys(const uint32x4_t & k128) {
+    alignas(16) std::array<uint32,4> a;
+    vst1q_u32((uint32_t*) a.data(), k128);
+    
+    static AlignedMap<std::array<uint32,4>, std::array<uint32x4_t,11>> roundkeys;
+    
+    if(roundkeys.find(a) == roundkeys.end()) {
+        auto rk = aesni_keygen(k128);
+        roundkeys[a] = rk;
+    }
+    return roundkeys[a];
+}
+
+QUALIFIERS uint32x4_t aesni1xm128i(const uint32x4_t & in, const uint32x4_t & k0) {
+    auto k = aesni_roundkeys(k0);
+    uint8x16_t x = vaesmcq_u8(vaeseq_u8(vreinterpretq_u8_u32(in), vreinterpretq_u8_u32(k[0])));
+    x = vaesmcq_u8(vaeseq_u8(x, vreinterpretq_u8_u32(k[1])));
+    x = vaesmcq_u8(vaeseq_u8(x, vreinterpretq_u8_u32(k[2])));
+    x = vaesmcq_u8(vaeseq_u8(x, vreinterpretq_u8_u32(k[3])));
+    x = vaesmcq_u8(vaeseq_u8(x, vreinterpretq_u8_u32(k[4])));
+    x = vaesmcq_u8(vaeseq_u8(x, vreinterpretq_u8_u32(k[5])));
+    x = vaesmcq_u8(vaeseq_u8(x, vreinterpretq_u8_u32(k[6])));
+    x = vaesmcq_u8(vaeseq_u8(x, vreinterpretq_u8_u32(k[7])));
+    x = vaesmcq_u8(vaeseq_u8(x, vreinterpretq_u8_u32(k[8])));
+    x = vaeseq_u8(x, vreinterpretq_u8_u32(k[9]));
+    x = veorq_u8(x, vreinterpretq_u8_u32(k[10]));
+    return vreinterpretq_u32_u8(x);
+}
+
+QUALIFIERS void aesni_float4(uint32 ctr0, uint32 ctr1, uint32 ctr2, uint32 ctr3,
+                             uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                             float & rnd1, float & rnd2, float & rnd3, float & rnd4)
+{
+    // pack input and call AES
+    uint32x4_t c128 = {ctr0, ctr1, ctr2, ctr3};
+    uint32x4_t k128 = {key0, key1, key2, key3};
+    c128 = aesni1xm128i(c128, k128);
+
+    // convert uint32 to float
+    float32x4_t rs = vcvtq_f32_u32(c128);
+    // calculate rs * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f)
+    rs = vfmaq_f32(vdupq_n_f32(TWOPOW32_INV_FLOAT/2.0), vdupq_n_f32(TWOPOW32_INV_FLOAT), rs);
+
+    // store result
+    rnd1 = vgetq_lane_f32(rs, 0);
+    rnd2 = vgetq_lane_f32(rs, 1);
+    rnd3 = vgetq_lane_f32(rs, 2);
+    rnd4 = vgetq_lane_f32(rs, 3);
+}
+
+QUALIFIERS void aesni_double2(uint32 ctr0, uint32 ctr1, uint32 ctr2, uint32 ctr3,
+                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                              double & rnd1, double & rnd2)
+{
+    // pack input and call AES
+    uint32x4_t c128 = {ctr0, ctr1, ctr2, ctr3};
+    uint32x4_t k128 = {key0, key1, key2, key3};
+    c128 = aesni1xm128i(c128, k128);
+
+    // convert 32 to 64 bit and put 0th and 2nd element into x, 1st and 3rd element into y
+    uint32x4_t x = vandq_u32(c128, uint32x4_t{0xffffffff, 0, 0xffffffff, 0});
+    uint32x4_t y = vandq_u32(c128, uint32x4_t{0, 0xffffffff, 0, 0xffffffff});
+    y = vextq_u32(y, vdupq_n_u32(0), 1);
+
+    // calculate z = x ^ y << (53 - 32))
+    uint64x2_t z = vshlq_n_u64(vreinterpretq_u64_u32(y), 53 - 32);
+    z = veorq_u64(vreinterpretq_u64_u32(x), z);
+
+    // convert uint64 to double
+    float64x2_t rs = vcvtq_f64_u64(z);
+    // calculate rs * TWOPOW53_INV_DOUBLE + (TWOPOW53_INV_DOUBLE/2.0)
+    rs = vfmaq_f64(vdupq_n_f64(TWOPOW53_INV_DOUBLE/2.0), vdupq_n_f64(TWOPOW53_INV_DOUBLE), rs);
+
+    // store result
+   rnd1 = vgetq_lane_f64(rs, 0);
+   rnd2 = vgetq_lane_f64(rs, 1);
+}
+
+template<bool high>
+QUALIFIERS float64x2_t _uniform_double_hq(uint32x4_t x, uint32x4_t y)
+{
+    // convert 32 to 64 bit
+    if (high)
+    {
+        x = vzip2q_u32(x, vdupq_n_u32(0));
+        y = vzip2q_u32(y, vdupq_n_u32(0));
+    }
+    else
+    {
+        x = vzip1q_u32(x, vdupq_n_u32(0));
+        y = vzip1q_u32(y, vdupq_n_u32(0));
+    }
+
+    // calculate z = x ^ y << (53 - 32))
+    uint64x2_t z = vshlq_n_u64(vreinterpretq_u64_u32(y), 53 - 32);
+    z = veorq_u64(vreinterpretq_u64_u32(x), z);
+
+    // convert uint64 to double
+    float64x2_t rs = vcvtq_f64_u64(z);
+    // calculate rs * TWOPOW53_INV_DOUBLE + (TWOPOW53_INV_DOUBLE/2.0)
+    rs = vfmaq_f64(vdupq_n_f64(TWOPOW53_INV_DOUBLE/2.0), vdupq_n_f64(TWOPOW53_INV_DOUBLE), rs);
+
+    return rs;
+}
+
+
+QUALIFIERS void transpose128(uint32x4_t & R0, uint32x4_t & R1, uint32x4_t & R2, uint32x4_t & R3)
+{
+    uint32x4_t T0, T1, T2, T3;
+    T0  = vreinterpretq_u32_u64(vtrn1q_u64(vreinterpretq_u64_u32(R0), vreinterpretq_u64_u32(R2)));
+    T1  = vreinterpretq_u32_u64(vtrn1q_u64(vreinterpretq_u64_u32(R1), vreinterpretq_u64_u32(R3)));
+    T2  = vreinterpretq_u32_u64(vtrn2q_u64(vreinterpretq_u64_u32(R0), vreinterpretq_u64_u32(R2)));
+    T3  = vreinterpretq_u32_u64(vtrn2q_u64(vreinterpretq_u64_u32(R1), vreinterpretq_u64_u32(R3)));
+    R0  = vtrn1q_u32(T0, T1);
+    R1  = vtrn2q_u32(T0, T1);
+    R2  = vtrn1q_u32(T2, T3);
+    R3  = vtrn2q_u32(T2, T3);
+}
+
+
+QUALIFIERS void aesni_float4(uint32x4_t ctr0, uint32x4_t ctr1, uint32x4_t ctr2, uint32x4_t ctr3,
+                             uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                             float32x4_t & rnd1, float32x4_t & rnd2, float32x4_t & rnd3, float32x4_t & rnd4)
+{
+    uint32x4_t k128 = {key0, key1, key2, key3};
+    uint32x4_t ctr[4] = {ctr0, ctr1, ctr2, ctr3};
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
+    for (int i = 0; i < 4; ++i)
+    {
+        ctr[i] = aesni1xm128i(ctr[i], k128);
+    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
+
+    // convert uint32 to float
+    rnd1 = vcvtq_f32_u32(ctr[0]);
+    rnd2 = vcvtq_f32_u32(ctr[1]);
+    rnd3 = vcvtq_f32_u32(ctr[2]);
+    rnd4 = vcvtq_f32_u32(ctr[3]);
+    // calculate rnd * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f)
+    rnd1 = vfmaq_f32(vdupq_n_f32(TWOPOW32_INV_FLOAT/2.0), vdupq_n_f32(TWOPOW32_INV_FLOAT), rnd1);
+    rnd2 = vfmaq_f32(vdupq_n_f32(TWOPOW32_INV_FLOAT/2.0), vdupq_n_f32(TWOPOW32_INV_FLOAT), rnd2);
+    rnd3 = vfmaq_f32(vdupq_n_f32(TWOPOW32_INV_FLOAT/2.0), vdupq_n_f32(TWOPOW32_INV_FLOAT), rnd3);
+    rnd4 = vfmaq_f32(vdupq_n_f32(TWOPOW32_INV_FLOAT/2.0), vdupq_n_f32(TWOPOW32_INV_FLOAT), rnd4);
+}
+
+
+QUALIFIERS void aesni_double2(uint32x4_t ctr0, uint32x4_t ctr1, uint32x4_t ctr2, uint32x4_t ctr3,
+                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                              float64x2_t & rnd1lo, float64x2_t & rnd1hi, float64x2_t & rnd2lo, float64x2_t & rnd2hi)
+{
+    uint32x4_t k128 = {key0, key1, key2, key3};
+    uint32x4_t ctr[4] = {ctr0, ctr1, ctr2, ctr3};
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
+    for (int i = 0; i < 4; ++i)
+    {
+        ctr[i] = aesni1xm128i(ctr[i], k128);
+    }
+    transpose128(ctr[0], ctr[1], ctr[2], ctr[3]);
+
+    rnd1lo = _uniform_double_hq<false>(ctr[0], ctr[1]);
+    rnd1hi = _uniform_double_hq<true>(ctr[0], ctr[1]);
+    rnd2lo = _uniform_double_hq<false>(ctr[2], ctr[3]);
+    rnd2hi = _uniform_double_hq<true>(ctr[2], ctr[3]);
+}
+
+QUALIFIERS void aesni_float4(uint32 ctr0, uint32x4_t ctr1, uint32 ctr2, uint32 ctr3,
+                             uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                             float32x4_t & rnd1, float32x4_t & rnd2, float32x4_t & rnd3, float32x4_t & rnd4)
+{
+    uint32x4_t ctr0v = vdupq_n_u32(ctr0);
+    uint32x4_t ctr2v = vdupq_n_u32(ctr2);
+    uint32x4_t ctr3v = vdupq_n_u32(ctr3);
+
+    aesni_float4(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, key2, key3, rnd1, rnd2, rnd3, rnd4);
+}
+
+#ifndef _MSC_VER
+QUALIFIERS void aesni_float4(uint32 ctr0, int32x4_t ctr1, uint32 ctr2, uint32 ctr3,
+                             uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                             float32x4_t & rnd1, float32x4_t & rnd2, float32x4_t & rnd3, float32x4_t & rnd4)
+{
+    aesni_float4(ctr0, vreinterpretq_u32_s32(ctr1), ctr2, ctr3, key0, key1, key2, key3, rnd1, rnd2, rnd3, rnd4);
+}
+#endif
+
+QUALIFIERS void aesni_double2(uint32 ctr0, uint32x4_t ctr1, uint32 ctr2, uint32 ctr3,
+                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                              float64x2_t & rnd1lo, float64x2_t & rnd1hi, float64x2_t & rnd2lo, float64x2_t & rnd2hi)
+{
+    uint32x4_t ctr0v = vdupq_n_u32(ctr0);
+    uint32x4_t ctr2v = vdupq_n_u32(ctr2);
+    uint32x4_t ctr3v = vdupq_n_u32(ctr3);
+
+    aesni_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, key2, key3, rnd1lo, rnd1hi, rnd2lo, rnd2hi);
+}
+
+QUALIFIERS void aesni_double2(uint32 ctr0, uint32x4_t ctr1, uint32 ctr2, uint32 ctr3,
+                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                              float64x2_t & rnd1, float64x2_t & rnd2)
+{
+    uint32x4_t ctr0v = vdupq_n_u32(ctr0);
+    uint32x4_t ctr2v = vdupq_n_u32(ctr2);
+    uint32x4_t ctr3v = vdupq_n_u32(ctr3);
+
+    float64x2_t ignore;
+    aesni_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, key2, key3, rnd1, ignore, rnd2, ignore);
+}
+
+#ifndef _MSC_VER
+QUALIFIERS void aesni_double2(uint32 ctr0, int32x4_t ctr1, uint32 ctr2, uint32 ctr3,
+                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                              float64x2_t & rnd1, float64x2_t & rnd2)
+{
+    aesni_double2(ctr0, vreinterpretq_u32_s32(ctr1), ctr2, ctr3, key0, key1, key2, key3, rnd1, rnd2);
+}
+#endif
+#endif
+
+#if defined(__ARM_FEATURE_SVE)
+template<bool high>
+QUALIFIERS svfloat64_t _uniform_double_hq(svuint32_t x, svuint32_t y)
+{
+    // convert 32 to 64 bit
+    if (high)
+    {
+        x = svzip2_u32(x, svdup_u32(0));
+        y = svzip2_u32(y, svdup_u32(0));
+    }
+    else
+    {
+        x = svzip1_u32(x, svdup_u32(0));
+        y = svzip1_u32(y, svdup_u32(0));
+    }
+
+    // calculate z = x ^ y << (53 - 32))
+    svuint64_t z = svlsl_n_u64_x(svptrue_b64(), svreinterpret_u64_u32(y), 53 - 32);
+    z = sveor_u64_x(svptrue_b64(), svreinterpret_u64_u32(x), z);
+
+    // convert uint64 to double
+    svfloat64_t rs = svcvt_f64_u64_x(svptrue_b64(), z);
+    // calculate rs * TWOPOW53_INV_DOUBLE + (TWOPOW53_INV_DOUBLE/2.0)
+    rs = svmad_f64_x(svptrue_b64(), rs, svdup_f64(TWOPOW53_INV_DOUBLE), svdup_f64(TWOPOW53_INV_DOUBLE/2.0));
+
+    return rs;
+}
+
+
+QUALIFIERS void transpose128(svuint32x4_t & R)
+{
+    svuint32_t T0, T1, T2, T3;
+    T0  = svreinterpret_u32_u64(svtrn1_u64(svreinterpret_u64_u32(svget4_u32(R, 0)), svreinterpret_u64_u32(svget4_u32(R, 2))));
+    T1  = svreinterpret_u32_u64(svtrn1_u64(svreinterpret_u64_u32(svget4_u32(R, 1)), svreinterpret_u64_u32(svget4_u32(R, 3))));
+    T2  = svreinterpret_u32_u64(svtrn2_u64(svreinterpret_u64_u32(svget4_u32(R, 0)), svreinterpret_u64_u32(svget4_u32(R, 2))));
+    T3  = svreinterpret_u32_u64(svtrn2_u64(svreinterpret_u64_u32(svget4_u32(R, 1)), svreinterpret_u64_u32(svget4_u32(R, 3))));
+    R = svset4_u32(R, 0, svtrn1_u32(T0, T1));
+    R = svset4_u32(R, 1, svtrn2_u32(T0, T1));
+    R = svset4_u32(R, 2, svtrn1_u32(T2, T3));
+    R = svset4_u32(R, 3, svtrn2_u32(T2, T3));
+}
+
+
+QUALIFIERS svuint32_t aesni1xm128i(const svuint32_t & in, const uint32x4_t & k0)
+{
+#ifdef __ARM_FEATURE_SVE2_AES
+  auto k = aesni_roundkeys(k0);
+  svuint8_t x = svaesmc_u8(svaese_u8(svreinterpret_u8_u32(in), svdup_neonq_u8(vreinterpretq_u8_u32(k[0]))));
+  x = svaesmc_u8(svaese_u8(x, svdup_neonq_u8(vreinterpretq_u8_u32(k[1]))));
+  x = svaesmc_u8(svaese_u8(x, svdup_neonq_u8(vreinterpretq_u8_u32(k[2]))));
+  x = svaesmc_u8(svaese_u8(x, svdup_neonq_u8(vreinterpretq_u8_u32(k[3]))));
+  x = svaesmc_u8(svaese_u8(x, svdup_neonq_u8(vreinterpretq_u8_u32(k[4]))));
+  x = svaesmc_u8(svaese_u8(x, svdup_neonq_u8(vreinterpretq_u8_u32(k[5]))));
+  x = svaesmc_u8(svaese_u8(x, svdup_neonq_u8(vreinterpretq_u8_u32(k[6]))));
+  x = svaesmc_u8(svaese_u8(x, svdup_neonq_u8(vreinterpretq_u8_u32(k[7]))));
+  x = svaesmc_u8(svaese_u8(x, svdup_neonq_u8(vreinterpretq_u8_u32(k[8]))));
+  x = svaese_u8(x, svdup_neonq_u8(vreinterpretq_u8_u32(k[9])));
+  x = sveor_u8_x(svptrue_b8(), x, svdup_neonq_u8(vreinterpretq_u8_u32(k[10])));
+  return svreinterpret_u32_u8(x);
+#else
+  svuint32_t x;
+  for (int i = 0; i < svcntw(); i += 4)
+  {
+    svbool_t pred = svbic_z(svptrue_b32(), svwhilelt_b32_u32(0, i+4), svwhilelt_b32_u32(0, i));
+    uint32x4_t a = aesni1xm128i(svget_neonq_u32(svcompact_u32(pred, in)), k0);
+    x = svsel_u32(pred, svdup_neonq_u32(a), x);
+  }
+  return x;
+#endif
+}
+
+
+QUALIFIERS void aesni_float4(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
+                             uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                             svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+{
+    uint32x4_t k128 = {key0, key1, key2, key3};
+    svuint32x4_t ctr = svcreate4_u32(ctr0, ctr1, ctr2, ctr3);
+    transpose128(ctr);
+    ctr = svset4_u32(ctr, 0, aesni1xm128i(svget4_u32(ctr, 0), k128));
+    ctr = svset4_u32(ctr, 1, aesni1xm128i(svget4_u32(ctr, 1), k128));
+    ctr = svset4_u32(ctr, 2, aesni1xm128i(svget4_u32(ctr, 2), k128));
+    ctr = svset4_u32(ctr, 3, aesni1xm128i(svget4_u32(ctr, 3), k128));
+    transpose128(ctr);
+
+    // convert uint32 to float
+    rnd1 = svcvt_f32_u32_x(svptrue_b32(), svget4_u32(ctr, 0));
+    rnd2 = svcvt_f32_u32_x(svptrue_b32(), svget4_u32(ctr, 1));
+    rnd3 = svcvt_f32_u32_x(svptrue_b32(), svget4_u32(ctr, 2));
+    rnd4 = svcvt_f32_u32_x(svptrue_b32(), svget4_u32(ctr, 3));
+    // calculate rnd * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f)
+    rnd1 = svmad_f32_x(svptrue_b32(), rnd1, svdup_f32(TWOPOW32_INV_FLOAT), svdup_f32(TWOPOW32_INV_FLOAT/2.0));
+    rnd2 = svmad_f32_x(svptrue_b32(), rnd2, svdup_f32(TWOPOW32_INV_FLOAT), svdup_f32(TWOPOW32_INV_FLOAT/2.0));
+    rnd3 = svmad_f32_x(svptrue_b32(), rnd3, svdup_f32(TWOPOW32_INV_FLOAT), svdup_f32(TWOPOW32_INV_FLOAT/2.0));
+    rnd4 = svmad_f32_x(svptrue_b32(), rnd4, svdup_f32(TWOPOW32_INV_FLOAT), svdup_f32(TWOPOW32_INV_FLOAT/2.0));
+}
+
+
+QUALIFIERS void aesni_double2(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
+                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                              svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+{
+    uint32x4_t k128 = {key0, key1, key2, key3};
+    svuint32x4_t ctr = svcreate4_u32(ctr0, ctr1, ctr2, ctr3);
+    transpose128(ctr);
+    ctr = svset4_u32(ctr, 0, aesni1xm128i(svget4_u32(ctr, 0), k128));
+    ctr = svset4_u32(ctr, 1, aesni1xm128i(svget4_u32(ctr, 1), k128));
+    ctr = svset4_u32(ctr, 2, aesni1xm128i(svget4_u32(ctr, 2), k128));
+    ctr = svset4_u32(ctr, 3, aesni1xm128i(svget4_u32(ctr, 3), k128));
+    transpose128(ctr);
+
+    rnd1lo = _uniform_double_hq<false>(svget4_u32(ctr, 0), svget4_u32(ctr, 1));
+    rnd1hi = _uniform_double_hq<true>(svget4_u32(ctr, 0), svget4_u32(ctr, 1));
+    rnd2lo = _uniform_double_hq<false>(svget4_u32(ctr, 2), svget4_u32(ctr, 3));
+    rnd2hi = _uniform_double_hq<true>(svget4_u32(ctr, 2), svget4_u32(ctr, 3));
+}
+
+QUALIFIERS void aesni_float4(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                             uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                             svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+{
+    svuint32_t ctr0v = svdup_u32(ctr0);
+    svuint32_t ctr2v = svdup_u32(ctr2);
+    svuint32_t ctr3v = svdup_u32(ctr3);
+
+    aesni_float4(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, key2, key3, rnd1, rnd2, rnd3, rnd4);
+}
+
+QUALIFIERS void aesni_float4(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                             uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                             svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+{
+    aesni_float4(ctr0, svreinterpret_u32_s32(ctr1), ctr2, ctr3, key0, key1, key2, key3, rnd1, rnd2, rnd3, rnd4);
+}
+
+QUALIFIERS void aesni_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                              svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+{
+    svuint32_t ctr0v = svdup_u32(ctr0);
+    svuint32_t ctr2v = svdup_u32(ctr2);
+    svuint32_t ctr3v = svdup_u32(ctr3);
+
+    aesni_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, key2, key3, rnd1lo, rnd1hi, rnd2lo, rnd2hi);
+}
+
+QUALIFIERS void aesni_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                              svfloat64_st & rnd1, svfloat64_st & rnd2)
+{
+    svuint32_t ctr0v = svdup_u32(ctr0);
+    svuint32_t ctr2v = svdup_u32(ctr2);
+    svuint32_t ctr3v = svdup_u32(ctr3);
+
+    svfloat64_st ignore;
+    aesni_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, key2, key3, rnd1, ignore, rnd2, ignore);
+}
+
+QUALIFIERS void aesni_double2(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
+                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
+                              svfloat64_st & rnd1, svfloat64_st & rnd2)
+{
+    aesni_double2(ctr0, svreinterpret_u32_s32(ctr1), ctr2, ctr3, key0, key1, key2, key3, rnd1, rnd2);
+}
+#endif
+
+#undef QUALIFIERS
+#undef TWOPOW53_INV_DOUBLE
+#undef TWOPOW32_INV_FLOAT
