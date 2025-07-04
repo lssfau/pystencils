@@ -49,17 +49,17 @@ def get_vector_instruction_set_riscv(data_type='double', instruction_set='rvv'):
         '&': 'mand_mm[0, 1]',
         '|': 'mor_mm[0, 1]',
 
-        'blendv': 'merge_vvm[2, 0, 1]',
+        'blendv': 'merge_vvm[0, 1, 2]',
         'any': 'cpop_m[0]',
         'all': 'cpop_m[0]',
     }
 
     result = dict()
 
-    width = f'vsetvlmax_e{bits[data_type]}m1()'
-    intwidth = 'vsetvlmax_e{bits["int"]}m1()'
-    result['bytes'] = 'vsetvlmax_e8m1()'
-    prefix = 'v'
+    prefix = '__riscv_v'
+    width = f'{prefix}setvlmax_e{bits[data_type]}m1()'
+    intwidth = f'{prefix}setvlmax_e{bits["int"]}m1()'
+    result['bytes'] = f'{prefix}setvlmax_e8m1()'
     suffix = f'_f{bits[data_type]}m1'
 
     vl = '{loop_stop} - {loop_counter}'
@@ -84,16 +84,16 @@ def get_vector_instruction_set_riscv(data_type='double', instruction_set='rvv'):
     result['width'] = CFunction(width, "int")
     result['intwidth'] = CFunction(intwidth, "int")
 
-    result['makeVecConst'] = f'vfmv_v_f_f{bits[data_type]}m1({{0}}, {vl})'
-    result['makeVecConstInt'] = f'vmv_v_x_i{bits["int"]}m1({{0}}, {int_vl})'
-    result['makeVecIndex'] = f'vmacc_vx_i{bits["int"]}m1({result["makeVecConstInt"]}, {{1}}, ' + \
-                             f'vid_v_i{bits["int"]}m1({int_vl}), {int_vl})'
+    result['makeVecConst'] = f'{prefix}fmv_v_f_f{bits[data_type]}m1({{0}}, {vl})'
+    result['makeVecConstInt'] = f'{prefix}mv_v_x_i{bits["int"]}m1({{0}}, {int_vl})'
+    result['makeVecIndex'] = f'{prefix}macc_vx_i{bits["int"]}m1({result["makeVecConstInt"]}, {{1}}, ' + \
+                             f'{prefix}id_v_i{bits["int"]}m1({int_vl}), {int_vl})'
 
     result['storeS'] = result['storeS'].replace('{2}', f'{{2}}*{bits[data_type]//8}')
     result['loadS'] = result['loadS'].replace('{1}', f'{{1}}*{bits[data_type]//8}')
     result['maskStoreS'] = result['maskStoreS'].replace('{2}', f'{{2}}*{bits[data_type]//8}')
 
-    result['+int'] = f"vadd_vv_i{bits['int']}m1({{0}}, {{1}}, {int_vl})"
+    result['+int'] = f"{prefix}add_vv_i{bits['int']}m1({{0}}, {{1}}, {int_vl})"
 
     result['float'] = f'vfloat{bits["float"]}m1_t'
     result['double'] = f'vfloat{bits["double"]}m1_t'
@@ -103,7 +103,7 @@ def get_vector_instruction_set_riscv(data_type='double', instruction_set='rvv'):
     result['headers'] = ['<riscv_vector.h>', '"riscv_v_helpers.h"']
 
     result['any'] += ' > 0x0'
-    result['all'] += f' == vsetvl_e{bits[data_type]}m1({vl})'
+    result['all'] += f' == {prefix}setvl_e{bits[data_type]}m1({vl})'
 
     result['cachelineSize'] = 'cachelineSize()'
     result['cachelineZero'] = 'cachelineZero((void*) {0})'

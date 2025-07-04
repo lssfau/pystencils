@@ -200,7 +200,7 @@ arm64v9:
     - sed -i s/g\+\+/clang++/g ~/.config/pystencils/config.json
 
 riscv64:
-  # RISC-V vector extension are currently not supported by GCC.
+  # RISC-V vector extension support is incomplete in GCC 13.
   extends: .multiarch_template
   image: i10git.cs.fau.de:5005/pycodegen/pycodegen/riscv64
   variables:
@@ -210,7 +210,7 @@ riscv64:
   before_script:
     - *multiarch_before_script
     - sed -i 's/march=native/march=rv64imfdvzicboz/g' ~/.config/pystencils/config.json
-    - sed -i s/g\+\+/clang++-15/g ~/.config/pystencils/config.json
+    - sed -i s/g\+\+/clang++/g ~/.config/pystencils/config.json
 
 minimal-conda:
   stage: pretest
