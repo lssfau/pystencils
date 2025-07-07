@@ -105,8 +105,8 @@ When ``//`` and ``%`` occur in symbolic expressions given to pystencils, they ar
 This can lead to inefficient generated code, since Pythonic integer division does not map to the corresponding C
 operators.
 To achieve C behaviour (and efficient code), you can use
-`pystencils.symb.int_div <pystencils.sympyextensions.integer_functions.int_div>` and
-`pystencils.symb.int_rem <pystencils.sympyextensions.integer_functions.int_rem>`
+`int_div <pystencils.sympyextensions.integer_functions.int_div>` and
+`int_rem <pystencils.sympyextensions.integer_functions.int_rem>`
 which translate to C ``/`` and ``%``, respectively.
 
 When expressions are translated in an integer type context, the Python ``/`` operator

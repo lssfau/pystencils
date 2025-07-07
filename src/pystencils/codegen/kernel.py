@@ -11,8 +11,6 @@ from .gpu_indexing import GpuLaunchConfiguration
 from ..backend.ast.structural import PsBlock
 from ..field import Field
 
-from .._deprecation import _deprecated
-
 if TYPE_CHECKING:
     from ..jit import JitBase
 
@@ -64,12 +62,12 @@ class Kernel:
 
     @property
     def function_name(self) -> str:  # pragma: no cover
-        _deprecated("function_name", "name")
+        _deprecated_member("function_name", "name")
         return self._name
 
     @function_name.setter
     def function_name(self, n: str):  # pragma: no cover
-        _deprecated("function_name", "name")
+        _deprecated_member("function_name", "name")
         self._name = n
 
     @property
@@ -77,7 +75,7 @@ class Kernel:
         return self._params
 
     def get_parameters(self) -> tuple[Parameter, ...]:  # pragma: no cover
-        _deprecated("Kernel.get_parameters", "Kernel.parameters")
+        _deprecated_member("get_parameters", "parameters")
         return self.parameters
 
     def get_fields(self) -> set[Field]:
@@ -132,3 +130,14 @@ class GpuKernel(Kernel):
     def get_launch_configuration(self) -> GpuLaunchConfiguration:
         """Object exposing the total size of the launch grid this kernel expects to be executed with."""
         return self._launch_config_factory()
+
+
+def _deprecated_member(name, instead):
+    from warnings import warn
+
+    warn(
+        f"Member {name} of `Kernel` is deprecated and will be removed in pystencils 2.1. "
+        f"Use {instead} instead.",
+        DeprecationWarning,
+        stacklevel=3
+    )
