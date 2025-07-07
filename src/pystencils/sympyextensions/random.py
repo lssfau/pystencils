@@ -1,6 +1,7 @@
 from __future__ import annotations
 from abc import abstractmethod, ABC
 from typing import Sequence
+from dataclasses import dataclass
 
 import sympy as sp
 
@@ -9,52 +10,24 @@ from .typed_sympy import TypedSymbol, tcast
 from ..types import UserTypeSpec, create_type, PsIeeeFloatType, PsNamedArrayType
 
 
-class RngBase(ABC):
-    """Abstract base class for counter-based random number generators.
+@dataclass(frozen=True)
+class RngState(ABC):
+    """State of an RNG object.
 
-    Args:
-        name: Name of the RNG instance
-        dtype: Data type of the generated random numbers. Must be a floating-point type.
+    Instances of `RngState` must be immutable, hashable, and comparable
+    to facilitate comparison, hashing, and pickle serialization of RNG invocation expressions.
     """
 
-    class RngFunc(sp.core.function.AppliedUndef):
-        rng: RngBase
-        """RNG instance this function belongs to"""
-
-        invocation_key: int
-        """Key identifying this invocation of the RNG"""
-
-    @classmethod
-    @abstractmethod
-    def _get_vector_type(cls, dtype: PsIeeeFloatType) -> PsNamedArrayType: ...
-
-    def __init__(
-        self,
-        name: str,
-        dtype: UserTypeSpec,
-    ):
-        dtype = create_type(dtype)
-
-        if not isinstance(dtype, PsIeeeFloatType):
-            raise ValueError("dtype must be a floating-point type")
-
-        self._name = name
-        self._dtype = dtype
-
-        self._vector_type = self._get_vector_type(self._dtype)
-
-    @property
-    def dtype(self) -> PsIeeeFloatType:
-        """Data type of the random numbers"""
-        return self._dtype
-
-    @property
-    def vector_size(self) -> int:
-        """Number of random numbers returned by a single invocation"""
-        return self._vector_type.shape[0]
+    name: str
+    dtype: PsIeeeFloatType
+    invocation_key: int
 
     @abstractmethod
-    def get_keys(self, invocation: sp.Expr) -> tuple[sp.Expr | int, ...]:
+    def next(self) -> RngState:
+        """Return the RNG state for the next invocation"""
+
+    @abstractmethod
+    def get_keys(self) -> tuple[sp.Expr | int, ...]:
         """Return the key tuple identifying the given RNG invocation's number stream.
 
         Args:
@@ -79,8 +52,54 @@ class RngBase(ABC):
             see `pystencils.backend.functions.PsRngEngineFunction`.
         """
 
+
+class RngBase(ABC):
+    """Abstract base class for counter-based random number generators."""
+
+    @classmethod
+    def is_invocation(cls, expr: sp.Expr) -> bool:
+        """Determine if the given expression is an RNG invocation"""
+        return isinstance(expr, sp.Function) and isinstance(
+            getattr(expr, "state", None), RngState
+        )
+
+    @classmethod
+    def get_invocation_state(cls, expr: sp.Expr) -> RngState | None:
+        """If ``expr`` is an RNG invocation, return its state; return `None` otherwise."""
+        if isinstance(expr, sp.Function):
+            state = getattr(expr, "state", None)
+            if isinstance(state, RngState):
+                return state
+
+        return None
+
+    @classmethod
     @abstractmethod
-    def _get_rng_func(self) -> type[RngFunc]: ...
+    def _get_vector_type(cls, dtype: PsIeeeFloatType) -> PsNamedArrayType: ...
+
+    def __init__(self, state: RngState):
+        self._state = state
+        self._vector_type = self._get_vector_type(self._state.dtype)
+
+    @property
+    def dtype(self) -> PsIeeeFloatType:
+        """Data type of the random numbers"""
+        return self._state.dtype
+
+    @property
+    def vector_size(self) -> int:
+        """Number of random numbers returned by a single invocation"""
+        return self._vector_type.shape[0]
+
+    def _get_rng_func(self) -> tuple[type[sp.Function], RngState]:
+        state = self._state
+        self._state = state.next()
+
+        return sp.Function(
+            f"{self._state.name}_{state.invocation_key}",
+            nargs=1,
+            state=state,
+        ), state  # type: ignore
 
     def get_random_vector(
         self, counter: sp.Expr | int
@@ -88,11 +107,14 @@ class RngBase(ABC):
         """Get a symbolic invocation of the RNG and a symbol representing its result.
 
         Args:
-            counter: An expression specifying the external counter part of the RNG state, optional
+            counter: An expression specifying the external counter part of the RNG state,
+                e.g. the time step counter
         """
 
-        rng_func = self._get_rng_func()
-        symb = TypedSymbol(f"{self._name}_{rng_func.invocation_key}", self._vector_type)
+        rng_func, state = self._get_rng_func()
+        symb = TypedSymbol(
+            f"{state.name}_{state.invocation_key}", self._vector_type
+        )
         asm = Assignment(symb, rng_func(counter))
         return sp.IndexedBase(symb, self._vector_type.shape), asm  # type: ignore
 
@@ -122,6 +144,38 @@ class Philox(RngBase):
             computing the random values
     """
 
+    @dataclass(frozen=True)
+    class PhiloxState(RngState):
+        seed: sp.Expr | int
+        offsets: tuple[sp.Expr | int, ...]
+
+        def next(self) -> Philox.PhiloxState:
+            return Philox.PhiloxState(
+                self.name, self.dtype, self.invocation_key + 1, self.seed, self.offsets
+            )
+
+        def get_keys(self) -> tuple[sp.Expr | int, ...]:
+            return (tcast(self.seed, "uint32"), self.invocation_key)
+
+        def get_counters(self, invocation, rank) -> tuple[sp.Expr | int, ...]:
+            if Philox.get_invocation_state(invocation) != self:
+                raise ValueError(
+                    "This RNG state does not belong to the given invocation."
+                )
+
+            counters = [tcast(invocation.args[0], "uint32")]
+
+            offsets = self.offsets + (0,) * (rank - len(self.offsets))
+
+            from ..defaults import DEFAULTS
+
+            for spatial_ctr, offset in zip(DEFAULTS.spatial_counters[:rank], offsets):
+                counters.append(tcast(spatial_ctr + offset, "uint32"))
+
+            counters += [0 for _ in range(3 - rank)]
+
+            return tuple(counters)
+
     def __init__(
         self,
         name: str,
@@ -129,46 +183,12 @@ class Philox(RngBase):
         seed: sp.Expr | int,
         offsets: Sequence[sp.Expr | int] = (),
     ):
-        super().__init__(name, dtype)
+        dtype = create_type(dtype)
+        if not isinstance(dtype, PsIeeeFloatType):
+            raise ValueError("Data type must be a floating-point type")
 
-        self._seed = seed
-        self._offsets = tuple(offsets)
-        self._next_key = 0
-
-    def get_keys(self, invocation) -> tuple[sp.Expr | int, ...]:
-        if not isinstance(invocation, RngBase.RngFunc) or invocation.rng != self:
-            raise ValueError("Given invocation does not belong to this RNG.")
-
-        return (tcast(self._seed, "uint32"), invocation.invocation_key)
-
-    def get_counters(self, invocation, rank) -> tuple[sp.Expr | int, ...]:
-        if not isinstance(invocation, RngBase.RngFunc) or invocation.rng != self:
-            raise ValueError("Given invocation does not belong to this RNG.")
-
-        counters = [tcast(invocation.args[0], "uint32")]
-
-        offsets = self._offsets + (0,) * (rank - len(self._offsets))
-
-        from ..defaults import DEFAULTS
-
-        for spatial_ctr, offset in zip(DEFAULTS.spatial_counters[:rank], offsets):
-            counters.append(tcast(spatial_ctr + offset, "uint32"))
-
-        counters += [0 for _ in range(3 - rank)]
-
-        return tuple(counters)
-
-    def _get_rng_func(self) -> type[RngBase.RngFunc]:
-        key = self._next_key
-        self._next_key += 1
-
-        return sp.Function(
-            f"{self._name}_{key}",
-            nargs=1,
-            bases=(RngBase.RngFunc,),
-            rng=self,
-            invocation_key=key,
-        )  # type: ignore
+        state = Philox.PhiloxState(name, dtype, 0, seed, tuple(offsets))
+        super().__init__(state)
 
     @classmethod
     def _get_vector_type(cls, dtype: PsIeeeFloatType):
