@@ -1,6 +1,8 @@
 import pystencils as ps
 import numpy as np
+import sympy as sp
 import pytest
+import pickle
 
 try:
     import randomgen
@@ -102,3 +104,30 @@ def test_philox(dtype, gen_config, xp, offsets, c_value):
 
     np.testing.assert_allclose(f_arr, f_reference, rtol=0, atol=eps)
     np.testing.assert_allclose(g_arr, g_reference, rtol=0, atol=eps)
+
+
+def test_compare_and_pickle():
+    rng = ps.random.Philox("phil", "float32", ps.TypedSymbol("seed", "uint32"), (13, 41, 2))
+    t = ps.TypedSymbol("t", "uint32")
+    rx, rasm = rng.get_random_vector(t)
+
+    assert isinstance(rasm.rhs, sp.Function)
+    
+    rasm_dump = pickle.dumps(rasm)
+
+    rasm_reconstructed = pickle.loads(rasm_dump)
+    assert rasm_reconstructed == rasm
+    assert isinstance(rasm_reconstructed.rhs.state, ps.random.Philox.PhiloxState)
+    assert isinstance(rasm_reconstructed.rhs, sp.Function)
+    assert rasm_reconstructed.rhs.state == rasm.rhs.state
+
+    rng2 = ps.random.Philox("phil", "float32", ps.TypedSymbol("seed", "uint32"), (13, 41, 2))
+    rx2, rasm2 = rng2.get_random_vector(t)
+    
+    assert rx2 == rx
+    assert rasm2 == rasm
+    assert rasm2 == rasm_reconstructed
+
+    rx3, rasm3 = rng2.get_random_vector(t)
+    assert rx3 != rx2
+    assert rasm3 != rasm2

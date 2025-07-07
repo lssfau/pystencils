@@ -4,7 +4,7 @@ from abc import ABC
 from enum import Enum
 
 from ..sympyextensions import ReductionOp
-from ..sympyextensions.random import RngBase, Philox
+from ..sympyextensions.random import RngState, Philox
 from ..types import PsType, PsNumericType, PsTypeError, PsIeeeFloatType, PsIntegerType, PsUnsignedIntegerType
 from .exceptions import PsInternalCompilerError
 
@@ -260,16 +260,16 @@ class PsRngEngineFunction(PsIrFunction):
     __match_args__ = ("rng_spec",)
 
     @staticmethod
-    def get_for_rng(rng: RngBase) -> PsRngEngineFunction:
+    def get_for_rng(state: RngState) -> PsRngEngineFunction:
         """Retrieve the function to be invoked for the given symbolic RNG."""
-        match rng:
-            case Philox():
-                match rng.dtype.width:
+        match state:
+            case Philox.PhiloxState():
+                match state.dtype.width:
                     case 32: spec = RngSpec.PhiloxFp32
                     case 64: spec = RngSpec.PhiloxFp64
-                    case _: raise ValueError(f"Data type {rng.dtype} not supported in Philox RNG")
+                    case _: raise ValueError(f"Data type {state.dtype} not supported in Philox RNG")
             case _:
-                raise ValueError(f"Unexpected RNG type: {type(rng)}")
+                raise ValueError(f"Unexpected RNG type: {type(state)}")
             
         return PsRngEngineFunction(spec)
 

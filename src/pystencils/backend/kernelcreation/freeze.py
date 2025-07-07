@@ -1,8 +1,10 @@
-from typing import overload, cast, Any
+from typing import overload, cast, Any, TypeAlias
 from functools import reduce
 from operator import add, mul, sub
 
 import sympy as sp
+import sympy.core
+import sympy.core.relational
 import sympy.logic.boolalg
 from sympy.codegen.ast import AssignmentBase, AugmentedAssignment
 
@@ -75,7 +77,7 @@ from ..functions import (
 from ..exceptions import FreezeError
 
 
-ExprLike = (
+ExprLike: TypeAlias = (
     sp.Expr
     | sp.Tuple
     | sympy.core.relational.Relational
@@ -108,11 +110,11 @@ class FreezeExpressions:
         pass
 
     @overload
-    def __call__(self, obj: ExprLike) -> PsExpression:
+    def __call__(self, obj: AssignmentBase) -> PsAssignment:
         pass
 
     @overload
-    def __call__(self, obj: AssignmentBase) -> PsAssignment:
+    def __call__(self, obj: ExprLike) -> PsExpression:  # type: ignore[overload-cannot-match]
         pass
 
     def __call__(self, obj: AssignmentCollection | sp.Basic) -> PsAstNode:
@@ -499,8 +501,11 @@ class FreezeExpressions:
                 return PsAddressOf(*args)
             case mem_acc():
                 return PsMemAcc(*args)
-            case RngBase.RngFunc():
-                ir_func = PsRngEngineFunction.get_for_rng(func.rng)
+            case sp.Function() if (
+                rng_state := RngBase.get_invocation_state(func)
+            ) is not None:
+                #   Random number generator invocation
+                ir_func = PsRngEngineFunction.get_for_rng(rng_state)
 
                 ispace = self._ctx.iteration_space
                 if ispace is not None:
@@ -508,8 +513,11 @@ class FreezeExpressions:
                 else:
                     rank = 0
 
-                counters = [self.visit_expr_or_builtin(c) for c in func.rng.get_counters(func, rank)]
-                keys = [self.visit_expr_or_builtin(k) for k in func.rng.get_keys(func)]
+                counters = [
+                    self.visit_expr_or_builtin(c)
+                    for c in rng_state.get_counters(func, rank)
+                ]
+                keys = [self.visit_expr_or_builtin(k) for k in rng_state.get_keys()]
 
                 return ir_func(*counters, *keys)
             case _:

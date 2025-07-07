@@ -1,4 +1,4 @@
-from typing import Any, Sequence, cast, overload
+from typing import Any, Sequence, cast, overload, TypeAlias
 
 import numpy as np
 import sympy as sp
@@ -17,7 +17,7 @@ from .typification import Typifier
 from .iteration_space import FullIterationSpace
 
 
-IndexParsable = PsExpression | PsSymbol | PsConstant | sp.Expr | int | np.integer
+IndexParsable: TypeAlias = PsExpression | PsSymbol | PsConstant | sp.Expr | int | np.integer
 _IndexParsable = (PsExpression, PsSymbol, PsConstant, sp.Expr, int, np.integer)
 
 
@@ -42,11 +42,11 @@ class AstFactory:
         pass
 
     @overload
-    def parse_sympy(self, sp_obj: ExprLike) -> PsExpression:
+    def parse_sympy(self, sp_obj: ExprLike) -> PsExpression:  # type: ignore[overload-cannot-match]
         pass
 
     @overload
-    def parse_sympy(self, sp_obj: AssignmentBase) -> PsAssignment:
+    def parse_sympy(self, sp_obj: AssignmentBase) -> PsAssignment:  # type: ignore[overload-cannot-match]
         pass
 
     def parse_sympy(self, sp_obj: ExprLike | AssignmentBase) -> PsAstNode:
