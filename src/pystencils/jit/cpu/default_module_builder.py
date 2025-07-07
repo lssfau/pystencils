@@ -174,11 +174,12 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             )
 
         def check_same_shape(self, fields: Sequence[Field]):
-            check_args = ", ".join("&" + self._array_proxy_name(f.name) for f in fields)
-            rank = fields[0].spatial_dimensions
-            self.precondition_checks.append(
-                f"checkSameShape({{ {check_args} }}, {rank});"
-            )
+            if len(fields) > 1:
+                check_args = ", ".join("&" + self._array_proxy_name(f.name) for f in fields)
+                rank = fields[0].spatial_dimensions
+                self.precondition_checks.append(
+                    f"checkSameShape({{ {check_args} }}, {rank});"
+                )
 
         def check_fixed_shape_and_strides(self, field: Field):
             proxy_name = self._array_proxy_name(field.name)
