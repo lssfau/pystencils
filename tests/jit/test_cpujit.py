@@ -4,7 +4,7 @@ import pytest
 from itertools import product
 import sympy as sp
 import numpy as np
-from pystencils import create_kernel, Assignment, fields, Field
+from pystencils import create_kernel, Assignment, fields, Field, FieldType, make_slice
 from pystencils.jit import CpuJit
 
 
@@ -169,3 +169,14 @@ def test_scalar_field(cpu_jit):
         kfunc(f=f_arr, g=g_arr)
 
         np.testing.assert_allclose(f_arr.flatten(), g_arr.flatten())
+
+
+def test_only_custom_fields(cpu_jit):
+    f = fields("f: [1D]", field_type=FieldType.CUSTOM)
+    asm = Assignment(f(), 2 * f())
+    ker = create_kernel(asm, iteration_slice=make_slice[0:12])
+    kfunc = cpu_jit.compile(ker)
+
+    f_arr = np.ones(12)
+    kfunc(f=f_arr)
+    np.testing.assert_allclose(f_arr, np.array([2.0] * 12))
