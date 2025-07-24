@@ -336,7 +336,6 @@ class SerialDataHandling(DataHandling):
                 else:
                     if functor is None:
                         from pystencils.gpu.periodicity import get_periodic_boundary_functor as functor
-                        target = Target.GPU
                     result.append(functor(filtered_stencil, self._domainSize,
                                           index_dimensions=self.fields[name].index_dimensions,
                                           index_dim_shape=values_per_cell,
@@ -344,14 +343,16 @@ class SerialDataHandling(DataHandling):
                                           ghost_layers=gls,
                                           target=target))
 
-        if target == Target.CPU:
+        if target.is_cpu():
             def result_functor():
                 for arr_name, func in zip(names, result):
                     func(self.cpu_arrays[arr_name])
-        else:
+        elif target.is_gpu():
             def result_functor():
                 for arr_name, func in zip(names, result):
                     func(self.gpu_arrays[arr_name])
+        else:
+            raise ValueError(f"Unsupported target: {target}")
 
         return result_functor
 
