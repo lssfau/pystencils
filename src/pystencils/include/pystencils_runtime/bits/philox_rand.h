@@ -124,8 +124,8 @@ QUALIFIERS uint32 mulhilo32(uint32 a, uint32 b, uint32* hip)
     return a*b;
 #else
     uint64 product = ((uint64)a) * ((uint64)b);
-    *hip = product >> 32;
-    return (uint32)product;
+    *hip = (uint32) (product >> 32);
+    return (uint32) product;
 #endif
 #else
     // device code
@@ -156,7 +156,7 @@ QUALIFIERS void _philox4x32bumpkey(uint32* key)
 QUALIFIERS double _uniform_double_hq(uint32 x, uint32 y)
 {
     uint64 z = (uint64)x ^ ((uint64)y << (53 - 32));
-    return z * TWOPOW53_INV_DOUBLE + (TWOPOW53_INV_DOUBLE/2.0);
+    return double(z) * TWOPOW53_INV_DOUBLE + (TWOPOW53_INV_DOUBLE/2.0);
 }
 
 
@@ -218,10 +218,10 @@ QUALIFIERS void philox_float4(uint32 ctr0, uint32 ctr1, uint32 ctr2, uint32 ctr3
     *rnd3 = ctr[2] * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
     *rnd4 = ctr[3] * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
 #else
-    rnd1 = ctr[0] * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
-    rnd2 = ctr[1] * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
-    rnd3 = ctr[2] * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
-    rnd4 = ctr[3] * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
+    rnd1 = float(ctr[0]) * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
+    rnd2 = float(ctr[1]) * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
+    rnd3 = float(ctr[2]) * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
+    rnd4 = float(ctr[3]) * TWOPOW32_INV_FLOAT + (TWOPOW32_INV_FLOAT/2.0f);
 #endif
 }
 

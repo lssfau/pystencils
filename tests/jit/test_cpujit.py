@@ -5,12 +5,14 @@ from itertools import product
 import sympy as sp
 import numpy as np
 from pystencils import create_kernel, Assignment, fields, Field, FieldType, make_slice
-from pystencils.jit import CpuJit
+from pystencils.jit.cpu import CpuJit, CompilerInfo
 
 
 @pytest.fixture
 def cpu_jit(tmp_path) -> CpuJit:
-    return CpuJit(objcache=tmp_path, emit_warnings=True)
+    cinfo = CompilerInfo.get_default()
+    cinfo.extra_cxxflags = ["-Wall", "-Wconversion", "-Werror"]
+    return CpuJit(compiler_info=cinfo, objcache=tmp_path, emit_warnings=True)
 
 
 def test_basic_cpu_kernel(cpu_jit):

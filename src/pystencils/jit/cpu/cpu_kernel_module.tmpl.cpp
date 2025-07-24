@@ -37,13 +37,13 @@ struct ArrayProxy {
 private:
     //  Don't forget to adapt move constructor / assignment!
     PyArrayObject * arr_ { nullptr }; // owned by this instance -> decref in destructor
-    size_t itemsize_;
+    npy_intp itemsize_;
     std::string name_;
 
-    ArrayProxy(PyArrayObject * array, size_t itemsize, const std::string& name) : arr_{array}, itemsize_{itemsize}, name_{name} {}
+    ArrayProxy(PyArrayObject * array, npy_intp itemsize, const std::string& name) : arr_{array}, itemsize_{itemsize}, name_{name} {}
 
 public:
-    static ArrayProxy fromPyObject(const std::string& name, PyObject * obj, int ndim, int typeno, size_t itemsize){
+    static ArrayProxy fromPyObject(const std::string& name, PyObject * obj, int ndim, int typeno, npy_intp itemsize){
         if(!PyArray_Check(obj)){
             throw KernelModuleError { PyExc_TypeError, "Invalid array argument" };
         }
@@ -57,7 +57,7 @@ public:
             throw KernelModuleError { PyExc_TypeError, err.str() };
         }
 
-        return std::move(proxy);
+        return proxy;
     }
 
     ArrayProxy(const ArrayProxy &) = delete;
@@ -84,17 +84,17 @@ public:
         return ptr;
     }
 
-    size_t ndim() const {
-        return static_cast< size_t >(PyArray_NDIM(arr_));
+    int ndim() const {
+        return PyArray_NDIM(arr_);
     } 
 
     template< typename index_type = ssize_t >
-    index_type shape(size_t c) const {
+    index_type shape(int c) const {
         return static_cast< index_type >(PyArray_DIM(arr_, c));
     }
 
     template< typename index_type = ssize_t >
-    index_type stride(size_t c) const {
+    index_type stride(int c) const {
         return static_cast< index_type >(PyArray_STRIDE(arr_, c) / itemsize_);
     }
 };
@@ -126,7 +126,7 @@ T scalarFromPyObject(PyObject * obj, std::string name = ""){
     return val;
 }
 
-void checkFieldShape(const std::string& expected, const ArrayProxy& arr, size_t coord, ssize_t desired) {
+void checkFieldShape(const std::string& expected, const ArrayProxy& arr, int coord, ssize_t desired) {
     if(arr.ndim() <= coord || arr.shape(coord) != desired){
         std::stringstream err;
         err << "Invalid shape of array argument '" << arr.name()
@@ -135,7 +135,7 @@ void checkFieldShape(const std::string& expected, const ArrayProxy& arr, size_t 
     }
 }
 
-void checkFieldStride(const std::string& expected, const ArrayProxy& arr, size_t coord, ssize_t desired) {
+void checkFieldStride(const std::string& expected, const ArrayProxy& arr, int coord, ssize_t desired) {
     if(arr.ndim() <= coord || arr.stride(coord) != desired){
         std::stringstream err;
         err << "Invalid stride of array argument '" << arr.name()
@@ -144,10 +144,10 @@ void checkFieldStride(const std::string& expected, const ArrayProxy& arr, size_t
     }
 }
 
-void checkTrivialIndexShape(const std::string& expected, const ArrayProxy& arr, size_t spatial_rank) {
-    const size_t ndim = arr.ndim();
+void checkTrivialIndexShape(const std::string& expected, const ArrayProxy& arr, int spatial_rank) {
+    const int ndim = arr.ndim();
     if(ndim > spatial_rank){
-        for(size_t c = spatial_rank; c < ndim; ++c){
+        for(int c = spatial_rank; c < ndim; ++c){
             if(arr.shape(c) != 1) {
                 std::stringstream err;
                 err << "Invalid shape of array argument '" << arr.name()
@@ -159,7 +159,7 @@ void checkTrivialIndexShape(const std::string& expected, const ArrayProxy& arr, 
 }
 
 
-void checkSameShape(std::initializer_list< const ArrayProxy * > arrays, size_t spatial_dims) {
+void checkSameShape(std::initializer_list< const ArrayProxy * > arrays, int spatial_dims) {
     const ArrayProxy * fst { nullptr };
     for(const auto arr : arrays) {
         if(arr->ndim() < spatial_dims) {
@@ -172,7 +172,7 @@ void checkSameShape(std::initializer_list< const ArrayProxy * > arrays, size_t s
         if(fst == nullptr) {
             fst = arr;
         } else {
-            for(size_t c = 0; c < spatial_dims; ++c){
+            for(int c = 0; c < spatial_dims; ++c){
                 if(fst->shape(c) != arr->shape(c)){
                     throw KernelModuleError{
                         PyExc_ValueError,
