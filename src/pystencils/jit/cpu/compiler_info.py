@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Sequence
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ...codegen.target import Target
@@ -27,6 +27,8 @@ class CompilerInfo(ABC):
     option (or equivalent).
     `Target.CurrentCPU` translates to ``-march=native``.
     """
+
+    extra_cxxflags: list[str] = field(default_factory=list)
 
     @abstractmethod
     def cxx(self) -> str:
@@ -92,7 +94,7 @@ class _GnuLikeCliCompiler(CompilerInfo):
             case Target.X86_AVX512_FP16:
                 flags += ["-march=x86-64-v4", "-mavx512fp16"]
 
-        return flags
+        return flags + self.extra_cxxflags
 
     def linker_flags(self) -> list[str]:
         return ["-shared"]
