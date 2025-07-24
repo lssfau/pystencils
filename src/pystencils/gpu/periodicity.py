@@ -55,7 +55,7 @@ def get_periodic_boundary_functor(
     dtype=np.float64,
     target=Target.GPU,
 ):
-    assert target in {Target.GPU}
+    assert target.is_gpu()
     src_dst_slice_tuples = get_periodic_boundary_src_dst_slices(
         stencil, ghost_layers, thickness
     )
