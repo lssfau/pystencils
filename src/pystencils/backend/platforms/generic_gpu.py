@@ -311,6 +311,7 @@ class GenericGpu(Platform):
                         | MathFunctions.Tan
                         | MathFunctions.Sinh
                         | MathFunctions.Cosh
+                        | MathFunctions.Tanh
                         | MathFunctions.ASin
                         | MathFunctions.ACos
                         | MathFunctions.ATan

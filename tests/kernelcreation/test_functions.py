@@ -34,6 +34,7 @@ def unary_function(name, xp):
         "tan": (sp.tan, xp.tan),
         "sinh": (sp.sinh, xp.sinh),
         "cosh": (sp.cosh, xp.cosh),
+        "tanh": (sp.tanh, xp.tanh),
         "asin": (sp.asin, xp.arcsin),
         "acos": (sp.acos, xp.arccos),
         "atan": (sp.atan, xp.arctan),
@@ -63,7 +64,7 @@ def function_domain(function_name, dtype):
 
     match function_name:
         case (
-            "exp" | "sin" | "cos" | "sinh" | "cosh" | "atan" | "abs" | "floor" | "ceil"
+            "exp" | "sin" | "cos" | "sinh" | "cosh" | "tanh" | "atan" | "abs" | "floor" | "ceil"
         ):
             return np.concatenate(
                 [
@@ -144,6 +145,7 @@ def function_domain(function_name, dtype):
                 "tan",
                 "sinh",
                 "cosh",
+                "tanh",
                 "asin",
                 "acos",
                 "atan",

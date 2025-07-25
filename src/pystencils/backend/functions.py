@@ -54,6 +54,7 @@ class MathFunctions(Enum):
     Tan = ("tan", 1)
     Sinh = ("sinh", 1)
     Cosh = ("cosh", 1)
+    Tanh = ("tanh", 1)
     ASin = ("asin", 1)
     ACos = ("acos", 1)
     ATan = ("atan", 1)
