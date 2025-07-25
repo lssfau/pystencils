@@ -460,6 +460,8 @@ class FreezeExpressions:
                 return PsCall(PsMathFunction(MathFunctions.Sinh), args)
             case sp.cosh():
                 return PsCall(PsMathFunction(MathFunctions.Cosh), args)
+            case sp.tanh():
+                return PsCall(PsMathFunction(MathFunctions.Tanh), args)
             case sp.asin():
                 return PsCall(PsMathFunction(MathFunctions.ASin), args)
             case sp.acos():
