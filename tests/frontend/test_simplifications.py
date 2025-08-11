@@ -149,3 +149,39 @@ def test_add_subexpressions_for_field_reads():
     assert ac3.subexpressions[0].lhs.dtype == create_type("float32")
     assert isinstance(ac3.subexpressions[0].rhs, ps.tcast)
     assert ac3.subexpressions[0].rhs.dtype == create_type("float32")
+
+
+def test_retain_assignment_types():
+    r_min = ps.TypedSymbol("r_min", "float64")
+    r_mul = ps.TypedSymbol("r_mul", "float64")
+    x, y, z, w = sp.symbols("x, y, z, w")
+
+    asms = [
+        ps.AddAugmentedAssignment(x, 2 * y),
+        ps.MinReductionAssignment(r_min, 3 * x),
+        ps.MulReductionAssignment(r_mul, 7 + y)
+    ]
+
+    ac = AssignmentCollection(asms)
+
+    acn = ac.new_with_substitutions(
+        {
+            x: 2 * w,
+            y: 3 * z
+        },
+        substitute_on_lhs=False
+    )
+
+    for asm_old, asm_new in zip(ac, acn):
+        assert type(asm_old) is type(asm_new)
+
+    acn = ac.new_with_substitutions(
+        {
+            x: w,
+            y: 3 * z
+        },
+        substitute_on_lhs=True
+    )
+
+    for asm_old, asm_new in zip(ac, acn):
+        assert type(asm_old) is type(asm_new)
