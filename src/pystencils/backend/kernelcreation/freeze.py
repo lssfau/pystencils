@@ -12,6 +12,7 @@ from ...assignment import Assignment
 from ...simp import AssignmentCollection
 from ...sympyextensions import (
     integer_functions,
+    fast_approximation,
     ConditionalFieldAccess,
 )
 from ..reduction_op_mapping import reduction_op_to_expr
@@ -73,6 +74,8 @@ from ..functions import (
     PsConstantFunction,
     ConstantFunctions,
     PsRngEngineFunction,
+    PsGpuIntrinsicFunction,
+    GpuFpIntrinsics,
 )
 from ..exceptions import FreezeError
 
@@ -499,6 +502,12 @@ class FreezeExpressions:
                 return PsIntDiv(
                     args[0] + args[1] - PsExpression.make(PsConstant(1)), args[1]
                 )
+            case fast_approximation.fast_division():
+                return PsGpuIntrinsicFunction(GpuFpIntrinsics.dividef)(*args)
+            case fast_approximation.fast_sqrt():
+                return PsGpuIntrinsicFunction(GpuFpIntrinsics.SqrtRn)(*args)
+            case fast_approximation.fast_inv_sqrt():
+                return PsGpuIntrinsicFunction(GpuFpIntrinsics.RSqrtRn)(*args)
             case AddressOf():
                 return PsAddressOf(*args)
             case mem_acc():

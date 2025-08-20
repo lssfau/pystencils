@@ -190,7 +190,7 @@ class GenericCpu(Platform):
             return expr
         else:
             raise MaterializationError(
-                f"No implementation available for function {func} on data type {dtype}"
+                f"No implementation available for function {call_func} on data type {dtype}"
             )
 
     #   Internals

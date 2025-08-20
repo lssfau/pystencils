@@ -14,6 +14,7 @@ from ...types import (
     PsBoolType,
     PsScalarType,
     PsVectorType,
+    PsIeeeFloatType,
     constify,
     deconstify,
 )
@@ -56,6 +57,7 @@ from ..functions import (
     PsConstantFunction,
     PsReductionWriteBack,
     PsRngEngineFunction,
+    PsGpuIntrinsicFunction,
 )
 from ..ast.util import determine_memory_object
 from ..exceptions import TypificationError
@@ -678,7 +680,10 @@ class Typifier:
                                 f"Unable to determine type of argument to PsReductionWriteBack: {expr}"
                             )
 
-                        if not (isinstance(ptr_expr, PsSymbolExpr) and isinstance(symbol_expr, PsSymbolExpr)):
+                        if not (
+                            isinstance(ptr_expr, PsSymbolExpr)
+                            and isinstance(symbol_expr, PsSymbolExpr)
+                        ):
                             raise TypificationError(
                                 "Arguments to PsReductionWriteBack must be instances of PsSymbolExpr."
                             )
@@ -694,6 +699,11 @@ class Typifier:
                             )
 
                         tc.infer_dtype(expr)
+
+                    case PsGpuIntrinsicFunction(_):
+                        tc.apply_dtype(PsIeeeFloatType(32), expr)
+                        for arg in expr.args:
+                            self.visit_expr(arg, tc)
 
                     case PsRngEngineFunction(rng_spec):
                         tc.apply_dtype(rng_spec.dtype, expr)

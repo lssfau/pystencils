@@ -126,19 +126,26 @@ The same protocol is used for type conversion of constants, using {any}`PsConsta
 
 ## Functions
 
-The pystencils IR models several kinds of functions:
+The pystencils IR models two primary kinds of functions: IR functions and external functions.
+
+IR functions are functions that are only serve as an intermediate representation of a function,
+and must be lowered to a concrete implementation at some point during kernel translation.
+This is typically done by the {any}`SelectFunctions` pass, in combination with the active {any}`Platform`
+class.
+
+IR function classes derive from the common base class {any}`PsIrFunction`.
+The following groups of IR functions exist:
 
  - Pure mathematical functions (such as `sqrt`, `sin`, `exp`, ...), through {any}`PsMathFunction`;
  - Special numerical constants (such as $\pi$, $e$, $\pm \infty$) as 0-ary functions through {any}`PsConstantFunction`
- - External functions with a fixed C-like signature using {any}`CFunction`.
+ - Intrinsic GPU functions (such as fast division and square roots) through {any}`PsGpuIntrinsicFunction`
+ - Random number generator invocations through {any}`PsRngEngineFunction`
 
-All of these inherit from the common base class {any}`PsFunction`.
-Functions of the former two categories are purely internal to pystencils
-and must be lowered to a platform-specific implementation at some point
-during the kernel creation process.
-The latter category, `CFunction`, represents these concrete functions.
-It is used to inject platform-specific runtime APIs, vector intrinsics, and user-defined
+External functions with a fixed C-like signature are modelled by the {any}`CFunction` class.
+They are used to inject platform-specific runtime APIs, vector intrinsics, and user-defined
 external functions into the IR.
+These are the only functions allowed to remain in a kernel by the time it is exported
+as C code.
 
 ### Side Effects
 

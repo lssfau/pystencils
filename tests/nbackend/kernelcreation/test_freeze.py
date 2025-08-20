@@ -48,7 +48,14 @@ from pystencils.backend.ast.expressions import (
     PsSymbolExpr,
 )
 from pystencils.backend.constants import PsConstant
-from pystencils.backend.functions import PsMathFunction, MathFunctions, PsConstantFunction, ConstantFunctions
+from pystencils.backend.functions import (
+    PsMathFunction,
+    MathFunctions,
+    PsConstantFunction,
+    ConstantFunctions,
+    PsGpuIntrinsicFunction,
+    GpuFpIntrinsics,
+)
 from pystencils.backend.kernelcreation import (
     KernelCreationContext,
     FreezeExpressions,
@@ -74,6 +81,11 @@ from pystencils.sympyextensions.reduction import (
     MulReductionAssignment,
     MinReductionAssignment,
     MaxReductionAssignment,
+)
+from pystencils.sympyextensions.fast_approximation import (
+    fast_division,
+    fast_sqrt,
+    fast_inv_sqrt,
 )
 from pystencils.types import PsTypeError
 
@@ -150,7 +162,7 @@ def test_freeze_constants():
     assert isinstance(expr.function, PsConstantFunction)
     assert expr.function.func == ConstantFunctions.PosInfinity
 
-    expr = freeze(- sp.oo)
+    expr = freeze(-sp.oo)
     assert isinstance(expr, PsCall)
     assert isinstance(expr.function, PsConstantFunction)
     assert expr.function.func == ConstantFunctions.NegInfinity
@@ -529,17 +541,17 @@ def test_invalid_arrays():
         _ = freeze(symb_arr)
 
 
-@pytest.mark.parametrize("reduction_assignment_rhs_type",
-                         [
-                             (AddReductionAssignment, PsAdd),
-                             (SubReductionAssignment, PsSub),
-                             (MulReductionAssignment, PsMul),
-                             (MinReductionAssignment, PsCall),
-                             (MaxReductionAssignment, PsCall),
-                         ])
-def test_reduction_assignments(
-        reduction_assignment_rhs_type
-):
+@pytest.mark.parametrize(
+    "reduction_assignment_rhs_type",
+    [
+        (AddReductionAssignment, PsAdd),
+        (SubReductionAssignment, PsSub),
+        (MulReductionAssignment, PsMul),
+        (MinReductionAssignment, PsCall),
+        (MaxReductionAssignment, PsCall),
+    ],
+)
+def test_reduction_assignments(reduction_assignment_rhs_type):
     x = fields(f"x: float64[1d]")
     w = TypedSymbol("w", "float64")
 
@@ -584,7 +596,7 @@ def test_invalid_reduction_assignments():
         ([reduction_assignment, assignment], PsTypeError),
         # 3) Duplicate ReductionAssignment
         #    May only be used once for now -> KernelConstraintsError
-        ([reduction_assignment, reduction_assignment], KernelConstraintsError)
+        ([reduction_assignment, reduction_assignment], KernelConstraintsError),
     ]
 
     for invalid_assignment, error_class in expected_errors_for_invalid_cases:
@@ -686,5 +698,34 @@ def test_freeze_bit_conditional():
                 ),
                 PsExpression.make(ctx.get_symbol("z")),
             ),
+        )
+    )
+
+
+def test_freeze_gpu_intrinsics():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x, y = sp.symbols("x, y")
+
+    expr = freeze(fast_division(x, y))
+    assert expr.structurally_equal(
+        PsGpuIntrinsicFunction(GpuFpIntrinsics.dividef)(
+            PsExpression.make(ctx.get_symbol("x")),
+            PsExpression.make(ctx.get_symbol("y")),
+        )
+    )
+
+    expr = freeze(fast_sqrt(x))
+    assert expr.structurally_equal(
+        PsGpuIntrinsicFunction(GpuFpIntrinsics.SqrtRn)(
+            PsExpression.make(ctx.get_symbol("x")),
+        )
+    )
+
+    expr = freeze(fast_inv_sqrt(x))
+    assert expr.structurally_equal(
+        PsGpuIntrinsicFunction(GpuFpIntrinsics.RSqrtRn)(
+            PsExpression.make(ctx.get_symbol("x")),
         )
     )

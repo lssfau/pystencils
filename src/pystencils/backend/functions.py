@@ -213,6 +213,55 @@ class PsConstantFunction(PsIrFunction):
         self._dtype = dtype
 
 
+class GpuFpIntrinsics(Enum):
+    """GPU floating point intrinsics."""
+
+    dividef = ("dividef", 2)
+    """Fast approximate division"""
+
+    SqrtRn = ("sqrt_rn", 1)
+    """Fast square root in round-to-nearest-even mode"""
+
+    RSqrtRn = ("rsqrt_rn", 1)
+    """Fast reciprocal square root in round-to-nearest-even mode"""
+
+    def __init__(self, func_name, num_args):
+        self.function_name = func_name
+        self.num_args = num_args
+
+    def __str__(self) -> str:
+        return f"{self.function_name}"
+    
+    def __repr__(self) -> str:
+        return f"GpuFpIntrinsics.{self.name}"
+
+
+class PsGpuIntrinsicFunction(PsIrFunction):
+    """GPU floating point intrinsics"""
+
+    __match_args__ = ("func",)
+
+    def __init__(self, intrin: GpuFpIntrinsics) -> None:
+        super().__init__(intrin.function_name, intrin.num_args)
+        self._intrin = intrin
+
+    @property
+    def func(self) -> GpuFpIntrinsics:
+        return self._intrin
+
+    def __str__(self) -> str:
+        return f"{self._intrin.function_name}"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PsGpuIntrinsicFunction):
+            return False
+
+        return self._intrin == other._intrin
+
+    def __hash__(self) -> int:
+        return hash(self._intrin)
+
+
 class RngSpec(Enum):
     """Random number generator specifications for `PsRngEngineFunction`."""
 
