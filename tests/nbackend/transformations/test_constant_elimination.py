@@ -354,12 +354,13 @@ def test_extract_constant_subexprs():
             factory.parse_sympy(Assignment(z, y - sp.Rational(12, 5))),
             factory.parse_sympy(Assignment(q, w + sp.Rational(7, 4))),
             factory.parse_sympy(Assignment(z, y - sp.Rational(12, 5) + z * sp.sin(41))),
+            factory.parse_sympy(Assignment(y, z - sp.oo + sp.sin(41))),
         ]
     )
 
     result = elim(block)
 
-    assert len(result.statements) == 9
+    assert len(result.statements) == 10
 
     c_symb = ctx.find_symbol("__c_3_0o2_0")
     assert c_symb is None
@@ -372,14 +373,16 @@ def test_extract_constant_subexprs():
     assert c_symb is not None
     assert c_symb.dtype == constify(ctx.default_dtype)
 
-    #   Make sure symbol was duplicated
+    #   Make sure symbol for constant of different type was duplicated
     c_symb = ctx.find_symbol("__c_7_0o4_0__0")
     assert c_symb is not None
     assert c_symb.dtype == constify(create_numeric_type("float32"))
 
+    #   sin(41) and negative infinity occur twice, but must only be extracted once
     c_symb = ctx.find_symbol("__c_sin_41_0_")
     assert c_symb is not None
     assert c_symb.dtype == constify(ctx.default_dtype)
+    assert not [s for s in ctx.symbols if s.name.startswith(c_symb.name) and s != c_symb]
 
 
 def test_extract_vector_constants():

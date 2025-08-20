@@ -60,6 +60,10 @@ class PsAstNode(ABC):
     def __str__(self) -> str:
         from ..emission import emit_ir
         return emit_ir(self)
+    
+    def __repr__(self) -> str:
+        children = ", ".join(repr(c) for c in self.children)
+        return f"{type(self).__name__}({children})"
 
 
 class PsLeafMixIn(ABC):

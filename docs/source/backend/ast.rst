@@ -129,5 +129,4 @@ Utility
     expressions.evaluate_expression
     dfs_preorder
     dfs_postorder
-    util.AstEqWrapper
     util.determine_memory_object
