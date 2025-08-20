@@ -1,5 +1,6 @@
-from typing import cast, Iterable, overload
+from typing import cast, overload
 from collections import defaultdict
+from itertools import chain
 
 import numpy as np
 
@@ -35,7 +36,6 @@ from ..ast.expressions import (
     PsCast,
 )
 from ..ast.vector import PsVecBroadcast
-from ..ast.util import AstEqWrapper
 from ..exceptions import PsInternalCompilerError
 
 from ..constants import PsConstant
@@ -50,18 +50,19 @@ __all__ = ["EliminateConstants"]
 class ECContext:
     def __init__(self, ctx: KernelCreationContext):
         self._ctx = ctx
-        self._extracted_constants: dict[AstEqWrapper, PsSymbol] = dict()
+
+        #   Map from subexpression symbol names to extracted constants
+        self._extracted_constants: dict[str, list[tuple[PsSymbol, PsExpression]]] = (
+            defaultdict(list)
+        )
 
         from ..emission import IRAstPrinter
 
         self._printer = IRAstPrinter(indent_width=0, annotate_constants=False)
 
     @property
-    def extractions(self) -> Iterable[tuple[PsSymbol, PsExpression]]:
-        return [
-            (symb, cast(PsExpression, w.n))
-            for (w, symb) in self._extracted_constants.items()
-        ]
+    def extractions(self) -> tuple[tuple[PsSymbol, PsExpression], ...]:
+        return tuple(chain.from_iterable(self._extracted_constants.values()))
 
     def _get_symb_name(self, expr: PsExpression):
         code = self._printer(expr)
@@ -80,15 +81,14 @@ class ECContext:
 
     def extract_expression(self, expr: PsExpression) -> PsSymbolExpr:
         dtype = expr.get_dtype()
-        expr_wrapped = AstEqWrapper(expr)
+        symb_name = self._get_symb_name(expr)
 
-        if expr_wrapped not in self._extracted_constants:
-            symb_name = self._get_symb_name(expr)
-            symb = self._ctx.get_new_symbol(symb_name, constify(dtype))
-
-            self._extracted_constants[expr_wrapped] = symb
+        for symb, extracted_expr in self._extracted_constants[symb_name]:
+            if extracted_expr.structurally_equal(expr):
+                break
         else:
-            symb = self._extracted_constants[expr_wrapped]
+            symb = self._ctx.get_new_symbol(symb_name, constify(dtype))
+            self._extracted_constants[symb_name].append((symb, expr))
 
         return PsSymbolExpr(symb)
 

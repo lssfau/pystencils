@@ -74,6 +74,12 @@ class MathFunctions(Enum):
         self.function_name = func_name
         self.num_args = num_args
 
+    def __str__(self) -> str:
+        return self.function_name
+    
+    def __repr__(self) -> str:
+        return f"MathFunctions.{self.name}"
+
 
 class PsMathFunction(PsIrFunction):
     """Homogeneously typed mathematical functions."""
@@ -90,6 +96,9 @@ class PsMathFunction(PsIrFunction):
 
     def __str__(self) -> str:
         return f"{self._func.function_name}"
+    
+    def __repr__(self) -> str:
+        return f"PsMathFunction({repr(self._func)})"
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PsMathFunction):
@@ -117,6 +126,9 @@ class PsReductionWriteBack(PsIrFunction):
 
     def __str__(self) -> str:
         return f"{super().name}"
+    
+    def __repr__(self) -> str:
+        return f"PsReductionWriteBack({repr(self._reduction_op)})"
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PsReductionWriteBack):
@@ -141,6 +153,12 @@ class ConstantFunctions(Enum):
 
     def __init__(self, func_name):
         self.function_name = func_name
+
+    def __str__(self) -> str:
+        return self.function_name
+    
+    def __repr__(self) -> str:
+        return f"ConstantFunctions.{self.name}"
 
 
 class PsConstantFunction(PsIrFunction):
@@ -187,6 +205,9 @@ class PsConstantFunction(PsIrFunction):
 
     def __str__(self) -> str:
         return f"{self._func.function_name}"
+    
+    def __repr__(self) -> str:
+        return f"PsConstantFunction({repr(self._func)})"
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PsConstantFunction):
@@ -333,6 +354,9 @@ class PsRngEngineFunction(PsIrFunction):
 
     def __str__(self) -> str:
         return f"{self._rng_spec.rng_name}"
+    
+    def __repr__(self) -> str:
+        return f"PsRngEngineFunction({repr(self._rng_spec)})"
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PsRngEngineFunction):
