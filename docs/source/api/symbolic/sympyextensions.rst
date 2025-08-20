@@ -106,6 +106,19 @@ Bit Masks and Bit-Set Conditionals
 
     bit_masks.bit_conditional
 
+GPU Intrinsics
+--------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: autosummary/sympy_class.rst
+
+    fast_approximation.fast_division
+    fast_approximation.fast_sqrt
+    fast_approximation.fast_inv_sqrt
+    
+
 Random Number Generation
 ------------------------
 

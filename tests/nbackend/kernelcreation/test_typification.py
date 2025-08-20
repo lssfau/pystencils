@@ -54,6 +54,8 @@ from pystencils.sympyextensions.integer_functions import (
     bitwise_or,
 )
 
+from pystencils.sympyextensions.fast_approximation import fast_division, fast_sqrt
+
 
 def test_typify_simple():
     ctx = KernelCreationContext()
@@ -835,3 +837,26 @@ def test_inference_fails():
 
     with pytest.raises(TypificationError):
         typify(PsCast(ctx.default_dtype, x))
+
+
+def test_typify_gpu_intrinsics():
+    ctx = KernelCreationContext(default_dtype=create_type("float32"))
+    freeze = FreezeExpressions(ctx)
+    typify = Typifier(ctx)
+
+    x, y = sp.symbols("x, y")
+
+    expr = freeze(fast_division(x, y) - fast_sqrt(y))
+    expr = typify(expr)
+
+    assert expr.get_dtype() == create_type("float32")
+
+    w = TypedSymbol("w", "float64")
+    
+    expr = freeze(fast_division(w, 31.2))
+    with pytest.raises(TypificationError):
+        typify(expr)
+
+    expr = freeze(fast_sqrt(w))
+    with pytest.raises(TypificationError):
+        typify(expr)

@@ -54,6 +54,8 @@ from ..functions import (
     ConstantFunctions,
     PsRngEngineFunction,
     RngSpec,
+    PsGpuIntrinsicFunction,
+    GpuFpIntrinsics
 )
 
 int32 = PsSignedIntegerType(width=32, const=False)
@@ -284,11 +286,12 @@ class GenericGpu(Platform):
         call_func = call.function
 
         dtype = call.get_dtype()
-        arg_types = (dtype,) * call.function.arg_count
         expr: PsExpression | None = None
 
-        if isinstance(call_func, PsMathFunction | PsConstantFunction):
+        if isinstance(call_func, PsMathFunction | PsConstantFunction | PsGpuIntrinsicFunction):
             func = call_func.func
+            arg_types = (dtype,) * call.function.arg_count
+
             if isinstance(dtype, PsIeeeFloatType):
                 match func:
                     case (
@@ -353,6 +356,11 @@ class GenericGpu(Platform):
                     case ConstantFunctions.NegInfinity:
                         expr = PsExpression.make(PsLiteral(f"PS_FP{dtype.width}_NEG_INFINITY", dtype))
 
+                    case GpuFpIntrinsics() if dtype.width == 32:
+                        name = f"__f{func.function_name}"
+                        call.function = CFunction(name, arg_types, dtype)
+                        expr = call
+
                     case _:
                         raise MaterializationError(
                             f"Cannot materialize call to function {func}"
@@ -385,7 +393,7 @@ class GenericGpu(Platform):
             return expr
 
         raise MaterializationError(
-            f"No implementation available for function {func} on data type {dtype}"
+            f"No implementation available for function {call_func} on data type {dtype}"
         )
 
     #   Internals
