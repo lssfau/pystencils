@@ -3,6 +3,7 @@ from typing import Sequence
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+import subprocess
 
 from ...codegen.target import Target
 
@@ -53,23 +54,43 @@ class CompilerInfo(ABC):
     @staticmethod
     def get_default(**kwargs) -> CompilerInfo:
         """Create a default compiler info object for the current runtime environment.
-        
+
         Args:
             kwargs: Are forwarded to the constructor of the selected `CompilerInfo` subclass.
         """
+        return CompilerInfo.get_available_compilers()[0](**kwargs)
+
+    @staticmethod
+    def get_available_compilers() -> Sequence[type[CompilerInfo]]:
+        def _test_compiler(cmd):
+            try:
+                if subprocess.run(cmd, capture_output=True).returncode == 0:
+                    return True
+            except FileNotFoundError:
+                pass
+            return False
+
         import platform
 
         sysname = platform.system()
+
+        compilers: list[type[CompilerInfo]] = []
+
         match sysname.lower():
             case "linux":
-                #   Use GCC on Linux
-                return GccInfo(**kwargs)
+                if _test_compiler(["g++", "--version"]):
+                    compilers.append(GccInfo)
+                if _test_compiler(["clang++", "--version"]):
+                    compilers.append(ClangInfo)
             case "darwin":
-                return AppleClangInfo(**kwargs)
+                if _test_compiler(["clang++", "--version"]):
+                    compilers.append(AppleClangInfo)
             case _:
                 raise RuntimeError(
                     f"Cannot determine compiler information for platform {sysname}"
                 )
+
+        return tuple(compilers)
 
 
 class _GnuLikeCliCompiler(CompilerInfo):
@@ -119,7 +140,7 @@ class ClangInfo(_GnuLikeCliCompiler):
 
     def cxx(self) -> str:
         return "clang++"
-    
+
     def cxxflags(self):
         flags = super().cxxflags()
         if self.optlevel == "fast":
@@ -142,12 +163,13 @@ class AppleClangInfo(ClangInfo):
             flags += ["-Xclang", "-fopenmp"]
 
         return flags
-    
+
     def linker_flags(self):
         ldflags = super().linker_flags()
-        
+
         #   Link against libpython
         import sysconfig
+
         libpython_file = Path(sysconfig.get_config_var("LIBRARY")).with_suffix(".dylib")
         libpython_dir = Path(sysconfig.get_config_var("LIBDIR"))
         libpython = libpython_dir / libpython_file
