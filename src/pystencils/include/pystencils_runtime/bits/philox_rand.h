@@ -229,10 +229,10 @@ QUALIFIERS void philox_float4(uint32 ctr0, uint32 ctr1, uint32 ctr2, uint32 ctr3
 #if defined(__SSE4_1__) || (defined(_MSC_VER) && !defined(_M_ARM64))
 QUALIFIERS void _philox4x32round(__m128i* ctr, __m128i* key)
 {
-    __m128i lohi0a = _mm_mul_epu32(ctr[0], _mm_set1_epi32(PHILOX_M4x32_0));
-    __m128i lohi0b = _mm_mul_epu32(_mm_srli_epi64(ctr[0], 32), _mm_set1_epi32(PHILOX_M4x32_0));
-    __m128i lohi1a = _mm_mul_epu32(ctr[2], _mm_set1_epi32(PHILOX_M4x32_1));
-    __m128i lohi1b = _mm_mul_epu32(_mm_srli_epi64(ctr[2], 32), _mm_set1_epi32(PHILOX_M4x32_1));
+    __m128i lohi0a = _mm_mul_epu32(ctr[0], _mm_set1_epi32(int(PHILOX_M4x32_0)));
+    __m128i lohi0b = _mm_mul_epu32(_mm_srli_epi64(ctr[0], 32), _mm_set1_epi32(int(PHILOX_M4x32_0)));
+    __m128i lohi1a = _mm_mul_epu32(ctr[2], _mm_set1_epi32(int(PHILOX_M4x32_1)));
+    __m128i lohi1b = _mm_mul_epu32(_mm_srli_epi64(ctr[2], 32), _mm_set1_epi32(int(PHILOX_M4x32_1)));
 
     lohi0a = _mm_shuffle_epi32(lohi0a, 0xD8);
     lohi0b = _mm_shuffle_epi32(lohi0b, 0xD8);
@@ -252,8 +252,8 @@ QUALIFIERS void _philox4x32round(__m128i* ctr, __m128i* key)
 
 QUALIFIERS void _philox4x32bumpkey(__m128i* key)
 {
-    key[0] = _mm_add_epi32(key[0], _mm_set1_epi32(PHILOX_W32_0));
-    key[1] = _mm_add_epi32(key[1], _mm_set1_epi32(PHILOX_W32_1));
+    key[0] = _mm_add_epi32(key[0], _mm_set1_epi32(int(PHILOX_W32_0)));
+    key[1] = _mm_add_epi32(key[1], _mm_set1_epi32(int(PHILOX_W32_1)));
 }
 
 template<bool high>
@@ -293,7 +293,7 @@ QUALIFIERS void philox_float4(__m128i ctr0, __m128i ctr1, __m128i ctr2, __m128i 
                               uint32 key0, uint32 key1,
                               __m128 & rnd1, __m128 & rnd2, __m128 & rnd3, __m128 & rnd4)
 {
-    __m128i key[2] = {_mm_set1_epi32(key0), _mm_set1_epi32(key1)};
+    __m128i key[2] = {_mm_set1_epi32(int(key0)), _mm_set1_epi32(int(key1))};
     __m128i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
     _philox4x32round(ctr, key);                           // 1
     _philox4x32bumpkey(key); _philox4x32round(ctr, key);  // 2
@@ -334,7 +334,7 @@ QUALIFIERS void philox_double2(__m128i ctr0, __m128i ctr1, __m128i ctr2, __m128i
                                uint32 key0, uint32 key1,
                                __m128d & rnd1lo, __m128d & rnd1hi, __m128d & rnd2lo, __m128d & rnd2hi)
 {
-    __m128i key[2] = {_mm_set1_epi32(key0), _mm_set1_epi32(key1)};
+    __m128i key[2] = {_mm_set1_epi32(int(key0)), _mm_set1_epi32(int(key1))};
     __m128i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
     _philox4x32round(ctr, key);                           // 1
     _philox4x32bumpkey(key); _philox4x32round(ctr, key);  // 2
@@ -357,9 +357,9 @@ QUALIFIERS void philox_float4(uint32 ctr0, __m128i ctr1, uint32 ctr2, uint32 ctr
                               uint32 key0, uint32 key1,
                               __m128 & rnd1, __m128 & rnd2, __m128 & rnd3, __m128 & rnd4)
 {
-    __m128i ctr0v = _mm_set1_epi32(ctr0);
-    __m128i ctr2v = _mm_set1_epi32(ctr2);
-    __m128i ctr3v = _mm_set1_epi32(ctr3);
+    __m128i ctr0v = _mm_set1_epi32(int(ctr0));
+    __m128i ctr2v = _mm_set1_epi32(int(ctr2));
+    __m128i ctr3v = _mm_set1_epi32(int(ctr3));
 
     philox_float4(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1, rnd2, rnd3, rnd4);
 }
@@ -368,9 +368,9 @@ QUALIFIERS void philox_double2(uint32 ctr0, __m128i ctr1, uint32 ctr2, uint32 ct
                                uint32 key0, uint32 key1,
                                __m128d & rnd1lo, __m128d & rnd1hi, __m128d & rnd2lo, __m128d & rnd2hi)
 {
-    __m128i ctr0v = _mm_set1_epi32(ctr0);
-    __m128i ctr2v = _mm_set1_epi32(ctr2);
-    __m128i ctr3v = _mm_set1_epi32(ctr3);
+    __m128i ctr0v = _mm_set1_epi32(int(ctr0));
+    __m128i ctr2v = _mm_set1_epi32(int(ctr2));
+    __m128i ctr3v = _mm_set1_epi32(int(ctr3));
 
     philox_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1lo, rnd1hi, rnd2lo, rnd2hi);
 }
@@ -379,9 +379,9 @@ QUALIFIERS void philox_double2(uint32 ctr0, __m128i ctr1, uint32 ctr2, uint32 ct
                                uint32 key0, uint32 key1,
                                __m128d & rnd1, __m128d & rnd2)
 {
-    __m128i ctr0v = _mm_set1_epi32(ctr0);
-    __m128i ctr2v = _mm_set1_epi32(ctr2);
-    __m128i ctr3v = _mm_set1_epi32(ctr3);
+    __m128i ctr0v = _mm_set1_epi32(int(ctr0));
+    __m128i ctr2v = _mm_set1_epi32(int(ctr2));
+    __m128i ctr3v = _mm_set1_epi32(int(ctr3));
 
     __m128d ignore;
     philox_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1, ignore, rnd2, ignore);
@@ -1055,10 +1055,10 @@ QUALIFIERS void philox_double2(uint32 ctr0, vint32m1_t ctr1, uint32 ctr2, uint32
 #ifdef __AVX2__
 QUALIFIERS void _philox4x32round(__m256i* ctr, __m256i* key)
 {
-    __m256i lohi0a = _mm256_mul_epu32(ctr[0], _mm256_set1_epi32(PHILOX_M4x32_0));
-    __m256i lohi0b = _mm256_mul_epu32(_mm256_srli_epi64(ctr[0], 32), _mm256_set1_epi32(PHILOX_M4x32_0));
-    __m256i lohi1a = _mm256_mul_epu32(ctr[2], _mm256_set1_epi32(PHILOX_M4x32_1));
-    __m256i lohi1b = _mm256_mul_epu32(_mm256_srli_epi64(ctr[2], 32), _mm256_set1_epi32(PHILOX_M4x32_1));
+    __m256i lohi0a = _mm256_mul_epu32(ctr[0], _mm256_set1_epi32(int(PHILOX_M4x32_0)));
+    __m256i lohi0b = _mm256_mul_epu32(_mm256_srli_epi64(ctr[0], 32), _mm256_set1_epi32(int(PHILOX_M4x32_0)));
+    __m256i lohi1a = _mm256_mul_epu32(ctr[2], _mm256_set1_epi32(int(PHILOX_M4x32_1)));
+    __m256i lohi1b = _mm256_mul_epu32(_mm256_srli_epi64(ctr[2], 32), _mm256_set1_epi32(int(PHILOX_M4x32_1)));
 
     lohi0a = _mm256_shuffle_epi32(lohi0a, 0xD8);
     lohi0b = _mm256_shuffle_epi32(lohi0b, 0xD8);
@@ -1078,8 +1078,8 @@ QUALIFIERS void _philox4x32round(__m256i* ctr, __m256i* key)
 
 QUALIFIERS void _philox4x32bumpkey(__m256i* key)
 {
-    key[0] = _mm256_add_epi32(key[0], _mm256_set1_epi32(PHILOX_W32_0));
-    key[1] = _mm256_add_epi32(key[1], _mm256_set1_epi32(PHILOX_W32_1));
+    key[0] = _mm256_add_epi32(key[0], _mm256_set1_epi32(int(PHILOX_W32_0)));
+    key[1] = _mm256_add_epi32(key[1], _mm256_set1_epi32(int(PHILOX_W32_1)));
 }
 
 template<bool high>
@@ -1119,7 +1119,7 @@ QUALIFIERS void philox_float4(__m256i ctr0, __m256i ctr1, __m256i ctr2, __m256i 
                               uint32 key0, uint32 key1,
                               __m256 & rnd1, __m256 & rnd2, __m256 & rnd3, __m256 & rnd4)
 {
-    __m256i key[2] = {_mm256_set1_epi32(key0), _mm256_set1_epi32(key1)};
+    __m256i key[2] = {_mm256_set1_epi32(int(key0)), _mm256_set1_epi32(int(key1))};
     __m256i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
     _philox4x32round(ctr, key);                           // 1
     _philox4x32bumpkey(key); _philox4x32round(ctr, key);  // 2
@@ -1160,7 +1160,7 @@ QUALIFIERS void philox_double2(__m256i ctr0, __m256i ctr1, __m256i ctr2, __m256i
                                uint32 key0, uint32 key1,
                                __m256d & rnd1lo, __m256d & rnd1hi, __m256d & rnd2lo, __m256d & rnd2hi)
 {
-    __m256i key[2] = {_mm256_set1_epi32(key0), _mm256_set1_epi32(key1)};
+    __m256i key[2] = {_mm256_set1_epi32(int(key0)), _mm256_set1_epi32(int(key1))};
     __m256i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
     _philox4x32round(ctr, key);                           // 1
     _philox4x32bumpkey(key); _philox4x32round(ctr, key);  // 2
@@ -1183,9 +1183,9 @@ QUALIFIERS void philox_float4(uint32 ctr0, __m256i ctr1, uint32 ctr2, uint32 ctr
                               uint32 key0, uint32 key1,
                               __m256 & rnd1, __m256 & rnd2, __m256 & rnd3, __m256 & rnd4)
 {
-    __m256i ctr0v = _mm256_set1_epi32(ctr0);
-    __m256i ctr2v = _mm256_set1_epi32(ctr2);
-    __m256i ctr3v = _mm256_set1_epi32(ctr3);
+    __m256i ctr0v = _mm256_set1_epi32(int(ctr0));
+    __m256i ctr2v = _mm256_set1_epi32(int(ctr2));
+    __m256i ctr3v = _mm256_set1_epi32(int(ctr3));
 
     philox_float4(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1, rnd2, rnd3, rnd4);
 }
@@ -1194,9 +1194,9 @@ QUALIFIERS void philox_double2(uint32 ctr0, __m256i ctr1, uint32 ctr2, uint32 ct
                                uint32 key0, uint32 key1,
                                __m256d & rnd1lo, __m256d & rnd1hi, __m256d & rnd2lo, __m256d & rnd2hi)
 {
-    __m256i ctr0v = _mm256_set1_epi32(ctr0);
-    __m256i ctr2v = _mm256_set1_epi32(ctr2);
-    __m256i ctr3v = _mm256_set1_epi32(ctr3);
+    __m256i ctr0v = _mm256_set1_epi32(int(ctr0));
+    __m256i ctr2v = _mm256_set1_epi32(int(ctr2));
+    __m256i ctr3v = _mm256_set1_epi32(int(ctr3));
 
     philox_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1lo, rnd1hi, rnd2lo, rnd2hi);
 }
@@ -1206,9 +1206,9 @@ QUALIFIERS void philox_double2(uint32 ctr0, __m256i ctr1, uint32 ctr2, uint32 ct
                                __m256d & rnd1, __m256d & rnd2)
 {
 #if 0
-    __m256i ctr0v = _mm256_set1_epi32(ctr0);
-    __m256i ctr2v = _mm256_set1_epi32(ctr2);
-    __m256i ctr3v = _mm256_set1_epi32(ctr3);
+    __m256i ctr0v = _mm256_set1_epi32(int(ctr0));
+    __m256i ctr2v = _mm256_set1_epi32(int(ctr2));
+    __m256i ctr3v = _mm256_set1_epi32(int(ctr3));
 
     __m256d ignore;
     philox_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1, ignore, rnd2, ignore);
@@ -1224,10 +1224,10 @@ QUALIFIERS void philox_double2(uint32 ctr0, __m256i ctr1, uint32 ctr2, uint32 ct
 #if defined(__AVX512F__) || defined(__AVX10_512BIT__)
 QUALIFIERS void _philox4x32round(__m512i* ctr, __m512i* key)
 {
-    __m512i lohi0a = _mm512_mul_epu32(ctr[0], _mm512_set1_epi32(PHILOX_M4x32_0));
-    __m512i lohi0b = _mm512_mul_epu32(_mm512_srli_epi64(ctr[0], 32), _mm512_set1_epi32(PHILOX_M4x32_0));
-    __m512i lohi1a = _mm512_mul_epu32(ctr[2], _mm512_set1_epi32(PHILOX_M4x32_1));
-    __m512i lohi1b = _mm512_mul_epu32(_mm512_srli_epi64(ctr[2], 32), _mm512_set1_epi32(PHILOX_M4x32_1));
+    __m512i lohi0a = _mm512_mul_epu32(ctr[0], _mm512_set1_epi32(int(PHILOX_M4x32_0)));
+    __m512i lohi0b = _mm512_mul_epu32(_mm512_srli_epi64(ctr[0], 32), _mm512_set1_epi32(int(PHILOX_M4x32_0)));
+    __m512i lohi1a = _mm512_mul_epu32(ctr[2], _mm512_set1_epi32(int(PHILOX_M4x32_1)));
+    __m512i lohi1b = _mm512_mul_epu32(_mm512_srli_epi64(ctr[2], 32), _mm512_set1_epi32(int(PHILOX_M4x32_1)));
 
     lohi0a = _mm512_shuffle_epi32(lohi0a, _MM_PERM_DBCA);
     lohi0b = _mm512_shuffle_epi32(lohi0b, _MM_PERM_DBCA);
@@ -1247,8 +1247,8 @@ QUALIFIERS void _philox4x32round(__m512i* ctr, __m512i* key)
 
 QUALIFIERS void _philox4x32bumpkey(__m512i* key)
 {
-    key[0] = _mm512_add_epi32(key[0], _mm512_set1_epi32(PHILOX_W32_0));
-    key[1] = _mm512_add_epi32(key[1], _mm512_set1_epi32(PHILOX_W32_1));
+    key[0] = _mm512_add_epi32(key[0], _mm512_set1_epi32(int(PHILOX_W32_0)));
+    key[1] = _mm512_add_epi32(key[1], _mm512_set1_epi32(int(PHILOX_W32_1)));
 }
 
 template<bool high>
@@ -1283,7 +1283,7 @@ QUALIFIERS void philox_float4(__m512i ctr0, __m512i ctr1, __m512i ctr2, __m512i 
                               uint32 key0, uint32 key1,
                               __m512 & rnd1, __m512 & rnd2, __m512 & rnd3, __m512 & rnd4)
 {
-    __m512i key[2] = {_mm512_set1_epi32(key0), _mm512_set1_epi32(key1)};
+    __m512i key[2] = {_mm512_set1_epi32(int(key0)), _mm512_set1_epi32(int(key1))};
     __m512i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
     _philox4x32round(ctr, key);                           // 1
     _philox4x32bumpkey(key); _philox4x32round(ctr, key);  // 2
@@ -1313,7 +1313,7 @@ QUALIFIERS void philox_double2(__m512i ctr0, __m512i ctr1, __m512i ctr2, __m512i
                                uint32 key0, uint32 key1,
                                __m512d & rnd1lo, __m512d & rnd1hi, __m512d & rnd2lo, __m512d & rnd2hi)
 {
-    __m512i key[2] = {_mm512_set1_epi32(key0), _mm512_set1_epi32(key1)};
+    __m512i key[2] = {_mm512_set1_epi32(int(key0)), _mm512_set1_epi32(int(key1))};
     __m512i ctr[4] = {ctr0, ctr1, ctr2, ctr3};
     _philox4x32round(ctr, key);                           // 1
     _philox4x32bumpkey(key); _philox4x32round(ctr, key);  // 2
@@ -1336,9 +1336,9 @@ QUALIFIERS void philox_float4(uint32 ctr0, __m512i ctr1, uint32 ctr2, uint32 ctr
                               uint32 key0, uint32 key1,
                               __m512 & rnd1, __m512 & rnd2, __m512 & rnd3, __m512 & rnd4)
 {
-    __m512i ctr0v = _mm512_set1_epi32(ctr0);
-    __m512i ctr2v = _mm512_set1_epi32(ctr2);
-    __m512i ctr3v = _mm512_set1_epi32(ctr3);
+    __m512i ctr0v = _mm512_set1_epi32(int(ctr0));
+    __m512i ctr2v = _mm512_set1_epi32(int(ctr2));
+    __m512i ctr3v = _mm512_set1_epi32(int(ctr3));
 
     philox_float4(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1, rnd2, rnd3, rnd4);
 }
@@ -1347,9 +1347,9 @@ QUALIFIERS void philox_double2(uint32 ctr0, __m512i ctr1, uint32 ctr2, uint32 ct
                                uint32 key0, uint32 key1,
                                __m512d & rnd1lo, __m512d & rnd1hi, __m512d & rnd2lo, __m512d & rnd2hi)
 {
-    __m512i ctr0v = _mm512_set1_epi32(ctr0);
-    __m512i ctr2v = _mm512_set1_epi32(ctr2);
-    __m512i ctr3v = _mm512_set1_epi32(ctr3);
+    __m512i ctr0v = _mm512_set1_epi32(int(ctr0));
+    __m512i ctr2v = _mm512_set1_epi32(int(ctr2));
+    __m512i ctr3v = _mm512_set1_epi32(int(ctr3));
 
     philox_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1lo, rnd1hi, rnd2lo, rnd2hi);
 }
@@ -1359,9 +1359,9 @@ QUALIFIERS void philox_double2(uint32 ctr0, __m512i ctr1, uint32 ctr2, uint32 ct
                                __m512d & rnd1, __m512d & rnd2)
 {
 #if 0
-    __m512i ctr0v = _mm512_set1_epi32(ctr0);
-    __m512i ctr2v = _mm512_set1_epi32(ctr2);
-    __m512i ctr3v = _mm512_set1_epi32(ctr3);
+    __m512i ctr0v = _mm512_set1_epi32(int(ctr0));
+    __m512i ctr2v = _mm512_set1_epi32(int(ctr2));
+    __m512i ctr3v = _mm512_set1_epi32(int(ctr3));
 
     __m512d ignore;
     philox_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1, ignore, rnd2, ignore);

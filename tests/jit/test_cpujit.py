@@ -4,13 +4,40 @@ import pytest
 from itertools import product
 import sympy as sp
 import numpy as np
-from pystencils import create_kernel, Assignment, fields, Field, FieldType, make_slice
+
+from pystencils import (
+    create_kernel,
+    Assignment,
+    fields,
+    Field,
+    FieldType,
+    make_slice,
+    Target,
+)
 from pystencils.jit.cpu import CpuJit, CompilerInfo
 
 
+JIT_TEST_TARGETS = [Target.GenericCPU]
+
+#   Enable the best available vector architecture
+#   to catch compiler warnings in vector intrinsics code
+if Target.available_vector_cpu_targets():
+    JIT_TEST_TARGETS.append(Target.available_vector_cpu_targets()[-1])
+
+
+@pytest.fixture(params=JIT_TEST_TARGETS)
+def target(request) -> Target:
+    return request.param
+
+
+@pytest.fixture(params=CompilerInfo.get_available_compilers())
+def compiler_info(request) -> type[CompilerInfo]:
+    return request.param
+
+
 @pytest.fixture
-def cpu_jit(tmp_path) -> CpuJit:
-    cinfo = CompilerInfo.get_default()
+def cpu_jit(tmp_path, compiler_info, target) -> CpuJit:
+    cinfo = compiler_info(target=target)
     cinfo.extra_cxxflags = ["-Wall", "-Wconversion", "-Werror"]
     return CpuJit(compiler_info=cinfo, objcache=tmp_path, emit_warnings=True)
 
@@ -21,7 +48,7 @@ def test_basic_cpu_kernel(cpu_jit):
     ker = create_kernel(asm)
     kfunc = cpu_jit.compile(ker)
 
-    rng = np.random.default_rng(0x5eed)
+    rng = np.random.default_rng(0x5EED)
     f_arr = rng.random(size=(34, 26), dtype="float64")
     g_arr = np.zeros_like(f_arr)
 
@@ -111,7 +138,7 @@ def test_shape_check(cpu_jit):
 def test_fixed_shape(cpu_jit):
     a = np.zeros((12, 23), dtype="float64")
     b = np.zeros((13, 21), dtype="float64")
-    
+
     f = Field.create_from_numpy_array("f", a)
     g = Field.create_from_numpy_array("g", a)
 
@@ -131,7 +158,9 @@ def test_fixed_shape(cpu_jit):
 def test_fixed_index_shape(cpu_jit):
     f, g = fields("f(3), g(2, 2): [2D]")
 
-    asm = Assignment(f.center(1), g.center(0, 0) + g.center(0, 1) + g.center(1, 0) + g.center(1, 1))
+    asm = Assignment(
+        f.center(1), g.center(0, 0) + g.center(0, 1) + g.center(1, 0) + g.center(1, 1)
+    )
     ker = create_kernel(asm)
     kfunc = cpu_jit.compile(ker)
 
@@ -164,10 +193,10 @@ def test_scalar_field(cpu_jit):
     spatial_shape = (31, 29)
     #   Both implicit and explicit scalar fields must be accepted
     for ishape_f, ishape_g in product(((), (1,)), ((), (1,))):
-        rng = np.random.default_rng(0x5eed)
+        rng = np.random.default_rng(0x5EED)
         f_arr = rng.random(size=spatial_shape + ishape_f, dtype="float64")
         g_arr = np.zeros(spatial_shape + ishape_g)
-        
+
         kfunc(f=f_arr, g=g_arr)
 
         np.testing.assert_allclose(f_arr.flatten(), g_arr.flatten())
