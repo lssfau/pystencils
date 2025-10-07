@@ -48,6 +48,6 @@ class flag_cond(sp.Function):
         if len(self.args) > 3:
             else_expression = self.args[3]
             else_code = print_func(else_expression)
-            code += f" + (({mask_code}) >> ({flag_bit_code}) ^ 1) * ({else_code})"
+            code += f" + ((({mask_code}) >> ({flag_bit_code}) & 1) ^ 1) * ({else_code})"
 
         return code
