@@ -190,7 +190,7 @@ def generate_simd_horizontal_op(reduction_op: ReductionOps, scalar_var: Variable
     opname = reduction_op.op_name
     opstr = reduction_op.op_str
 
-    reduction_function = f"f{opname}" \
+    reduction_function = f"std::{opname}" \
         if reduction_op in [ReductionOps.Max, ReductionOps.Min] else None
 
     simd_op = lambda a, b: generate_op_intrin(instruction_set, double_prec, reduction_op, a, b)
@@ -283,7 +283,7 @@ guards_for_instruction_sets = {
 
 code = """#pragma once
 
-#include <cmath>
+#include <algorithm>
 
 """
 
