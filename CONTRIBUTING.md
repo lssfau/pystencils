@@ -8,7 +8,7 @@ Of course, it is also always appreciated to bring own ideas and problems to the 
 Please submit all contributions to the official [GitLab repository](https://i10git.cs.fau.de/pycodegen/pystencils) in the form of a Merge Request. Please do not submit git diffs or files containing the changes.
 There also exists a GitHub repository, which is only a mirror to the GitLab repository. Contributions to the GitHub repository are not considered.
 
-`pystencils` is an open-source python package under the license of  AGPL3. Thus we consider the act of contributing to the code by submitting a Merge Request as the "Sign off" or agreement to the AGPL3 license.
+`pystencils` is an open-source python package licensed under GPLv3. Thus we consider the act of contributing to the code by submitting a Merge Request as the "Sign off" or agreement to the GPLv3 license.
 
 You can contribute in many different ways:
 

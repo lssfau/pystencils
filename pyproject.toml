@@ -10,7 +10,8 @@ authors = [
     { name = "Frederik Hennig" },
     { email = "cs10-codegen@fau.de" },
 ]
-license = { file = "COPYING.txt" }
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["sympy~=1.14", "numpy>=1.8.0", "appdirs", "joblib", "pyyaml", "fasteners"]
 classifiers = [
@@ -19,8 +20,7 @@ classifiers = [
     "Topic :: Software Development :: Code Generators",
     "Topic :: Scientific/Engineering :: Physics",
     "Intended Audience :: Developers",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Intended Audience :: Science/Research"
 ]
 
 [project.urls]
