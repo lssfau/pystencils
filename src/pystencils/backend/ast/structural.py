@@ -33,7 +33,19 @@ class PsStructuralNode(PsAstNode, ABC):
 
         :meta public:
         """
-        pass
+
+
+class PsDeclaresSymbolTrait:
+    """Mix-in for structural AST classes that declare a symbol.
+    
+    Depending on the node's semantics, declared symbols will be visible in
+    subsequent siblings, children, or both.
+    """
+
+    @property
+    @abstractmethod
+    def declared_symbol(self) -> PsSymbol:
+        """Override in subclasses to return the declared symbol"""
 
 
 class PsBlock(PsStructuralNode):
@@ -147,7 +159,7 @@ class PsAssignment(PsStructuralNode):
         return f"PsAssignment({repr(self._lhs)}, {repr(self._rhs)})"
 
 
-class PsDeclaration(PsAssignment):
+class PsDeclaration(PsDeclaresSymbolTrait, PsAssignment):
     __match_args__ = (
         "lhs",
         "rhs",
@@ -184,7 +196,7 @@ class PsDeclaration(PsAssignment):
         return f"PsDeclaration({repr(self._lhs)}, {repr(self._rhs)})"
 
 
-class PsLoop(PsStructuralNode):
+class PsLoop(PsDeclaresSymbolTrait, PsStructuralNode):
     __match_args__ = ("counter", "start", "stop", "step", "body")
 
     def __init__(
@@ -208,6 +220,10 @@ class PsLoop(PsStructuralNode):
     @counter.setter
     def counter(self, expr: PsSymbolExpr):
         self._ctr = expr
+
+    @property
+    def declared_symbol(self) -> PsSymbol:
+        return self._ctr.symbol
 
     @property
     def start(self) -> PsExpression:
