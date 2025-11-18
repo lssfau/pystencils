@@ -7,8 +7,9 @@ from ..ast.structural import PsLoop, PsBlock, PsConditional, PsDeclaration
 from ..ast.expressions import PsExpression, PsConstantExpr, PsGe, PsLt
 from ..constants import PsConstant
 
-from .canonical_clone import CanonicalClone, CloneContext
+from .canonical_clone import CanonicalClone
 from .eliminate_constants import EliminateConstants
+from .rewrite import substitute_symbols
 
 
 class ReshapeLoops:
@@ -43,17 +44,18 @@ class ReshapeLoops:
         peeled_iters: list[PsBlock] = []
 
         for i in range(num_iterations):
-            cc = CloneContext(self._ctx)
-            cc.symbol_decl(loop.counter.symbol)
             peeled_ctr = self._factory.parse_index(
-                cc.get_replacement(loop.counter.symbol)
+                self._ctx.duplicate_symbol(loop.counter.symbol)
             )
             peeled_idx = self._elim_constants(
                 self._typify(loop.start + PsExpression.make(PsConstant(i)) * loop.step)
             )
 
             counter_decl = PsDeclaration(peeled_ctr, peeled_idx)
-            peeled_block = self._canon_clone.visit(loop.body, cc)
+            peeled_block = self._canon_clone(loop.body)
+            peeled_block = substitute_symbols(
+                peeled_block, {loop.counter.symbol: peeled_ctr}
+            )
 
             if omit_range_check:
                 peeled_block.statements = [counter_decl] + peeled_block.statements
@@ -105,15 +107,16 @@ class ReshapeLoops:
         peeled_iters: list[PsBlock] = []
 
         for i in range(num_iterations)[::-1]:
-            cc = CloneContext(self._ctx)
-            cc.symbol_decl(loop.counter.symbol)
             peeled_ctr = self._factory.parse_index(
-                cc.get_replacement(loop.counter.symbol)
+                self._ctx.duplicate_symbol(loop.counter.symbol)
             )
             peeled_idx = self._typify(loop.stop - PsExpression.make(PsConstant(i + 1)))
 
             counter_decl = PsDeclaration(peeled_ctr, peeled_idx)
-            peeled_block = self._canon_clone.visit(loop.body, cc)
+            peeled_block = self._canon_clone(loop.body)
+            peeled_block = substitute_symbols(
+                peeled_block, {loop.counter.symbol: peeled_ctr}
+            )
 
             if omit_range_check:
                 peeled_block.statements = [counter_decl] + peeled_block.statements
@@ -176,16 +179,18 @@ class ReshapeLoops:
                     skip = True
                 elif num_iters.constant.value == 1:
                     skip = True
-                    cc = CloneContext(self._ctx)
-                    cc.symbol_decl(loop.counter.symbol)
                     local_counter = self._factory.parse_index(
-                        cc.get_replacement(loop.counter.symbol)
+                        self._ctx.duplicate_symbol(loop.counter.symbol)
                     )
                     ctr_decl = PsDeclaration(
                         local_counter,
                         new_start,
                     )
-                    cloned_body = self._canon_clone.visit(loop.body, cc)
+                    cloned_body = self._canon_clone(loop.body)
+                    cloned_body = substitute_symbols(
+                        cloned_body, {loop.counter.symbol: local_counter}
+                    )
+
                     cloned_body.statements = [ctr_decl] + cloned_body.statements
                     result.append(cloned_body)
 

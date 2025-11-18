@@ -27,7 +27,7 @@ class CanonContext:
 
         self.updated_symbols: set[PsSymbol] = set()
 
-    def deduplicate(self, symb: PsSymbol) -> PsSymbol:
+    def canonicalize(self, symb: PsSymbol) -> PsSymbol:
         if symb in self.live_symbols_map:
             return self.live_symbols_map[symb]
         elif symb not in self.encountered_symbols:
@@ -89,8 +89,7 @@ class CanonicalizeSymbols:
 
         match node:
             case PsSymbolExpr(symb):
-                node.symbol = cc.deduplicate(symb)
-                return node
+                node.symbol = cc.canonicalize(symb)
 
             case PsExpression():
                 for c in node.children:
