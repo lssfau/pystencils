@@ -20,27 +20,18 @@ from .parameters import Parameter
 from .functions import Lambda
 from .gpu_indexing import GpuIndexing, GpuLaunchConfiguration
 from .errors import CodegenError
-from ..backend.kernelcreation.context import ReductionInfo
 
 from ..field import Field
 from ..types import PsIntegerType, PsScalarType
 
 from ..backend.memory import PsSymbol
 from ..backend.ast import PsAstNode
-from ..backend.functions import PsReductionWriteBack
 from ..backend.ast.expressions import (
     PsExpression,
-    PsSymbolExpr,
-    PsCall,
-    PsMemAcc,
-    PsConstantExpr,
 )
 from ..backend.ast.structural import (
     PsBlock,
     PsLoop,
-    PsDeclaration,
-    PsAssignment,
-    PsStructuralNode,
 )
 from ..backend.ast.analysis import collect_undefined_symbols, collect_required_headers
 from ..backend.kernelcreation import (
@@ -68,6 +59,7 @@ from ..backend.transformations import (
     SelectFunctions,
     CanonicalizeSymbols,
     HoistLoopInvariantDeclarations,
+    ReductionsToMemory,
 )
 
 from ..simp import AssignmentCollection
@@ -212,8 +204,8 @@ class DefaultKernelCreationDriver:
                     "due to a code generator bug; see https://i10git.cs.fau.de/pycodegen/pystencils/-/issues/128"
                 )
 
-        for _, reduction_info in self._ctx.reduction_data.items():
-            self._modify_kernel_ast_for_reductions(reduction_info, kernel_ast)
+        reduce_to_memory = ReductionsToMemory(self._ctx, self._ctx.reduction_data.values())
+        kernel_ast = reduce_to_memory(kernel_ast)
 
         #   Target-Specific optimizations
         if self._target.is_cpu():
@@ -314,31 +306,6 @@ class DefaultKernelCreationDriver:
             self._intermediates.parsed_body = kernel_body.clone()
 
         return kernel_body
-
-    def _modify_kernel_ast_for_reductions(
-        self, reduction_info: ReductionInfo, kernel_ast: PsBlock
-    ):
-        # typify local symbol and write-back pointer expressions and initial value
-        typify = Typifier(self._ctx)
-        symbol_expr = typify(PsSymbolExpr(reduction_info.local_symbol))
-        ptr_symbol_expr = typify(PsSymbolExpr(reduction_info.writeback_ptr_symbol))
-        init_val = typify(reduction_info.init_val)
-
-        ptr_access = PsMemAcc(
-            ptr_symbol_expr, PsConstantExpr(PsConstant(0, self._ctx.index_dtype))
-        )
-        write_back_ptr = PsCall(
-            PsReductionWriteBack(reduction_info.op),
-            [ptr_symbol_expr, symbol_expr],
-        )
-
-        # declare and init local copy with neutral element
-        prepend_ast: list[PsStructuralNode] = [PsDeclaration(symbol_expr, init_val)]
-        # write back result to reduction target variable
-        append_ast: list[PsStructuralNode] = [PsAssignment(ptr_access, write_back_ptr)]
-
-        # modify AST
-        kernel_ast.statements = prepend_ast + kernel_ast.statements + append_ast
 
     def _transform_for_cpu(self, kernel_ast: PsBlock) -> PsBlock:
         canonicalize = CanonicalizeSymbols(self._ctx, True)

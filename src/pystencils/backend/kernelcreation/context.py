@@ -230,15 +230,15 @@ class KernelCreationContext:
         init_val: PsExpression
         match reduction_op:
             case ReductionOp.Add:
-                init_val = PsConstantExpr(PsConstant(0))
+                init_val = PsConstantExpr(PsConstant(0, lhs_dtype))
             case ReductionOp.Sub:
-                init_val = PsConstantExpr(PsConstant(0))
+                init_val = PsConstantExpr(PsConstant(0, lhs_dtype))
             case ReductionOp.Mul:
-                init_val = PsConstantExpr(PsConstant(1))
+                init_val = PsConstantExpr(PsConstant(1, lhs_dtype))
             case ReductionOp.Min:
-                init_val = PsCall(PsConstantFunction(ConstantFunctions.PosInfinity), [])
+                init_val = PsCall(PsConstantFunction(ConstantFunctions.PosInfinity, lhs_dtype), [])
             case ReductionOp.Max:
-                init_val = PsCall(PsConstantFunction(ConstantFunctions.NegInfinity), [])
+                init_val = PsCall(PsConstantFunction(ConstantFunctions.NegInfinity, lhs_dtype), [])
             case _:
                 raise PsInternalCompilerError(
                     f"Unsupported kind of reduction assignment: {reduction_op}."

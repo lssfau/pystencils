@@ -90,6 +90,9 @@ Vectorization
 Code Lowering and Materialization
 ---------------------------------
 
+.. autoclass:: ReductionsToMemory
+    :members:
+
 .. autoclass:: LowerToC
     :members: __call__
 
@@ -111,6 +114,7 @@ from .reshape_loops import ReshapeLoops
 from .add_pragmas import InsertPragmasAtLoops, LoopPragma, AddOpenMP
 from .ast_vectorizer import VectorizationAxis, VectorizationContext, AstVectorizer
 from .loop_vectorizer import LoopVectorizer
+from .reductions_to_memory import ReductionsToMemory
 from .lower_to_c import LowerToC
 from .select_functions import SelectFunctions
 from .select_intrinsics import SelectIntrinsics
@@ -130,6 +134,7 @@ __all__ = [
     "VectorizationContext",
     "AstVectorizer",
     "LoopVectorizer",
+    "ReductionsToMemory",
     "LowerToC",
     "SelectFunctions",
     "SelectIntrinsics",
