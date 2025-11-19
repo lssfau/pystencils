@@ -1,10 +1,11 @@
 from __future__ import annotations
 from textwrap import indent
 from typing import cast, overload
+import numpy as np
 
 from dataclasses import dataclass
 
-from ...types import PsType, PsVectorType, PsBoolType, PsScalarType
+from ...types import PsType, PsVectorType, PsBoolType, PsScalarType, PsNumericType
 
 from ..kernelcreation import KernelCreationContext, AstFactory
 from ..memory import PsSymbol
@@ -42,7 +43,7 @@ from ..ast.expressions import (
 from ..ast.vector import PsVectorOp, PsVecBroadcast, PsVecMemAcc
 from ..ast.analysis import UndefinedSymbolsCollector
 
-from ..exceptions import PsInternalCompilerError, VectorizationError
+from ..exceptions import VectorizationError
 
 
 @dataclass(frozen=True)
@@ -52,19 +53,8 @@ class VectorizationAxis:
     counter: PsSymbol
     """Scalar iteration counter of this axis"""
 
-    vectorized_counter: PsSymbol | None = None
-    """Vectorized iteration counter of this axis"""
-
     step: PsExpression = PsExpression.make(PsConstant(1))
     """Step size of the scalar iteration"""
-
-    def get_vectorized_counter(self) -> PsSymbol:
-        if self.vectorized_counter is None:
-            raise PsInternalCompilerError(
-                "No vectorized counter defined on this vectorization axis"
-            )
-
-        return self.vectorized_counter
 
 
 class VectorizationContext:
@@ -90,8 +80,13 @@ class VectorizationContext:
         )
         self._lane_mask: PsSymbol | None = None
 
-        if axis.vectorized_counter is not None:
-            self._vectorized_symbols[axis.counter] = axis.vectorized_counter
+        factory = AstFactory(ctx)
+
+        self.vectorize_symbol(axis.counter)
+
+        self._induction_vars: dict[PsSymbol, Affine] = {
+            self._axis.counter: Affine(factory.parse_index(1), factory.parse_index(0))
+        }
 
     @property
     def lanes(self) -> int:
@@ -116,6 +111,11 @@ class VectorizationContext:
     @lane_mask.setter
     def lane_mask(self, mask: PsSymbol | None):
         self._lane_mask = mask
+
+    @property
+    def induction_vars(self) -> dict[PsSymbol, Affine]:
+        """The vectorization context's induction variables."""
+        return self._induction_vars
 
     def get_lane_mask_expr(self) -> PsExpression:
         """Retrieve an expression representing the current lane execution mask."""
@@ -230,12 +230,30 @@ class AstVectorizer:
         self._collect_symbols = UndefinedSymbolsCollector()
 
         from ..kernelcreation import Typifier
-        from .eliminate_constants import EliminateConstants
+        from .eliminate_constants import TypifyAndFold
         from .lower_to_c import LowerToC
 
         self._typifiy = Typifier(ctx)
-        self._fold_constants = EliminateConstants(ctx)
+        self._type_fold = TypifyAndFold(ctx)
         self._lower_to_c = LowerToC(ctx)
+
+    def get_counter_declaration(self, vc: VectorizationContext) -> PsDeclaration:
+        vector_ctr = vc.vectorized_symbols[vc.axis.counter]
+        step_multiplier_val = np.array(
+            range(vc.lanes), dtype=vc.axis.counter.get_dtype().numpy_dtype
+        )
+        step_multiplier = PsExpression.make(
+            PsConstant(step_multiplier_val, cast(PsNumericType, vector_ctr.get_dtype()))
+        )
+        vector_counter_decl = self._type_fold(
+            PsDeclaration(
+                PsExpression.make(vector_ctr),
+                PsVecBroadcast(vc.lanes, PsExpression.make(vc.axis.counter))
+                + step_multiplier * PsVecBroadcast(vc.lanes, vc.axis.step),
+            )
+        )
+
+        return vector_counter_decl
 
     @overload
     def __call__(self, node: PsBlock, vc: VectorizationContext) -> PsBlock:
@@ -251,10 +269,6 @@ class AstVectorizer:
 
     @overload
     def __call__(self, node: PsExpression, vc: VectorizationContext) -> PsExpression:
-        pass
-
-    @overload
-    def __call__(self, node: PsAstNode, vc: VectorizationContext) -> PsAstNode:
         pass
 
     def __call__(self, node: PsAstNode, vc: VectorizationContext) -> PsAstNode:
@@ -287,13 +301,26 @@ class AstVectorizer:
         """Vectorize a subtree."""
 
         match node:
-            case PsBlock(stmts):
-                return PsBlock([self.visit(n, vc) for n in stmts])
+            case PsBlock(statements):
+                new_statements = []
+                for stmt in statements:
+                    new_statements.append(self.visit(stmt, vc))
+                    if isinstance(stmt, PsDeclaration):
+                        lhs_symb = cast(PsSymbolExpr, stmt.lhs).symbol
+
+                        #   Try to cast declared symbol as an induction variable
+                        if lhs_symb.get_dtype() == vc.axis.counter.get_dtype():
+                            if (
+                                affine := self._index_expression_as_affine(stmt.rhs, vc)
+                            ) is not None:
+                                vc.induction_vars[lhs_symb] = affine
+
+                return PsBlock(new_statements)
 
             case PsExpression():
                 return self.visit_expr(node, vc)
 
-            case PsDeclaration(_, rhs):
+            case PsDeclaration(lhs, rhs):
                 vec_symb = vc.vectorize_symbol(node.declared_symbol)
                 vec_lhs = PsExpression.make(vec_symb)
                 vec_rhs = self.visit_expr(rhs, vc)
@@ -426,12 +453,18 @@ class AstVectorizer:
                         f"Unable to vectorize memory access by non-symbol pointer {ptr}"
                     )
 
-                idx_affine = self._index_as_affine(offset, vc)
+                idx_affine = self._index_expression_as_affine(offset, vc)
                 if idx_affine is None:
-                    vec_expr = PsVecBroadcast(vc.lanes, expr.clone())
+                    if self._is_lane_invariant(offset, vc):
+                        vec_expr = PsVecBroadcast(vc.lanes, expr.clone())
+                    else:
+                        raise VectorizationError(
+                            "Could not vectorize memory access with non-affine, non-invariant offset.\n"
+                            f"    at: {expr}"
+                        )
                 else:
-                    stride: PsExpression | None = self._fold_constants(
-                        self._typifiy(idx_affine.coeff * vc.axis.step)
+                    stride: PsExpression | None = self._type_fold(
+                        idx_affine.coeff * vc.axis.step
                     )
 
                     if (
@@ -452,7 +485,7 @@ class AstVectorizer:
                 access_stride: PsExpression | None = None
 
                 for i, idx in enumerate(indices):
-                    idx_affine = self._index_as_affine(idx, vc)
+                    idx_affine = self._index_expression_as_affine(idx, vc)
                     if idx_affine is not None:
                         if ctr_found:
                             raise VectorizationError(
@@ -462,12 +495,15 @@ class AstVectorizer:
 
                         ctr_found = True
 
-                        access_stride = stride = self._fold_constants(
-                            self._typifiy(
-                                idx_affine.coeff
-                                * vc.axis.step
-                                * PsExpression.make(buf.strides[i])
-                            )
+                        access_stride = stride = self._type_fold(
+                            idx_affine.coeff
+                            * vc.axis.step
+                            * PsExpression.make(buf.strides[i])
+                        )
+                    elif not self._is_lane_invariant(idx, vc):
+                        raise VectorizationError(
+                            "Could not vectorize memory access with non-affine, non-invariant offset.\n"
+                            f"    at: {expr}"
                         )
 
                 if ctr_found:
@@ -519,37 +555,38 @@ class AstVectorizer:
         vec_expr.dtype = vc.vector_type(scalar_type)
         return vec_expr
 
-    def _index_as_affine(
-        self, idx: PsExpression, vc: VectorizationContext
+    def _is_lane_invariant(self, expr: PsExpression, vc: VectorizationContext) -> bool:
+        """An expression is lane-invariant if it depends on no vectorized symbols
+        or induction variables."""
+        free_symbols = self._collect_symbols(expr)
+        return not (
+            free_symbols & (set(vc.vectorized_symbols) | set(vc.induction_vars))
+        )
+
+    def _index_expression_as_affine(
+        self, expr: PsExpression, vc: VectorizationContext
     ) -> Affine | None:
         """Attempt to analyze an index expression as an affine expression of the axis counter."""
+        free_symbols = self._collect_symbols(expr)
+        if (free_symbols - set(vc.induction_vars)) & set(vc.vectorized_symbols):
+            return None
 
-        free_symbols = self._collect_symbols(idx)
-
-        #   Check if all symbols except for the axis counter are lane-invariant
-        for symb in free_symbols:
-            if symb != vc.axis.counter and symb in vc.vectorized_symbols:
-                raise VectorizationError(
-                    "Unable to rewrite index as affine expression of axis counter: \n"
-                    f"   {idx}\n"
-                    f"Expression depends on non-lane-invariant symbol {symb}"
-                )
-
-        if vc.axis.counter not in free_symbols:
-            #   Index is lane-invariant
+        if not (free_symbols & set(vc.induction_vars)):
             return None
 
         zero = self._factory.parse_index(0)
-        one = self._factory.parse_index(1)
 
-        def lane_invariant(expr) -> bool:
-            return vc.axis.counter not in self._collect_symbols(expr)
+        def no_induction_vars(expr) -> bool:
+            return not (self._collect_symbols(expr) & set(vc.induction_vars))
+
+        class NotAffine(Exception):
+            pass
 
         def collect(subexpr) -> Affine:
             match subexpr:
-                case PsSymbolExpr(symb) if symb == vc.axis.counter:
-                    return Affine(one, zero)
-                case _ if lane_invariant(subexpr):
+                case PsSymbolExpr(symb) if symb in vc.induction_vars:
+                    return vc.induction_vars[symb]
+                case _ if no_induction_vars(subexpr):
                     return Affine(zero, subexpr)
                 case PsNeg(op):
                     return -collect(op)
@@ -557,17 +594,16 @@ class AstVectorizer:
                     return collect(op1) + collect(op2)
                 case PsSub(op1, op2):
                     return collect(op1) - collect(op2)
-                case PsMul(op1, op2) if lane_invariant(op1):
+                case PsMul(op1, op2) if no_induction_vars(op1):
                     return op1 * collect(op2)
-                case PsMul(op1, op2) if lane_invariant(op2):
+                case PsMul(op1, op2) if no_induction_vars(op2):
                     return collect(op1) * op2
-                case PsDiv(op1, op2) if lane_invariant(op2):
+                case PsDiv(op1, op2) if no_induction_vars(op2):
                     return collect(op1) / op2
                 case _:
-                    raise VectorizationError(
-                        "Unable to rewrite index as affine expression of axis counter: \n"
-                        f"   {idx}\n"
-                        f"Encountered invalid subexpression {subexpr}"
-                    )
+                    raise NotAffine()
 
-        return collect(idx)
+        try:
+            return collect(expr)
+        except NotAffine:
+            return None
