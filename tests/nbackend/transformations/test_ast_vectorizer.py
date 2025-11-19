@@ -1,7 +1,7 @@
 import sympy as sp
 import pytest
 
-from pystencils import Assignment, TypedSymbol, fields, FieldType, make_slice
+from pystencils import Assignment, TypedSymbol, fields, Field, FieldType, make_slice
 from pystencils.sympyextensions import tcast, mem_acc
 from pystencils.sympyextensions.pointers import AddressOf
 
@@ -106,7 +106,7 @@ def test_broadcast_constants():
     vc = VectorizationContext(ctx, 4, axis)
     vectorize = AstVectorizer(ctx)
 
-    for constant in (sp.sympify(14), sp.pi, - sp.oo):
+    for constant in (sp.sympify(14), sp.pi, -sp.oo):
         expr = factory.parse_sympy(constant)
         vec_expr = vectorize(expr, vc)
         assert isinstance(vec_expr, PsVecBroadcast)
@@ -118,12 +118,13 @@ def test_vectorize_casts_and_counter():
     factory = AstFactory(ctx)
 
     ctr = ctx.get_symbol("ctr", ctx.index_dtype)
-    vec_ctr = ctx.get_symbol("vec_ctr", PsVectorType(ctx.index_dtype, 4))
 
     vectorize = AstVectorizer(ctx)
 
-    axis = VectorizationAxis(ctr, vec_ctr)
+    axis = VectorizationAxis(ctr)
     vc = VectorizationContext(ctx, 4, axis)
+
+    vec_ctr = vc.vectorized_symbols[ctr]
 
     expr = factory.parse_sympy(tcast(sp.Symbol("ctr"), create_type("float32")))
     vec_expr = vectorize.visit(expr, vc)
@@ -142,7 +143,6 @@ def test_vectorize_casts_and_counter():
 
 def test_invalid_vectorization():
     ctx = KernelCreationContext()
-    factory = AstFactory(ctx)
     typify = Typifier(ctx)
 
     ctr = ctx.get_symbol("ctr", ctx.index_dtype)
@@ -151,12 +151,6 @@ def test_invalid_vectorization():
 
     axis = VectorizationAxis(ctr)
     vc = VectorizationContext(ctx, 4, axis)
-
-    expr = factory.parse_sympy(tcast(sp.Symbol("ctr"), create_type("float32")))
-
-    with pytest.raises(VectorizationError):
-        #   Fails since no vectorized counter was specified
-        _ = vectorize.visit(expr, vc)
 
     expr = PsExpression.make(
         ctx.get_symbol("x_v", PsVectorType(create_type("float32"), 4))
@@ -663,3 +657,101 @@ def test_invalid_nested_loop():
 
     with pytest.raises(VectorizationError):
         _ = vectorize.visit(ast, vc)
+
+
+def test_multiple_induction_vars():
+    ctx = KernelCreationContext()
+    factory = AstFactory(ctx)
+    vectorize = AstVectorizer(ctx)
+
+    ctr = TypedSymbol("ctr", ctx.index_dtype)
+    i, j, k = [TypedSymbol(name, ctx.index_dtype) for name in "ijk"]
+    x, y = sp.symbols("x, y")
+    f = Field("f", FieldType.CUSTOM, ctx.default_dtype, (1, 0), (10, 5, 3), (1, 1, 50))
+    ptr = TypedSymbol("ptr", "float64 *")
+
+    ctr_ = ctx.get_symbol(ctr.name, ctr.dtype)
+
+    ast = PsBlock(
+        [
+            factory.parse_sympy(asm)
+            for asm in [
+                Assignment(i, 2 * ctr),
+                Assignment(f.absolute_access((3, i), (0,)), x),
+                Assignment(j, 2 * i + 3),
+                Assignment(f.absolute_access((j, 2), (1,)), x),
+                Assignment(k, i - 3 * j + ctr),
+                Assignment(
+                    f.absolute_access((k - i, 1), (2,)), mem_acc(ptr, j - k + ctr)
+                ),
+            ]
+        ]
+    )
+
+    axis = VectorizationAxis(ctr_)
+    vc = VectorizationContext(ctx, 4, axis)
+
+    simd_ast = vectorize(ast, vc)
+    assert set(vc.induction_vars) == set(
+        ctx.get_symbol(name) for name in ("ctr", "i", "j", "k")
+    )
+
+    for asm in simd_ast.statements[0::2]:
+        assert isinstance(asm, PsDeclaration)
+        assert isinstance(asm.lhs, PsSymbolExpr)
+        assert asm.lhs.symbol.get_dtype() == PsVectorType(ctx.index_dtype, 4)
+
+    strides = [2, 4, -11]
+    for asm, stride in zip(simd_ast.statements[1::2], strides):
+        assert isinstance(asm, PsAssignment)
+        assert isinstance(asm.lhs, PsVecMemAcc)
+        assert isinstance(asm.lhs.stride, PsConstantExpr)
+        assert asm.lhs.stride.constant.value == stride
+
+    last_asm = simd_ast.statements[-1]
+    assert isinstance(last_asm, PsAssignment)
+    assert isinstance(last_asm.rhs, PsVecMemAcc)
+    assert isinstance(last_asm.rhs.stride, PsConstantExpr)
+    assert last_asm.rhs.stride.constant.value == 14
+
+
+def test_invalid_multiple_induction_vars():
+    ctx = KernelCreationContext()
+    factory = AstFactory(ctx)
+    vectorize = AstVectorizer(ctx)
+
+    ctr = TypedSymbol("ctr", ctx.index_dtype)
+    i, j, k = [TypedSymbol(name, ctx.index_dtype) for name in "ijk"]
+    x, y = sp.symbols("x, y")
+    g = fields("g: float64[2D]", field_type=FieldType.CUSTOM)
+    ptr = TypedSymbol("ptr", "float64 *")
+
+    ctr_ = ctx.get_symbol(ctr.name, ctr.dtype)
+    axis = VectorizationAxis(ctr_)
+    vc = VectorizationContext(ctx, 4, axis)
+
+    for decl in [
+        factory.parse_sympy(Assignment(i, ctr + 1)),
+        factory.parse_sympy(Assignment(j, 2 * i + 1)),
+        factory.parse_sympy(Assignment(y, i**2))
+    ]:
+        vectorize(decl, vc)
+
+    with pytest.raises(VectorizationError):
+        _ = vectorize(
+            factory.parse_sympy(Assignment(g.absolute_access((i, j), ()), x)), vc
+        )
+
+    with pytest.raises(VectorizationError):
+        _ = vectorize(
+            factory.parse_sympy(Assignment(g.absolute_access((2, j**2 - i), ()), x)), vc
+        )
+
+    with pytest.raises(VectorizationError):
+        _ = vectorize(factory.parse_sympy(Assignment(x, mem_acc(ptr, i * 2 * j))), vc)
+    
+    with pytest.raises(VectorizationError):
+        _ = vectorize(factory.parse_sympy(Assignment(x, mem_acc(ptr, ctr * j))), vc)
+
+    with pytest.raises(VectorizationError):
+        _ = vectorize(factory.parse_sympy(Assignment(x, mem_acc(ptr, j + y))), vc)

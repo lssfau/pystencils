@@ -1,9 +1,7 @@
-import numpy as np
 from enum import Enum, auto
-from typing import cast, Callable, overload, Sequence
+from typing import Callable, overload, Sequence
 
 from ..kernelcreation.context import ReductionInfo
-from ...types import PsVectorType, PsScalarType
 
 from ..kernelcreation import KernelCreationContext
 from ..constants import PsConstant
@@ -64,11 +62,11 @@ class LoopVectorizer:
         self._trailing_iters = trailing_iters
 
         from ..kernelcreation import Typifier
-        from .eliminate_constants import EliminateConstants
+        from .eliminate_constants import TypifyAndFold
 
         self._typify = Typifier(ctx)
         self._vectorize_ast = AstVectorizer(ctx)
-        self._fold = EliminateConstants(ctx)
+        self._type_fold = TypifyAndFold(ctx)
 
     @overload
     def vectorize_select_loops(
@@ -118,30 +116,14 @@ class LoopVectorizer:
         scalar_ctr_expr = loop.counter
         scalar_ctr = scalar_ctr_expr.symbol
 
-        #   Prepare vector counter
-        vector_ctr_dtype = PsVectorType(
-            cast(PsScalarType, scalar_ctr_expr.get_dtype()), self._lanes
-        )
-        vector_ctr = self._ctx.duplicate_symbol(scalar_ctr, vector_ctr_dtype)
-        step_multiplier_val = np.array(
-            range(self._lanes), dtype=scalar_ctr_expr.get_dtype().numpy_dtype
-        )
-        step_multiplier = PsExpression.make(
-            PsConstant(step_multiplier_val, vector_ctr_dtype)
-        )
-        vector_counter_decl = self._type_fold(
-            PsDeclaration(
-                PsExpression.make(vector_ctr),
-                PsVecBroadcast(self._lanes, scalar_ctr_expr)
-                + step_multiplier * PsVecBroadcast(self._lanes, loop.step),
-            )
-        )
-
         #   Prepare axis
-        axis = VectorizationAxis(scalar_ctr, vector_ctr, step=loop.step)
+        axis = VectorizationAxis(scalar_ctr, step=loop.step)
 
         #   Prepare vectorization context
         vc = VectorizationContext(self._ctx, self._lanes, axis)
+
+        #   Prepare vector counter
+        vector_counter_decl = self._vectorize_ast.get_counter_declaration(vc)
 
         #   Prepare reductions found in loop body
         simd_init_local_reduction_vars: list[PsStructuralNode] = []
@@ -184,7 +166,7 @@ class LoopVectorizer:
         #   Generate vectorized loop body
         simd_body = self._vectorize_ast(loop.body, vc)
 
-        if vector_ctr in collect_undefined_symbols(simd_body):
+        if vc.vectorized_symbols[scalar_ctr] in collect_undefined_symbols(simd_body):
             simd_body.statements.insert(0, vector_counter_decl)
 
         #   Build new loop limits
@@ -293,18 +275,3 @@ class LoopVectorizer:
                     ]
                     + simd_writeback_local_reduction_vars
                 )
-
-    @overload
-    def _type_fold(self, node: PsExpression) -> PsExpression:
-        pass
-
-    @overload
-    def _type_fold(self, node: PsDeclaration) -> PsDeclaration:
-        pass
-
-    @overload
-    def _type_fold(self, node: PsAstNode) -> PsAstNode:
-        pass
-
-    def _type_fold(self, node: PsAstNode) -> PsAstNode:
-        return self._fold(self._typify(node))

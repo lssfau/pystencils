@@ -44,7 +44,7 @@ from ..functions import PsMathFunction
 from ...types import PsNumericType, PsBoolType, PsScalarType, PsVectorType, constify
 
 
-__all__ = ["EliminateConstants"]
+__all__ = ["EliminateConstants", "TypifyAndFold"]
 
 
 class ECContext:
@@ -386,3 +386,26 @@ class EliminateConstants:
 
         #   Any other expressions are not considered constant even if their arguments are
         return expr, False
+
+
+class TypifyAndFold:
+    """Compute data types and fold constants on AST nodes."""
+
+    def __init__(self, ctx: KernelCreationContext):
+        self._typify = Typifier(ctx)
+        self._fold = EliminateConstants(ctx)
+
+    @overload
+    def __call__(self, node: PsExpression) -> PsExpression:
+        pass
+
+    @overload
+    def __call__(self, node: PsDeclaration) -> PsDeclaration:
+        pass
+
+    @overload
+    def __call__(self, node: PsAstNode) -> PsAstNode:
+        pass
+
+    def __call__(self, node: PsAstNode) -> PsAstNode:
+        return self._fold(self._typify(node))
