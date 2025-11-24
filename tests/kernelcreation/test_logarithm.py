@@ -13,10 +13,8 @@ def test_log(dtype):
     assignments = ps.AssignmentCollection({x.center(): sp.log(a)})
 
     ast = ps.create_kernel(assignments, default_dtype=dtype)
-    code = ps.get_code_str(ast)
+    code = ast.get_c_code()
     kernel = ast.compile()
-
-    # ps.show_code(ast)
 
     if dtype == "float64":
         assert "float" not in code

@@ -31,10 +31,8 @@ def test_sum(dtype):
     assignments = ps.AssignmentCollection({x.center(): sum})
 
     ast = ps.create_kernel(assignments)
-    code = ps.get_code_str(ast)
+    code = ast.get_c_code()
     kernel = ast.compile()
-
-    # ps.show_code(ast)
 
     if dtype == "float32":
         assert "5050.0f;" in code
@@ -62,7 +60,7 @@ def test_product(dtype):
     config = ps.CreateKernelConfig()
 
     ast = ps.create_kernel(assignments, config=config)
-    code = ps.get_code_str(ast)
+    code = ast.get_c_code()
     kernel = ast.compile()
 
     # print(code)

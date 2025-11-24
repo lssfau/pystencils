@@ -61,7 +61,6 @@ def test_boundary_check(dtype, with_cse):
 
     config = ps.CreateKernelConfig(default_dtype=ps.create_type(dtype), ghost_layers=0)
     kernel_checked = ps.create_kernel(assignments, config=config).compile()
-    # ps.show_code(kernel_checked)
 
     # No SEGFAULT, please!!
     kernel_checked(f=f_arr, g=g_arr)

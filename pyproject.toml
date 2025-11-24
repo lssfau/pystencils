@@ -58,7 +58,6 @@ doc = [
     'sphinx_design',
     'myst-nb',
     'matplotlib',
-    'ipywidgets',
     'graphviz',
 ]
 testsuite = [

@@ -29,4 +29,4 @@ def test_kernel_decorator2():
     # assignments = ps.assignment_from_stencil(stencil, src, dst, normalization_factor=2)
     ast = ps.create_kernel(kernel_func)
 
-    _ = ps.get_code_str(ast)
+    _ = ast.get_c_code()

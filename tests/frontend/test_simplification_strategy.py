@@ -73,19 +73,18 @@ def test_split_inner_loop():
     ac.simplification_hints['split_groups'] = split_groups
     ast = ps.create_kernel(ac)
 
-    code = ps.get_code_str(ast)
-    ps.show_code(ast)
+    code = ast.get_c_code()
     # we have four inner loops as indicated in split groups (4 elements) plus one outer loop
     assert code.count('for') == 5
     ast = ps.create_kernel(ac, target=ps.Target.GPU)
 
-    code = ps.get_code_str(ast)
+    code = ast.get_c_code()
     # on GPUs is wouldn't be good to use loop splitting
     assert code.count('for') == 0
 
     ac = AssignmentCollection(main, subexpressions)
     ast = ps.create_kernel(ac)
 
-    code = ps.get_code_str(ast)
+    code = ast.get_c_code()
     # one inner loop and one outer loop
     assert code.count('for') == 2

@@ -109,6 +109,10 @@ class Kernel:
     def compile(self) -> Callable[..., None]:
         """Invoke the underlying just-in-time compiler to obtain the kernel as an executable Python function."""
         return self._jit.compile(self)
+    
+    def __str__(self) -> str:
+        params = ", ".join(f"{p.name} : {p.dtype}" for p in self._params)
+        return f"{self._name}({params})"
 
 
 class GpuKernel(Kernel):

@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from dataclasses import dataclass
 import numpy as np
 
@@ -34,17 +34,17 @@ class LaunchGrid:
 class CupyKernelWrapper(KernelWrapper):
     def __init__(
         self,
-        kfunc: GpuKernel,
+        ker: GpuKernel,
         raw_kernel: Any,
     ):
-        self._kfunc: GpuKernel = kfunc
-        self._launch_config = kfunc.get_launch_configuration()
+        super().__init__(ker)
+        self._launch_config = ker.get_launch_configuration()
         self._raw_kernel = raw_kernel
         self._args_cache: dict[Any, tuple] = dict()
 
     @property
     def kernel(self) -> GpuKernel:
-        return self._kfunc
+        return cast(GpuKernel, self._kernel)
 
     @property
     def launch_config(self) -> GpuLaunchConfiguration:
@@ -202,7 +202,7 @@ class CupyKernelWrapper(KernelWrapper):
 
         #   Process Arguments
 
-        for kparam in self._kfunc.parameters:
+        for kparam in self._kernel.parameters:
             process_param(kparam, add_kernel_arg)
 
         for cparam in self._launch_config.parameters:
