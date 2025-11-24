@@ -15,10 +15,8 @@ def test_blocking_staggered():
     ]
     assignments = [ps.Assignment(stag.staggered_access(d), terms[i]) for i, d in enumerate(stag.staggered_stencil)]
     reference_kernel = ps.create_staggered_kernel(assignments)
-    print(ps.show_code(reference_kernel))
     reference_kernel = reference_kernel.compile()
     kernel = ps.create_staggered_kernel(assignments, cpu_blocking=(3, 16, 8)).compile()
-    print(ps.show_code(kernel.ast))
 
     f_arr = np.random.rand(80, 33, 19)
     stag_arr = np.zeros((80, 33, 19, 3))

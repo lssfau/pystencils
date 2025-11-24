@@ -11,8 +11,10 @@ if TYPE_CHECKING:
 class KernelWrapper(ABC):
     """Wrapper around a compiled and executable pystencils kernel."""
 
-    def __init__(self, kfunc: Kernel) -> None:
-        self._kfunc = kfunc
+    __match_args__ = ("kernel",)
+
+    def __init__(self, ker: Kernel) -> None:
+        self._kernel = ker
 
     @abstractmethod
     def __call__(self, **kwargs) -> None:
@@ -20,25 +22,23 @@ class KernelWrapper(ABC):
 
     @property
     def kernel(self) -> Kernel:
-        return self._kfunc
+        return self._kernel
     
     @property
     def ast(self) -> Kernel:
-        return self._kfunc
+        return self._kernel
     
     @property
     def target(self) -> Target:
-        return self._kfunc.target
+        return self._kernel.target
     
     @property
     def parameters(self) -> Sequence[Parameter]:
-        return self._kfunc.parameters
+        return self._kernel.parameters
 
     @property
     def code(self) -> str:
-        from pystencils.display_utils import get_code_str
-
-        return get_code_str(self._kfunc)
+        return self._kernel.get_c_code()
 
 
 class JitBase(ABC):

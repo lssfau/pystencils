@@ -171,14 +171,8 @@ are using the `int32` data type, as specified in {py:data}`index_dtype <CreateKe
 ```{code-cell} ipython3
 :tags: [remove-input]
 
-driver = ps.codegen.get_driver(cfg, retain_intermediates=True)
-kernel = driver(assignments)
-ps.inspect(driver.intermediates.materialized_ispace, show_cpp=False)
+ps.inspect(kernel)
 ```
-
-:::{note}
-To learn more about inspecting code after different stages of the code generator, refer to [this section](#section_codegen_stages).
-:::
 
 ```{eval-rst}
 .. currentmodule:: pystencils.codegen
@@ -464,43 +458,3 @@ _show_ispace(cfg)
 Briefly explain about field memory layouts, cache locality, coalesced memory accesses (on GPU and vector CPUs),
 and the need for correct ordering of the dimensions (loop order on CPU, thread indexing order on GPU).
 :::
-
-(section_codegen_stages)=
-## Advanced: Understanding the Stages of the Code Generator
-
-While translating a set of symbolic definitions to a kernel, the code generator of pystencils
-goes through a number of stages, gradually extending and transforming the AST.
-Pystencils allows you to retrieve and inspect the intermediate results produced by the
-code generator, in order to better understand the process of kernel translation.
-This can be immensely helpful when tracking down bugs or trying to explain unexpected
-output code.
-
-To get access to the intermediate results, the code generator has to be invoked in a slightly different way.
-Instead of just calling `create_kernel`, we directly create the so-called *driver* and instruct it to
-store its intermediate ASTs:
-
-```{code-cell} ipython3
-:tags: [remove-cell]
-u_src, u_dst, f = ps.fields("u_src, u_dst, f: float32[2D]")
-h = sp.Symbol("h")
-
-cfg = ps.CreateKernelConfig(
-  target=ps.Target.X86_AVX512,
-  default_dtype="float32",
-)
-cfg.cpu.openmp.enable = True
-cfg.cpu.vectorize.enable = True
-cfg.cpu.vectorize.assume_inner_stride_one = True
-
-assignments = [
-  ps.Assignment(
-    u_dst[0,0], (h**2 * f[0, 0] + u_src[1, 0] + u_src[-1, 0] + u_src[0, 1] + u_src[0, -1]) / 4
-  )
-]
-```
-
-```{code-cell} ipython3
-driver = ps.codegen.get_driver(cfg, retain_intermediates=True)
-kernel = driver(assignments)
-ps.inspect(driver.intermediates)
-```

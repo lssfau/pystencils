@@ -25,7 +25,6 @@ def test_full_scalar_field(shape, dtype):
 
     pack_eqs = [Assignment(buffer.center(), src_field.center())]
     pack_code = create_kernel(pack_eqs)
-    ps.show_code(pack_code)
 
     rng = np.random.default_rng(0x5EED)
     src_arr = rng.random(shape, dtype=dtype)
