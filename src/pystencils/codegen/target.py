@@ -4,6 +4,8 @@ from enum import Flag, auto
 from warnings import warn
 from functools import cache
 
+from ..types import PsScalarType
+
 
 class Target(Flag):
     """
@@ -120,11 +122,29 @@ class Target(Flag):
 
     def is_gpu(self) -> bool:
         """Determine if this target is a GPU target.
-        
+
         This refers to targets for the CUDA and HIP family of platforms.
         `Target.SYCL` is *not* a GPU target.
         """
         return Target._GPU in self
+
+    def default_vector_lanes(self, dtype: PsScalarType) -> int:
+        if not self.is_vector_cpu():
+            raise ValueError("This target is no vector CPU target.")
+
+        assert dtype.itemsize is not None
+
+        match self:
+            case Target.X86_SSE:
+                return 128 // (dtype.itemsize * 8)
+            case Target.X86_AVX:
+                return 256 // (dtype.itemsize * 8)
+            case Target.X86_AVX512 | Target.X86_AVX512_FP16:
+                return 512 // (dtype.itemsize * 8)
+            case _:
+                raise NotImplementedError(
+                    f"No default number of lanes known for {dtype} on {self}"
+                )
 
     @staticmethod
     def auto_cpu() -> Target:
@@ -134,11 +154,11 @@ class Target(Flag):
             return avail_targets[-1]
         else:
             return Target.GenericCPU
-        
+
     @staticmethod
     def auto_gpu() -> Target:
         """Return the GPU target available in the current runtime environment.
-        
+
         Raises:
             RuntimeError: If `cupy` is not installed and therefore no GPU runtime is available.
         """
@@ -151,13 +171,14 @@ class Target(Flag):
                 return Target.CUDA
         except ImportError:
             raise RuntimeError("Cannot infer GPU target since cupy is not installed.")
-        
+
     @staticmethod
     def available_targets() -> tuple[Target, ...]:
         """List available"""
         targets = [Target.GenericCPU]
         try:
             import cupy  # noqa: F401
+
             targets.append(Target.auto_gpu())
         except ImportError:
             pass

@@ -4,9 +4,12 @@ import numpy as np
 import sympy as sp
 from sympy.codegen.ast import AssignmentBase
 
+from ...sympyextensions import TypedSymbol
+
 from ..ast import PsAstNode
 from ..ast.expressions import PsExpression, PsSymbolExpr, PsConstantExpr
 from ..ast.structural import PsLoop, PsBlock, PsAssignment
+from ..ast.axes import PsAxisRange, PsAxesCube
 
 from ..memory import PsSymbol
 from ..constants import PsConstant
@@ -14,10 +17,12 @@ from ..constants import PsConstant
 from .context import KernelCreationContext
 from .freeze import FreezeExpressions, ExprLike
 from .typification import Typifier
-from .iteration_space import FullIterationSpace
+from .iteration_space import IterationSpace, FullIterationSpace, SparseIterationSpace
 
 
-IndexParsable: TypeAlias = PsExpression | PsSymbol | PsConstant | sp.Expr | int | np.integer
+IndexParsable: TypeAlias = (
+    PsExpression | PsSymbol | PsConstant | sp.Expr | int | np.integer
+)
 _IndexParsable = (PsExpression, PsSymbol, PsConstant, sp.Expr, int, np.integer)
 
 
@@ -75,7 +80,7 @@ class AstFactory:
         pass
 
     def parse_index(self, idx: IndexParsable):
-        """Parse the given object as an expression with data type 
+        """Parse the given object as an expression with data type
         `ctx.index_dtype <KernelCreationContext.index_dtype>`."""
 
         if not isinstance(idx, _IndexParsable):
@@ -271,3 +276,66 @@ class AstFactory:
 
         assert isinstance(outer_node, PsLoop)
         return outer_node
+
+    def axis_range(self, ctr: str | sp.Symbol, iteration_slice: slice) -> PsAxisRange:
+        """Create an axis range from a counter and an iteration slice"""
+        match ctr:
+            case str():
+                ctr_symol = self._ctx.get_symbol(ctr, self._ctx.index_dtype)
+            case TypedSymbol():
+                ctr_symol = self._ctx.get_symbol(
+                    ctr.name, self._ctx.resolve_dynamic_type(ctr.dtype)
+                )
+            case sp.Symbol():
+                ctr_symol = self._ctx.get_symbol(ctr.name, self._ctx.index_dtype)
+            case _:
+                raise TypeError(f"Invalid type of argument ctr: {type(ctr)}")
+
+        start, stop, step = self.parse_slice(iteration_slice)
+
+        return PsAxisRange(PsExpression.make(ctr_symol), start, stop, step)
+
+    def axes_cube(
+        self,
+        counters: Sequence[str | sp.Symbol],
+        slices: Sequence[slice],
+        body: PsBlock,
+    ):
+        """Create an axes cube from given counters and iteration slices"""
+        ranges = [
+            self.axis_range(ctr, slic)
+            for ctr, slic in zip(counters, slices, strict=True)
+        ]
+        return PsAxesCube(ranges, body)
+
+    def cube_from_ispace(self, ispace: IterationSpace, body: PsBlock) -> PsAxesCube:
+        """Create an iteration axes cube for a given iteration space.
+
+        For dense iteration spaces, the cube will contain ranges for the iteration
+        space's dimensions in their desired loop order.
+        For sparse iteration spaces, the cube will contain a single range
+        for the sparse counter.
+        """
+        match ispace:
+            case FullIterationSpace():
+                dimensions = ispace.dimensions_in_loop_order()
+                ranges = [
+                    PsAxisRange(
+                        PsExpression.make(d.counter),
+                        d.start.clone(),
+                        d.stop.clone(),
+                        d.step.clone(),
+                    )
+                    for d in dimensions
+                ]
+                return PsAxesCube(ranges, body)
+            case SparseIterationSpace():
+                xrange = PsAxisRange(
+                    PsSymbolExpr(ispace.sparse_counter),
+                    PsExpression.make(PsConstant(0, self._ctx.index_dtype)),
+                    PsExpression.make(ispace.index_list.shape[0]),
+                    PsExpression.make(PsConstant(1, self._ctx.index_dtype)),
+                )
+                return PsAxesCube((xrange,), body)
+            case _:
+                raise TypeError(f"Unexpected iteration space type: {type(ispace)}")

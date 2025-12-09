@@ -6,7 +6,6 @@ from warnings import warn
 from .target import Target
 from .config import (
     CreateKernelConfig,
-    VectorizationOptions,
     AUTO,
     _AUTO_TYPE,
     GhostLayerSpec,
@@ -19,47 +18,41 @@ from .properties import PsSymbolProperty, FieldBasePtr
 from .parameters import Parameter
 from .functions import Lambda
 from .gpu_indexing import GpuIndexing, GpuLaunchConfiguration
-from .errors import CodegenError
+from .cpu_loop_strategies import DefaultCpuLoopStrategies
 
 from ..field import Field
 from ..types import PsIntegerType, PsScalarType
 
 from ..backend.memory import PsSymbol
 from ..backend.ast import PsAstNode
-from ..backend.ast.expressions import (
-    PsExpression,
-)
-from ..backend.ast.structural import (
-    PsBlock,
-    PsLoop,
-)
+from ..backend.ast.expressions import PsExpression
+from ..backend.ast.structural import PsBlock
 from ..backend.ast.analysis import collect_undefined_symbols, collect_required_headers
 from ..backend.kernelcreation import (
     KernelCreationContext,
     KernelAnalysis,
     FreezeExpressions,
     Typifier,
+    AstFactory,
 )
-from ..backend.constants import PsConstant
 from ..backend.kernelcreation.iteration_space import (
     create_sparse_iteration_space,
     create_full_iteration_space,
-    FullIterationSpace,
 )
 from ..backend.platforms import (
     Platform,
     GenericCpu,
     GenericVectorCpu,
 )
-from ..backend.exceptions import VectorizationError
 
 from ..backend.transformations import (
     EliminateConstants,
     LowerToC,
     SelectFunctions,
     CanonicalizeSymbols,
-    HoistLoopInvariantDeclarations,
+    HoistIterationInvariantDeclarations,
     ReductionsToMemory,
+    MaterializeAxes,
 )
 
 from ..simp import AssignmentCollection
@@ -153,80 +146,17 @@ class DefaultKernelCreationDriver:
         self._target = cfg.get_target()
         self._gpu_indexing: GpuIndexing | None = self._get_gpu_indexing()
         self._platform = self._get_platform()
+        self._factory = AstFactory(self._ctx)
 
     def __call__(
         self,
         assignments: AssignmentCollection | Sequence[AssignmentBase] | AssignmentBase,
     ) -> Kernel:
         kernel_body = self.parse_kernel_body(assignments)
-
-        kernel_ast = self._platform.materialize_iteration_space(
-            kernel_body, self._ctx.get_iteration_space()
-        )
-
-        #   Fold and extract constants
-        elim_constants = EliminateConstants(self._ctx, extract_constant_exprs=True)
-        kernel_ast = cast(PsBlock, elim_constants(kernel_ast))
-
-        #   Extensions for reductions
-
-        #   FIXME
-        if self._ctx.reduction_data:
-            if (
-                self._ctx.get_iteration_space().rank == 1
-                and self._cfg.cpu.openmp.get_option("enable")
-                and self._cfg.cpu.vectorize.get_option("enable")
-            ):
-                raise CodegenError(
-                    "Cannot safely apply both OpenMP and vectorization to a 1D kernel involving reductions"
-                    "due to a code generator bug; see https://i10git.cs.fau.de/pycodegen/pystencils/-/issues/128"
-                )
-
-        reduce_to_memory = ReductionsToMemory(self._ctx, self._ctx.reduction_data.values())
-        kernel_ast = reduce_to_memory(kernel_ast)
-
-        #   Target-Specific optimizations
-        if self._target.is_cpu():
-            kernel_ast = self._transform_for_cpu(kernel_ast)
-
-        #   Note: After this point, the AST may contain intrinsics, so type-dependent
-        #   transformations cannot be run any more
-
-        #   Lowering
-        lower_to_c = LowerToC(self._ctx)
-        kernel_ast = cast(PsBlock, lower_to_c(kernel_ast))
-
-        select_functions = SelectFunctions(self._platform)
-        kernel_ast = cast(PsBlock, select_functions(kernel_ast))
-
-        #   Late canonicalization pass: Canonicalize new symbols introduced by LowerToC
-
-        canonicalize = CanonicalizeSymbols(self._ctx, True)
-        kernel_ast = cast(PsBlock, canonicalize(kernel_ast))
-
-        kernel_factory = KernelFactory(self._ctx)
-
-        if self._target.is_cpu() or self._target == Target.SYCL:
-            return kernel_factory.create_generic_kernel(
-                self._platform,
-                kernel_ast,
-                self._cfg.get_option("function_name"),
-                self._target,
-                self._cfg.get_jit(),
-            )
-        elif self._target.is_gpu():
-            assert self._gpu_indexing is not None
-
-            return kernel_factory.create_gpu_kernel(
-                self._platform,
-                kernel_ast,
-                self._cfg.get_option("function_name"),
-                self._target,
-                self._cfg.get_jit(),
-                self._gpu_indexing.get_launch_config_factory(),
-            )
-        else:
-            assert False, "unexpected target"
+        kernel_ast = self._materialize_iteration_space(kernel_body)
+        kernel_ast = self._general_optimize(kernel_ast)
+        kernel_ast = self._lowering(kernel_ast)
+        return self._finalize(kernel_ast)
 
     def parse_kernel_body(
         self,
@@ -279,109 +209,84 @@ class DefaultKernelCreationDriver:
 
         return kernel_body
 
-    def _transform_for_cpu(self, kernel_ast: PsBlock) -> PsBlock:
+    def _materialize_iteration_space(self, kernel_body: PsBlock) -> PsBlock:
+        match self._platform:
+            case GenericCpu():
+                axes_builder = DefaultCpuLoopStrategies(
+                    self._ctx, self._target, self._cfg.cpu
+                )
+                kernel_ast = axes_builder.create_axes(
+                    kernel_body, self._ctx.get_iteration_space()
+                )
+
+                materialize_axes = MaterializeAxes(self._ctx)
+                kernel_ast = materialize_axes(kernel_ast)
+
+                return kernel_ast
+            case _:
+                return self._platform.materialize_iteration_space(
+                    kernel_body, self._ctx.get_iteration_space()
+                )
+
+    def _general_optimize(self, kernel_ast: PsBlock) -> PsBlock:
         canonicalize = CanonicalizeSymbols(self._ctx, True)
         kernel_ast = cast(PsBlock, canonicalize(kernel_ast))
 
-        hoist_invariants = HoistLoopInvariantDeclarations(self._ctx)
+        elim_constants = EliminateConstants(self._ctx, extract_constant_exprs=True)
+        kernel_ast = cast(PsBlock, elim_constants(kernel_ast))
+
+        hoist_invariants = HoistIterationInvariantDeclarations(self._ctx)
         kernel_ast = cast(PsBlock, hoist_invariants(kernel_ast))
 
-        cpu_cfg = self._cfg.cpu
-
-        if cpu_cfg is None:
-            return kernel_ast
-
-        if cpu_cfg.loop_blocking:
-            raise NotImplementedError("Loop blocking not implemented yet.")
-
-        kernel_ast = self._vectorize(kernel_ast)
-        kernel_ast = self._add_openmp(kernel_ast)
-
-        if cpu_cfg.use_cacheline_zeroing:
-            raise NotImplementedError("CL-zeroing not implemented yet")
-
         return kernel_ast
 
-    def _add_openmp(self, kernel_ast: PsBlock) -> PsBlock:
-        omp_options = self._cfg.cpu.openmp
-        enable_omp: bool = omp_options.get_option("enable")
-
-        if enable_omp:
-            from ..backend.transformations import AddOpenMP
-
-            add_omp = AddOpenMP(
-                self._ctx,
-                reductions=list(self._ctx.reduction_data.values()),
-                nesting_depth=omp_options.get_option("nesting_depth"),
-                num_threads=omp_options.get_option("num_threads"),
-                schedule=omp_options.get_option("schedule"),
-                collapse=omp_options.get_option("collapse"),
-                omit_parallel=omp_options.get_option("omit_parallel_construct"),
-            )
-            kernel_ast = cast(PsBlock, add_omp(kernel_ast))
-
-        return kernel_ast
-
-    def _vectorize(self, kernel_ast: PsBlock) -> PsBlock:
-        vec_options = self._cfg.cpu.vectorize
-
-        enable_vec = vec_options.get_option("enable")
-
-        if not enable_vec:
-            return kernel_ast
-
-        from ..backend.transformations import LoopVectorizer
-
-        assert isinstance(self._platform, GenericVectorCpu)
-
-        ispace = self._ctx.get_iteration_space()
-        if not isinstance(ispace, FullIterationSpace):
-            raise VectorizationError(
-                "Unable to vectorize kernel: The kernel is not using a dense iteration space."
-            )
-
-        inner_loop_coord = ispace.loop_order[-1]
-        inner_loop_dim = ispace.dimensions[inner_loop_coord]
-
-        #   Apply stride (TODO: and alignment) assumptions
-        assume_unit_stride: bool = vec_options.get_option("assume_inner_stride_one")
-
-        if assume_unit_stride:
-            for field in self._ctx.fields:
-                buf = self._ctx.get_buffer(field)
-                inner_stride = buf.strides[inner_loop_coord]
-                if isinstance(inner_stride, PsConstant):
-                    if inner_stride.value != 1:
-                        raise VectorizationError(
-                            f"Unable to apply assumption 'assume_inner_stride_one': "
-                            f"Field {field} has fixed stride {inner_stride} "
-                            f"set in the inner coordinate {inner_loop_coord}."
-                        )
-                else:
-                    buf.strides[inner_loop_coord] = PsConstant(1, buf.index_type)
-                    #   TODO: Communicate assumption to runtime system via a precondition
-
-        #   Call loop vectorizer
-        num_lanes: int | None = vec_options.get_option("lanes")
-
-        if num_lanes is None:
-            num_lanes = VectorizationOptions.default_lanes(
-                self._target, cast(PsScalarType, self._ctx.default_dtype)
-            )
-
-        vectorizer = LoopVectorizer(
-            self._ctx, num_lanes, list(self._ctx.reduction_data.values())
+    def _lowering(self, kernel_ast: PsBlock) -> PsBlock:
+        reduce_to_memory = ReductionsToMemory(
+            self._ctx, self._ctx.reduction_data.values()
         )
+        kernel_ast = reduce_to_memory(kernel_ast)
 
-        def loop_predicate(loop: PsLoop):
-            return loop.counter.symbol == inner_loop_dim.counter
+        if isinstance(self._platform, GenericVectorCpu):
+            select_intrin = self._platform.get_intrinsic_selector()
+            kernel_ast = cast(PsBlock, select_intrin(kernel_ast))
 
-        kernel_ast = vectorizer.vectorize_select_loops(kernel_ast, loop_predicate)
+        lower_to_c = LowerToC(self._ctx)
+        kernel_ast = cast(PsBlock, lower_to_c(kernel_ast))
 
-        select_intrin = self._platform.get_intrinsic_selector()
-        kernel_ast = cast(PsBlock, select_intrin(kernel_ast))
+        select_functions = SelectFunctions(self._platform)
+        kernel_ast = cast(PsBlock, select_functions(kernel_ast))
 
         return kernel_ast
+
+    def _finalize(self, kernel_ast: PsBlock) -> Kernel:
+        #   Late canonicalization pass: Canonicalize new symbols introduced by LowerToC
+
+        canonicalize = CanonicalizeSymbols(self._ctx, True)
+        kernel_ast = cast(PsBlock, canonicalize(kernel_ast))
+
+        kernel_factory = KernelFactory(self._ctx)
+
+        if self._target.is_cpu() or self._target == Target.SYCL:
+            return kernel_factory.create_generic_kernel(
+                self._platform,
+                kernel_ast,
+                self._cfg.get_option("function_name"),
+                self._target,
+                self._cfg.get_jit(),
+            )
+        elif self._target.is_gpu():
+            assert self._gpu_indexing is not None
+
+            return kernel_factory.create_gpu_kernel(
+                self._platform,
+                kernel_ast,
+                self._cfg.get_option("function_name"),
+                self._target,
+                self._cfg.get_jit(),
+                self._gpu_indexing.get_launch_config_factory(),
+            )
+        else:
+            assert False, "unexpected target"
 
     def _get_gpu_indexing(self) -> GpuIndexing | None:
         if not self._target.is_gpu():

@@ -11,7 +11,16 @@ from ...field import Field, FieldType
 
 from ..memory import PsSymbol, PsBuffer
 from ..constants import PsConstant
-from ..ast.expressions import PsExpression, PsConstantExpr, PsTernary, PsEq, PsRem
+from ..ast.structural import PsDeclaration
+from ..ast.expressions import (
+    PsExpression,
+    PsConstantExpr,
+    PsTernary,
+    PsEq,
+    PsRem,
+    PsLookup,
+    PsBufferAcc,
+)
 from ..ast.util import failing_cast
 from ...types import PsStructType
 from ..exceptions import PsInputError, KernelConstraintsError
@@ -324,6 +333,36 @@ class SparseIterationSpace(IterationSpace):
     @property
     def sparse_counter(self) -> PsSymbol:
         return self._sparse_counter
+
+    def get_spatial_counter_declarations(
+        self, ctx: KernelCreationContext
+    ) -> list[PsDeclaration]:
+        from .ast_factory import AstFactory
+        from .typification import Typifier
+
+        factory = AstFactory(ctx)
+        typify = Typifier(ctx)
+
+        decls = [
+            typify(
+                PsDeclaration(
+                    PsExpression.make(ctr),
+                    PsLookup(
+                        PsBufferAcc(
+                            self.index_list.base_pointer,
+                            (
+                                PsExpression.make(self.sparse_counter),
+                                factory.parse_index(0),
+                            ),
+                        ),
+                        coord.name,
+                    ),
+                )
+            )
+            for ctr, coord in zip(self.spatial_indices, self.coordinate_members)
+        ]
+
+        return decls
 
 
 def get_archetype_field(

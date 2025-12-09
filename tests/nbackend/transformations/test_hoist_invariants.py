@@ -2,6 +2,7 @@ import sympy as sp
 
 from pystencils import (
     Field,
+    FieldType,
     TypedSymbol,
     Assignment,
     AddAugmentedAssignment,
@@ -16,6 +17,8 @@ from pystencils.backend.ast.structural import (
     PsDeclaration,
 )
 
+from pystencils.backend.ast.axes import PsLoopAxis, PsParallelLoopAxis
+
 from pystencils.backend.kernelcreation import (
     KernelCreationContext,
     AstFactory,
@@ -23,7 +26,7 @@ from pystencils.backend.kernelcreation import (
 )
 from pystencils.backend.transformations import (
     CanonicalizeSymbols,
-    HoistLoopInvariantDeclarations,
+    HoistIterationInvariantDeclarations,
 )
 
 
@@ -31,7 +34,7 @@ def test_hoist_multiple_loops():
     ctx = KernelCreationContext()
     factory = AstFactory(ctx)
     canonicalize = CanonicalizeSymbols(ctx)
-    hoist = HoistLoopInvariantDeclarations(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
 
     f = Field.create_fixed_size("f", (5, 5), memory_strides=(5, 1))
     x, y, z = sp.symbols("x, y, z")
@@ -84,7 +87,7 @@ def test_hoist_multiple_loops():
 def test_hoist_with_recurrence():
     ctx = KernelCreationContext()
     factory = AstFactory(ctx)
-    hoist = HoistLoopInvariantDeclarations(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
 
     x, y = sp.symbols("x, y")
     x_decl = factory.parse_sympy(Assignment(x, 1))
@@ -106,7 +109,7 @@ def test_hoist_with_recurrence():
 def test_hoist_with_conditionals():
     ctx = KernelCreationContext()
     factory = AstFactory(ctx)
-    hoist = HoistLoopInvariantDeclarations(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
 
     x, y, z, w = sp.symbols("x, y, z, w")
     x_decl = factory.parse_sympy(Assignment(x, 1))
@@ -140,7 +143,7 @@ def test_hoist_with_conditionals():
 def test_hoist_arrays():
     ctx = KernelCreationContext()
     factory = AstFactory(ctx)
-    hoist = HoistLoopInvariantDeclarations(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
 
     const_arr_symb = TypedSymbol(
         "const_arr",
@@ -176,7 +179,7 @@ def test_hoist_arrays():
 def test_hoisting_eliminates_loops():
     ctx = KernelCreationContext()
     factory = AstFactory(ctx)
-    hoist = HoistLoopInvariantDeclarations(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
 
     x, y, z = sp.symbols("x, y, z")
 
@@ -198,7 +201,7 @@ def test_hoisting_eliminates_loops():
 def test_hoist_mutation():
     ctx = KernelCreationContext()
     factory = AstFactory(ctx)
-    hoist = HoistLoopInvariantDeclarations(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
 
     x = sp.Symbol("x")
     x_decl = factory.parse_sympy(Assignment(x, 1))
@@ -212,3 +215,81 @@ def test_hoist_mutation():
     #   x is updated in the loop, so nothing can be hoisted
     assert isinstance(result, PsLoop)
     assert result.body.statements == [x_decl, inner_loop]
+
+
+def test_hoist_from_axis_cube():
+    ctx = KernelCreationContext()
+    factory = AstFactory(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+    f = Field.create_generic("f", 2, "const float64", field_type=FieldType.CUSTOM)
+    i, j, k = [TypedSymbol(name, ctx.index_dtype) for name in "ijk"]
+
+    asms = [
+        Assignment(x, 14),
+        Assignment(y, x + 2),
+        Assignment(z, f.absolute_access((i, 2 * j), ()) + y),
+    ]
+
+    body = PsBlock([factory.parse_sympy(asm) for asm in asms])
+    cube = factory.axes_cube((i, j), make_slice[0:12, 0:40], body)
+
+    result = hoist(cube)
+
+    assert isinstance(result, PsBlock)
+    for stmt, asm in zip(result.statements[:-1], asms[:-1], strict=True):
+        assert stmt.structurally_equal(factory.parse_sympy(asm))
+
+    assert result.statements[-1] == cube
+    assert len(cube.body.statements) == 1
+
+
+def test_hoist_from_nested_axes():
+    ctx = KernelCreationContext()
+    factory = AstFactory(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
+
+    x, y, z, v, w = sp.symbols("x, y, z, v, w")
+    f = Field.create_generic("f", 2, "const float64", field_type=FieldType.CUSTOM)
+    i, j, k = [TypedSymbol(name, ctx.index_dtype) for name in "ijk"]
+
+    asms = [
+        Assignment(w, 15),
+        Assignment(x, f.absolute_access((i, 1), ())),
+        Assignment(y, x + 2),
+        Assignment(z, f.absolute_access((0, j), ()) + y),
+        Assignment(v, f.absolute_access((i, j + k), ()) + y),
+    ]
+
+    body = PsBlock([factory.parse_sympy(asm) for asm in asms])
+
+    ast = PsParallelLoopAxis(
+        factory.axis_range(i, make_slice[0:31]),
+        PsBlock(
+            [
+                PsLoopAxis(
+                    factory.axis_range(j, make_slice[0:i]),
+                    PsBlock([PsLoopAxis(factory.axis_range(k, make_slice[j:i]), body)]),
+                )
+            ]
+        ),
+    )
+
+    result = hoist(ast)
+    assert isinstance(result, PsBlock)
+    assert result.statements[0].structurally_equal(factory.parse_sympy(asms[0]))
+
+    loop_i = result.statements[1]
+    assert isinstance(loop_i, PsParallelLoopAxis)
+    assert loop_i.body.statements[0].structurally_equal(factory.parse_sympy(asms[1]))
+    assert loop_i.body.statements[1].structurally_equal(factory.parse_sympy(asms[2]))
+
+    loop_j = loop_i.body.statements[2]
+    assert isinstance(loop_j, PsLoopAxis)
+    assert loop_j.body.statements[0].structurally_equal(factory.parse_sympy(asms[3]))
+
+    loop_k = loop_j.body.statements[1]
+    assert isinstance(loop_k, PsLoopAxis)
+    assert len(loop_k.body.statements) == 1
+    assert loop_k.body.statements[0].structurally_equal(factory.parse_sympy(asms[4]))

@@ -169,7 +169,7 @@ class PsSymbolExpr(PsLeafMixIn, PsLvalue, PsExpression):
         return self._symbol == other._symbol
 
     def __repr__(self) -> str:
-        return f"Symbol({repr(self._symbol)})"
+        return f"PsSymbolExpr({repr(self._symbol)})"
 
 
 class PsConstantExpr(PsLeafMixIn, PsExpression):

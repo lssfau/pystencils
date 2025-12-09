@@ -228,9 +228,6 @@ class OpenMpOptions(ConfigBase):
     enable: BasicOption[bool] = BasicOption(False)
     """Enable OpenMP instrumentation"""
 
-    nesting_depth: BasicOption[int] = BasicOption(0)
-    """Nesting depth of the loop that should be parallelized. Must be a nonnegative number."""
-
     collapse: BasicOption[int] = BasicOption()
     """Argument to the OpenMP ``collapse`` clause"""
 
@@ -239,12 +236,6 @@ class OpenMpOptions(ConfigBase):
 
     num_threads: BasicOption[int] = BasicOption()
     """Set the number of OpenMP threads to execute the parallel region."""
-
-    omit_parallel_construct: BasicOption[bool] = BasicOption(False)
-    """If set to ``True``, the OpenMP ``parallel`` construct is omitted, producing just a ``#pragma omp for``.
-    
-    Use this option only if you intend to wrap the kernel into an external ``#pragma omp parallel`` region.
-    """
 
 
 @dataclass
@@ -289,25 +280,6 @@ class VectorizationOptions(ConfigBase):
     with unity, thus enabling vectorization. If any fields already have a fixed innermost stride
     that is not equal to one, an error will be raised.
     """
-
-    @staticmethod
-    def default_lanes(target: Target, dtype: PsScalarType):
-        if not target.is_vector_cpu():
-            raise ValueError(f"Given target {target} is no vector CPU target.")
-
-        assert dtype.itemsize is not None
-
-        match target:
-            case Target.X86_SSE:
-                return 128 // (dtype.itemsize * 8)
-            case Target.X86_AVX:
-                return 256 // (dtype.itemsize * 8)
-            case Target.X86_AVX512 | Target.X86_AVX512_FP16:
-                return 512 // (dtype.itemsize * 8)
-            case _:
-                raise NotImplementedError(
-                    f"No default number of lanes known for {dtype} on {target}"
-                )
 
 
 @dataclass

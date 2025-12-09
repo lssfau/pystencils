@@ -1,7 +1,14 @@
 #  type: ignore
 import sympy as sp
 
-from pystencils import Field, Assignment, AddAugmentedAssignment, make_slice, DEFAULTS
+from pystencils import (
+    Field,
+    Assignment,
+    AddAugmentedAssignment,
+    make_slice,
+    DEFAULTS,
+    TypedSymbol,
+)
 
 from pystencils.backend.kernelcreation import (
     KernelCreationContext,
@@ -10,6 +17,9 @@ from pystencils.backend.kernelcreation import (
 )
 from pystencils.backend.transformations import CanonicalizeSymbols
 from pystencils.backend.ast.structural import PsConditional, PsBlock
+from pystencils.backend.ast.expressions import PsSymbolExpr
+from pystencils.backend.ast import dfs_preorder
+from pystencils.backend.ast.axes import PsLoopAxis
 
 
 def test_deduplication():
@@ -77,10 +87,16 @@ def test_do_not_constify():
 
     x, z = sp.symbols("x, z")
 
-    ast = factory.loop("i", make_slice[:10], PsBlock([
-        factory.parse_sympy(Assignment(x, z)),
-        factory.parse_sympy(AddAugmentedAssignment(z, 1))
-    ]))
+    ast = factory.loop(
+        "i",
+        make_slice[:10],
+        PsBlock(
+            [
+                factory.parse_sympy(Assignment(x, z)),
+                factory.parse_sympy(AddAugmentedAssignment(z, 1)),
+            ]
+        ),
+    )
 
     ast = canonicalize(ast)
 
@@ -95,7 +111,9 @@ def test_loop_counters():
 
     f = Field.create_generic("f", 2, index_shape=(1,))
     g = Field.create_generic("g", 2, index_shape=(1,))
-    ispace = FullIterationSpace.create_from_slice(ctx, make_slice[:, :], archetype_field=f)
+    ispace = FullIterationSpace.create_from_slice(
+        ctx, make_slice[:, :], archetype_field=f
+    )
     ctx.set_iteration_space(ispace)
 
     asm = Assignment(f.center(0), 2 * g.center(0))
@@ -117,3 +135,47 @@ def test_loop_counters():
     assert not loops_clone.counter.symbol.get_dtype().const
     assert loops.counter.symbol.name == "ctr_0__1"
     assert not loops.counter.symbol.get_dtype().const
+
+
+def test_axes():
+    ctx = KernelCreationContext()
+    factory = AstFactory(ctx)
+    canonicalize = CanonicalizeSymbols(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+    i, j, k, m, n = [TypedSymbol(name, ctx.index_dtype) for name in "ijkmn"]
+
+    cube = factory.axes_cube(
+        (i, j, k),
+        make_slice[0:m, 0:i, i:j],
+        PsBlock(
+            [
+                PsLoopAxis(
+                    factory.axis_range(n, make_slice[i : j + k]),
+                    PsBlock([factory.parse_sympy(Assignment(x, y + z))]),
+                )
+            ]
+        ),
+    )
+
+    cube_clone = cube.clone()
+    cube_clone2 = cube.clone()
+
+    ast = PsBlock([cube, cube_clone, cube_clone2])
+    canonicalize(ast)
+
+    for node0, node1, node2 in zip(
+        dfs_preorder(ast.statements[0]),
+        dfs_preorder(ast.statements[1]),
+        dfs_preorder(ast.statements[2]),
+        strict=True,
+    ):
+        assert type(node0) is type(node1) and type(node0) is type(node2)
+
+        if isinstance(node2, PsSymbolExpr):
+            if node2.symbol.name in ("i", "j", "k", "n", "x"):
+                assert node1.symbol.name == (node2.symbol.name + "__0")
+                assert node0.symbol.name == (node2.symbol.name + "__1")
+            else:
+                assert node0.symbol == node1.symbol
+                assert node0.symbol == node2.symbol

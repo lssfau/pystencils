@@ -1,8 +1,16 @@
-from typing import cast
+from typing import cast, Sequence
 
 from ..kernelcreation import KernelCreationContext
 from ..ast import PsAstNode
-from ..ast.structural import PsBlock, PsLoop, PsConditional, PsDeclaration, PsAssignment, PsStructuralNode
+from ..ast.structural import (
+    PsBlock,
+    PsLoop,
+    PsConditional,
+    PsDeclaration,
+    PsAssignment,
+    PsStructuralNode,
+    PsPragma,
+)
 from ..ast.expressions import (
     PsExpression,
     PsSymbolExpr,
@@ -16,13 +24,14 @@ from ..ast.expressions import (
     PsBinOp,
     PsArrayInitList,
 )
+from ..ast.axes import PsAxesCube, PsAxisRange, PsIterationAxis
 from ..ast.util import determine_memory_object
 
 from ...types import PsDereferencableType
 from ..memory import PsSymbol
 from ..functions import PsMathFunction
 
-__all__ = ["HoistLoopInvariantDeclarations"]
+__all__ = ["HoistIterationInvariantDeclarations"]
 
 
 class HoistContext:
@@ -65,7 +74,7 @@ class HoistContext:
                 return False
 
 
-class HoistLoopInvariantDeclarations:
+class HoistIterationInvariantDeclarations:
     """Hoist loop-invariant declarations out of the loop nest.
 
     This transformation moves loop-invariant symbol declarations outside of the loop
@@ -73,11 +82,11 @@ class HoistLoopInvariantDeclarations:
     If this transformation results in the complete elimination of a loop body, the respective loop
     is removed.
 
-    `HoistLoopInvariantDeclarations` assumes that symbols are canonical;
+    `HoistIterationInvariantDeclarations` assumes that symbols are canonical;
     in particular, each symbol may have at most one declaration.
-    To ensure this, a `CanonicalizeSymbols` pass should be run before `HoistLoopInvariantDeclarations`.
+    To ensure this, a `CanonicalizeSymbols` pass should be run before `HoistIterationInvariantDeclarations`.
 
-    `HoistLoopInvariantDeclarations` assumes that all `PsMathFunction` s are pure (have no side effects),
+    `HoistIterationInvariantDeclarations` assumes that all `PsMathFunction` s are pure (have no side effects),
     but makes no such assumption about instances of `CFunction`.
     """
 
@@ -90,7 +99,7 @@ class HoistLoopInvariantDeclarations:
     def visit(self, node: PsAstNode) -> PsAstNode:
         """Search the outermost loop and start the hoisting cascade there."""
         match node:
-            case PsLoop():
+            case PsLoop() | PsAxesCube() | PsIterationAxis():
                 temp_block = PsBlock([node])
                 temp_block = cast(PsBlock, self.visit(temp_block))
                 if temp_block.statements == [node]:
@@ -101,12 +110,12 @@ class HoistLoopInvariantDeclarations:
             case PsBlock(statements):
                 statements_new: list[PsStructuralNode] = []
                 for stmt in statements:
-                    if isinstance(stmt, PsLoop):
+                    if isinstance(stmt, PsLoop | PsAxesCube | PsIterationAxis):
                         loop = stmt
                         hc = self._hoist(loop)
-                        statements_new += hc.hoisted_nodes
-                        if loop.body.statements:
-                            statements_new.append(loop)
+                        self._insert_hoisted_nodes(
+                            statements_new, hc.hoisted_nodes, loop
+                        )
                     else:
                         self.visit(stmt)
                         statements_new.append(stmt)
@@ -126,13 +135,21 @@ class HoistLoopInvariantDeclarations:
 
         #   end match
 
-    def _hoist(self, loop: PsLoop) -> HoistContext:
+    def _hoist(self, iteration_node: PsLoop | PsAxesCube | PsIterationAxis) -> HoistContext:
         """Hoist invariant declarations out of the given loop."""
         hc = HoistContext()
-        hc.assigned_symbols.add(loop.counter.symbol)
-        hc.mutated_symbols.add(loop.counter.symbol)
-        self._prepare_hoist(loop.body, hc)
-        self._hoist_from_block(loop.body, hc)
+
+        match iteration_node:
+            case PsLoop(ctr) | PsIterationAxis(PsAxisRange(ctr)):
+                hc.assigned_symbols.add(ctr.symbol)
+                hc.mutated_symbols.add(ctr.symbol)
+            case PsAxesCube(xranges):
+                for xrange in xranges:
+                    hc.assigned_symbols.add(xrange.counter.symbol)
+                    hc.mutated_symbols.add(xrange.counter.symbol)
+
+        self._prepare_hoist(iteration_node.body, hc)
+        self._hoist_from_block(iteration_node.body, hc)
         return hc
 
     def _prepare_hoist(self, node: PsAstNode, hc: HoistContext):
@@ -155,14 +172,14 @@ class HoistLoopInvariantDeclarations:
             case PsBlock(statements):
                 statements_new: list[PsStructuralNode] = []
                 for stmt in statements:
-                    if isinstance(stmt, PsLoop):
+                    if isinstance(stmt, PsLoop | PsAxesCube | PsIterationAxis):
                         loop = stmt
                         nested_hc = self._hoist(loop)
                         hc.assigned_symbols |= nested_hc.assigned_symbols
                         hc.mutated_symbols |= nested_hc.mutated_symbols
-                        statements_new += nested_hc.hoisted_nodes
-                        if loop.body.statements:
-                            statements_new.append(loop)
+                        self._insert_hoisted_nodes(
+                            statements_new, nested_hc.hoisted_nodes, loop
+                        )
                     else:
                         self._prepare_hoist(stmt, hc)
                         statements_new.append(stmt)
@@ -182,7 +199,7 @@ class HoistLoopInvariantDeclarations:
 
         for node in block.statements:
             if isinstance(node, PsDeclaration):
-                lhs_symb = cast(PsSymbolExpr, node.lhs).symbol
+                lhs_symb = node.declared_symbol
                 if lhs_symb not in hc.mutated_symbols and hc._is_invariant(node.rhs):
                     hc.hoisted_nodes.append(node)
                     hc.invariant_symbols.add(node.declared_symbol)
@@ -194,3 +211,24 @@ class HoistLoopInvariantDeclarations:
                 statements_new.append(node)
 
         block.statements = statements_new
+
+    def _insert_hoisted_nodes(
+        self,
+        statements: list[PsStructuralNode],
+        hoisted: Sequence[PsStructuralNode],
+        iteration_node: PsLoop | PsAxesCube | PsIterationAxis,
+    ):
+        """Insert hoisted nodes before the loop in the given statement list.
+
+        This function will take care to not disconnect any pragmas from loops."""
+        pragmas: list[PsPragma] = []
+
+        if isinstance(iteration_node, PsLoop):
+            while statements and isinstance(statements[-1], PsPragma):
+                pragmas.append(cast(PsPragma, statements.pop()))
+
+        statements += hoisted
+
+        if iteration_node.body.statements:
+            statements += pragmas[::-1]
+            statements.append(iteration_node)
