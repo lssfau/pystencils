@@ -12,6 +12,7 @@ from ..ast.structural import (
     PsStatement,
     PsEmptyLeafMixIn,
 )
+from ..ast.axes import PsAxesCube, PsIterationAxis, PsAxisRange
 from ..ast.expressions import PsSymbolExpr, PsExpression
 
 from ...types import constify
@@ -108,12 +109,16 @@ class CanonicalizeSymbols:
                 if isinstance(lhs, PsSymbolExpr):
                     cc.mark_as_updated(lhs.symbol)
 
-            case PsLoop(ctr, _, _, _, _):
+            case PsLoop(ctr) | PsAxisRange(ctr):
                 decl_symb = ctr.symbol
                 for c in node.children[::-1]:
                     self.visit(c, cc)
                 cc.mark_as_updated(ctr.symbol)
                 cc.end_lifespan(decl_symb)
+
+            case PsAxesCube() | PsIterationAxis():
+                for c in node.children[::-1]:
+                    self.visit(c, cc)
 
             case PsConditional(cond, then, els):
                 if els is not None:

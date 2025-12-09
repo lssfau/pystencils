@@ -1,6 +1,7 @@
 import sympy as sp
 from pystencils import Field, Assignment, make_slice, TypedSymbol
 from pystencils.types.quick import Arr
+from pystencils.sympyextensions import mem_acc
 
 from pystencils.backend.kernelcreation import (
     KernelCreationContext,
@@ -10,10 +11,11 @@ from pystencils.backend.kernelcreation import (
 from pystencils.backend.transformations import CanonicalClone
 from pystencils.backend.ast.structural import PsBlock, PsComment
 from pystencils.backend.ast.expressions import PsSymbolExpr
+from pystencils.backend.ast.axes import PsLoopAxis
 from pystencils.backend.ast.iteration import dfs_preorder
 
 
-def test_clone_entire_ast():
+def test_canon_clone_entire_ast():
     ctx = KernelCreationContext()
     factory = AstFactory(ctx)
     canon_clone = CanonicalClone(ctx)
@@ -61,3 +63,66 @@ def test_clone_entire_ast():
 
             if orig.symbol.name in ("ctr_0", "ctr_1", "rho", "u_0", "u_1", "cx", "cy"):
                 assert clone.symbol.name == orig.symbol.name + "__0"
+
+
+def test_canon_clone_iteration_axes():
+    ctx = KernelCreationContext()
+    factory = AstFactory(ctx)
+    canon_clone = CanonicalClone(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+    i, j, k = [TypedSymbol(name, ctx.index_dtype) for name in "ijk"]
+    n = TypedSymbol("n", ctx.index_dtype)
+    m = TypedSymbol("m", ctx.index_dtype)
+    ptr = TypedSymbol("ptr", "float64 *")
+
+    ast = factory.axes_cube(
+        (i, j, k),
+        make_slice[0:n, 0:m, 0:3],
+        PsBlock(
+            [
+                factory.parse_sympy(asm)
+                for asm in [
+                    Assignment(x, y + mem_acc(ptr, i + j + k)),
+                    Assignment(z, x + y),
+                ]
+            ]
+        ),
+    )
+
+    ast_clone = canon_clone(ast)
+
+    for orig, clone in zip(dfs_preorder(ast), dfs_preorder(ast_clone), strict=True):
+        assert type(orig) is type(clone)
+        assert orig is not clone
+
+        if isinstance(orig, PsSymbolExpr):
+            assert isinstance(clone, PsSymbolExpr)
+
+            if orig.symbol.name in ("i", "j", "k", "x", "z"):
+                assert clone.symbol.name == orig.symbol.name + "__0"
+
+    ast = PsLoopAxis(
+        factory.axis_range(k, make_slice[i:j:2]),
+        PsBlock(
+            [
+                factory.parse_sympy(asm)
+                for asm in [
+                    Assignment(x, y + mem_acc(ptr, i + j + k)),
+                    Assignment(z, x + y),
+                ]
+            ]
+        ),
+    )
+
+    ast_clone = canon_clone(ast)
+
+    for orig, clone in zip(dfs_preorder(ast), dfs_preorder(ast_clone), strict=True):
+        assert type(orig) is type(clone)
+        assert orig is not clone
+
+        if isinstance(orig, PsSymbolExpr):
+            assert isinstance(clone, PsSymbolExpr)
+
+            if orig.symbol.name in ("k", "x", "z"):
+                assert clone.symbol.name == orig.symbol.name + "__1"

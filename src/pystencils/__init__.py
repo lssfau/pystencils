@@ -87,6 +87,7 @@ __all__ = [
     "stencil",
     "tcast",
     "random",
+    "inspect_ast",
 ]
 
 from . import _version

@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 import sympy as sp
 import numpy as np
@@ -15,7 +17,7 @@ from pystencils.backend.kernelcreation import (
 )
 from pystencils.backend.platforms import GenericVectorCpu, X86VectorArch, X86VectorCpu
 from pystencils.backend.ast.structural import PsBlock
-from pystencils.backend.transformations import LoopVectorizer, LowerToC
+from pystencils.backend.transformations import AxisExpansion, MaterializeAxes, LowerToC
 from pystencils.backend.constants import PsConstant
 from pystencils.codegen.driver import KernelFactory
 from pystencils.jit import CpuJit
@@ -31,20 +33,18 @@ class VectorTestSetup:
     platform_factory: Callable[[KernelCreationContext], GenericVectorCpu]
     lanes: int
     type_width: int
-    
+
     @property
     def floating_type(self):
         return Fp(self.type_width)
-    
+
     @property
     def integer_type(self):
         return SInt(self.type_width)
 
     @property
     def name(self) -> str:
-        return (
-            f"({self.target.name} | {self.type_width}bit x {self.lanes})"
-        )
+        return f"({self.target.name} | {self.type_width}bit x {self.lanes})"
 
 
 def get_setups(target: Target) -> list[VectorTestSetup]:
@@ -121,32 +121,43 @@ def create_vector_kernel(
 
     body = PsBlock([factory.parse_sympy(asm) for asm in assignments])
 
-    loop_order = field.layout
-    loop_nest = factory.loops_from_ispace(ispace, body, loop_order)
-
     if assume_unit_stride:
         for field in ctx.fields:
             #   Set inner strides to one to ensure packed memory access
             buf = ctx.get_buffer(field)
             buf.strides[0] = PsConstant(1, ctx.index_dtype)
 
-    vectorize = LoopVectorizer(ctx, setup.lanes)
-    loop_nest = vectorize.vectorize_select_loops(
-        loop_nest, lambda l: l.counter.symbol.name == "ctr_0"
+    cube = factory.cube_from_ispace(ispace, body)
+
+    lanes = setup.lanes
+
+    ae = AxisExpansion(ctx)
+    strategy = ae.create_strategy(
+        [ae.loop() for _ in range(ispace.rank - 1)]
+        + [
+            ae.peel_for_divisibility(lanes),
+            [ae.block_loop(lanes, assume_divisible=True), ae.simd(lanes)],
+            [ae.loop()],
+        ]
     )
 
+    ast: PsBlock = strategy(cube)
+
+    materialize_axes = MaterializeAxes(ctx)
+    ast = materialize_axes(ast)
+
     select_intrin = platform.get_intrinsic_selector()
-    loop_nest = select_intrin(loop_nest)
+    ast = cast(PsBlock, select_intrin(ast))
 
     lower = LowerToC(ctx)
-    loop_nest = lower(loop_nest)
+    ast = cast(PsBlock, lower(ast))
 
     cinfo = CompilerInfo.get_default(target=setup.target)
 
     kfactory = KernelFactory(ctx)
     kernel = kfactory.create_generic_kernel(
         platform,
-        PsBlock([loop_nest]),
+        ast,
         "vector_kernel",
         Target.CPU,
         CpuJit(cinfo),
@@ -295,9 +306,7 @@ def test_strided_load(vectorization_setup: VectorTestSetup, int_or_float):
             assert False
 
     f = fields(f"f: {dtype}[2D]", layout="fzyx")
-    g = fields(
-        f"g: {dtype}[2D]", layout="fzyx", field_type=FieldType.CUSTOM
-    )
+    g = fields(f"g: {dtype}[2D]", layout="fzyx", field_type=FieldType.CUSTOM)
 
     i, j = DEFAULTS.spatial_counters[:2]
     update = [
@@ -320,9 +329,7 @@ def test_strided_load(vectorization_setup: VectorTestSetup, int_or_float):
         g_shape, layout=(1, 0), dtype=dtype.numpy_dtype
     )
 
-    g_arr[:] = np.arange(
-        np.prod(g_shape), dtype=dtype.numpy_dtype
-    ).reshape(g_shape)
+    g_arr[:] = np.arange(np.prod(g_shape), dtype=dtype.numpy_dtype).reshape(g_shape)
 
     kernel(f=f_arr, g=g_arr)
 
@@ -349,9 +356,7 @@ def test_strided_store(vectorization_setup: VectorTestSetup, int_or_float):
             assert False
 
     f = fields(f"f: {dtype}[2D]", layout="fzyx")
-    g = fields(
-        f"g: {dtype}[2D]", layout="fzyx", field_type=FieldType.CUSTOM
-    )
+    g = fields(f"g: {dtype}[2D]", layout="fzyx", field_type=FieldType.CUSTOM)
 
     i, j = DEFAULTS.spatial_counters[:2]
     update = [
@@ -373,7 +378,7 @@ def test_strided_store(vectorization_setup: VectorTestSetup, int_or_float):
 
     bits = setup.type_width * setup.lanes
     prefix = "_mm" if bits == 128 else f"_mm{bits}"
-    
+
     if int_or_float == "int":
         suffix = f"epi{setup.type_width}"
     else:
@@ -385,8 +390,13 @@ def test_strided_store(vectorization_setup: VectorTestSetup, int_or_float):
             case _:
                 assert False, "unexpected width"
 
-    scatter_pattern = f"{prefix}_i{setup.type_width}scatter_{suffix}" + r"\(.*,.*,.*,\s*" + str(setup.type_width // 8) + r"\);"
-    
+    scatter_pattern = (
+        f"{prefix}_i{setup.type_width}scatter_{suffix}"
+        + r"\(.*,.*,.*,\s*"
+        + str(setup.type_width // 8)
+        + r"\);"
+    )
+
     assert len(re.findall(scatter_pattern, kernel.get_c_code())) == 3
 
     if Target.X86_AVX512 in Target.available_vector_cpu_targets():
@@ -402,9 +412,7 @@ def test_strided_store(vectorization_setup: VectorTestSetup, int_or_float):
             g_shape, layout=(1, 0), dtype=dtype.numpy_dtype
         )
 
-        f_arr[:] = np.arange(
-            np.prod(f_shape), dtype=dtype.numpy_dtype
-        ).reshape(f_shape)
+        f_arr[:] = np.arange(np.prod(f_shape), dtype=dtype.numpy_dtype).reshape(f_shape)
 
         kernel(f=f_arr, g=g_arr)
 

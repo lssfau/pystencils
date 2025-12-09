@@ -3,7 +3,7 @@ import sympy as sp
 
 from pystencils import make_slice, Field, Assignment
 from pystencils.backend.kernelcreation import KernelCreationContext, AstFactory, FullIterationSpace
-from pystencils.backend.transformations import CanonicalizeSymbols, HoistLoopInvariantDeclarations, LowerToC
+from pystencils.backend.transformations import CanonicalizeSymbols, HoistIterationInvariantDeclarations, LowerToC
 from pystencils.backend.literals import PsLiteral
 from pystencils.backend.emission import CAstPrinter
 from pystencils.backend.ast.expressions import PsExpression, PsSubscript
@@ -43,7 +43,7 @@ def test_literals():
     canon = CanonicalizeSymbols(ctx)
     ast = canon(ast)
 
-    hoist = HoistLoopInvariantDeclarations(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
     ast = hoist(ast)
 
     lower = LowerToC(ctx)

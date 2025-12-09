@@ -56,13 +56,8 @@ ker = ps.create_kernel(asm, cfg)
 ps.show_code(ker)
 ```
 
-The `cpu.openmp` category allows us to further customize both
-placement and clauses of the `parallel for` pragma:
-
-- Use {any}`cpu.openmp.nesting_depth <OpenMpOptions.nesting_depth>`
-  to specify which loop should be parallelized;
-- Use the `collapse`, `schedule` and `num_threads` options to set values
-  for the respective OpenMP clauses.
+The `cpu.openmp` category allows us to customize parallelization behaviour through OpenMP clauses.
+Use the `collapse`, `schedule` and `num_threads` options to set values for the respective clauses.
 
 ## Vectorization
 
