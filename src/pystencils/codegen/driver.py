@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, Sequence, Callable, TYPE_CHECKING
+from typing import cast, Sequence, Callable, TYPE_CHECKING, Protocol
 from dataclasses import replace
 from warnings import warn
 
@@ -17,7 +17,7 @@ from .kernel import Kernel, GpuKernel
 from .properties import PsSymbolProperty, FieldBasePtr
 from .parameters import Parameter
 from .functions import Lambda
-from .gpu_indexing import GpuIndexing, GpuLaunchConfiguration
+from .gpu_indexing import GpuIndexing, GpuIndexMappingStrategy, GpuLaunchConfiguration
 from .cpu_loop_strategies import DefaultCpuLoopStrategies
 
 from ..field import Field
@@ -38,11 +38,13 @@ from ..backend.kernelcreation import (
 from ..backend.kernelcreation.iteration_space import (
     create_sparse_iteration_space,
     create_full_iteration_space,
+    IterationSpace,
 )
 from ..backend.platforms import (
     Platform,
     GenericCpu,
     GenericVectorCpu,
+    GenericGpu,
 )
 
 from ..backend.transformations import (
@@ -51,8 +53,8 @@ from ..backend.transformations import (
     SelectFunctions,
     CanonicalizeSymbols,
     HoistIterationInvariantDeclarations,
-    ReductionsToMemory,
     MaterializeAxes,
+    ReductionsToMemory,
 )
 
 from ..simp import AssignmentCollection
@@ -100,6 +102,10 @@ def get_driver(cfg: CreateKernelConfig) -> DefaultKernelCreationDriver:
         cfg: Configuration for the code generator
     """
     return DefaultKernelCreationDriver(cfg)
+
+
+class AxesFactory(Protocol):
+    def create_axes(self, body: PsBlock, ispace: IterationSpace) -> PsBlock: ...
 
 
 class DefaultKernelCreationDriver:
@@ -211,16 +217,20 @@ class DefaultKernelCreationDriver:
 
     def _materialize_iteration_space(self, kernel_body: PsBlock) -> PsBlock:
         match self._platform:
-            case GenericCpu():
-                axes_builder = DefaultCpuLoopStrategies(
-                    self._ctx, self._target, self._cfg.cpu
-                )
-                kernel_ast = axes_builder.create_axes(
+            case GenericCpu() | GenericGpu():
+                axes_factory = self._get_axes_factory()
+
+                kernel_ast = axes_factory.create_axes(
                     kernel_body, self._ctx.get_iteration_space()
                 )
 
                 materialize_axes = MaterializeAxes(self._ctx)
                 kernel_ast = materialize_axes(kernel_ast)
+
+                r_to_mem = ReductionsToMemory(
+                    self._ctx, self._ctx.reduction_data.values()
+                )
+                kernel_ast = r_to_mem(kernel_ast)
 
                 return kernel_ast
             case _:
@@ -241,11 +251,6 @@ class DefaultKernelCreationDriver:
         return kernel_ast
 
     def _lowering(self, kernel_ast: PsBlock) -> PsBlock:
-        reduce_to_memory = ReductionsToMemory(
-            self._ctx, self._ctx.reduction_data.values()
-        )
-        kernel_ast = reduce_to_memory(kernel_ast)
-
         if isinstance(self._platform, GenericVectorCpu):
             select_intrin = self._platform.get_intrinsic_selector()
             kernel_ast = cast(PsBlock, select_intrin(kernel_ast))
@@ -344,12 +349,6 @@ class DefaultKernelCreationDriver:
                 )
 
         elif self._target.is_gpu():
-            thread_mapping = (
-                self._gpu_indexing.get_thread_mapping()
-                if self._gpu_indexing is not None
-                else None
-            )
-
             assume_warp_aligned_block_size: bool = self._cfg.gpu.get_option(
                 "assume_warp_aligned_block_size"
             )
@@ -366,9 +365,8 @@ class DefaultKernelCreationDriver:
 
             return GpuPlatform(
                 self._ctx,
-                assume_warp_aligned_block_size,
-                warp_size,
-                thread_mapping=thread_mapping,
+                assume_warp_aligned_block_size=assume_warp_aligned_block_size,
+                warp_size=warp_size,
             )
 
         elif self._target == Target.SYCL:
@@ -384,6 +382,17 @@ class DefaultKernelCreationDriver:
         raise NotImplementedError(
             f"Code generation for target {self._target} not implemented"
         )
+
+    def _get_axes_factory(self) -> AxesFactory:
+        match self._platform:
+            case GenericCpu():
+                return DefaultCpuLoopStrategies(self._ctx, self._target, self._cfg.cpu)
+            case GenericGpu():
+                return GpuIndexMappingStrategy(self._ctx, self._cfg.gpu)
+            case _:
+                raise NotImplementedError(
+                    f"No axis builder available for platform of type {type(self._platform)}"
+                )
 
 
 class KernelFactory:

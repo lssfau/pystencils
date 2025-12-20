@@ -56,6 +56,7 @@ assignments = [
 assignments
 ```
 
+(walkthrough_context_setup)=
 ## Context Setup
 
 +++
@@ -87,6 +88,7 @@ we initialized the index space according to the rank and memory layout of the fi
 it is now a 3D index space with dimensions ordered such that the shortest-stride dimension
 of $f$ is mapped by the fastest-increasing coordinate of `ispace`.
 
+(walkthrough_parsing)=
 ## Parsing of the Kernel Body
 
 Next, the kernel's symbolic representation from above must be translated into pystencil's intermediate representation.
@@ -288,6 +290,23 @@ kernel_ast = mat_axes(kernel_ast)
 ps.inspect(kernel_ast)
 ```
 
+### Reductions to Memory
+
+Our reduction to `wmax` is not complete yet; the accumulated result from the kernel's modulo variables must still
+be written back to the reductions' target memory location.
+We invoke the `ReductionsToMemory` pass for this:
+
+```{code-cell} ipython3
+:tags: [hide-output]
+
+from pystencils.backend.transformations import ReductionsToMemory
+
+reduce_to_memory = ReductionsToMemory(ctx, ctx.reduction_data.values())
+kernel_ast = reduce_to_memory(kernel_ast)
+
+ps.inspect(kernel_ast)
+```
+
 ## Optimization Passes
 
 At this point, we can run another set of optimization passes.
@@ -316,23 +335,6 @@ Most importantly, its vectorized arithmetic still needs to be turned into archit
 and it contains arithmetic functions (`max`) that must be mapped onto a platform-dependent implementation.
 
 Let's go through the required lowering passes one by one.
-
-### Reductions to Memory
-
-Our reduction to `wmax` is not complete yet; the accumulated result from the kernel's modulo variables must still
-be written back to the reductions' target memory location.
-We invoke the `ReductionsToMemory` pass for this:
-
-```{code-cell} ipython3
-:tags: [hide-output]
-
-from pystencils.backend.transformations import ReductionsToMemory
-
-reduce_to_memory = ReductionsToMemory(ctx, ctx.reduction_data.values())
-kernel_ast = reduce_to_memory(kernel_ast)
-
-ps.inspect(kernel_ast)
-```
 
 ### Select Vector Intrinsics
 

@@ -58,6 +58,7 @@ from ..functions import (
     PsReductionWriteBack,
     PsRngEngineFunction,
     PsGpuIntrinsicFunction,
+    PsGpuIndexingFunction,
 )
 from ..ast.util import determine_memory_object
 from ..exceptions import TypificationError
@@ -704,6 +705,9 @@ class Typifier:
                         tc.apply_dtype(PsIeeeFloatType(32), expr)
                         for arg in expr.args:
                             self.visit_expr(arg, tc)
+
+                    case PsGpuIndexingFunction():
+                        tc.apply_dtype(self._ctx.index_dtype, expr)
 
                     case PsRngEngineFunction(rng_spec):
                         tc.apply_dtype(rng_spec.dtype, expr)

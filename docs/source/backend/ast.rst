@@ -89,6 +89,10 @@ Iteration Axes System
     PsLoopAxis
     PsParallelLoopAxis
     PsSimdAxis
+    PsGpuIndexingAxis
+    PsGpuBlockAxis
+    PsGpuThreadAxis
+    PsGpuBlockXThreadAxis
 
 
 Expressions

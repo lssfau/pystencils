@@ -1,9 +1,14 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 from ..ast.structural import PsAssignment, PsStructuralNode
 from ..exceptions import MaterializationError
-from ..platforms import Platform
 from ..ast import PsAstNode
 from ..ast.expressions import PsCall, PsExpression
 from ..functions import PsIrFunction, PsReductionWriteBack
+
+if TYPE_CHECKING:
+    from ..platforms import Platform
 
 
 class SelectFunctions:

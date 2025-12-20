@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from typing import Sequence, cast
+from abc import ABC
 
 from ..memory import PsSymbol
+from ..functions import GpuGridDimension
 from .astnode import PsAstNode, PsAstNodeChildrenMixin
 from .structural import PsStructuralNode, PsBlock, PsDeclaresSymbolTrait
 from .expressions import PsExpression, PsSymbolExpr
@@ -125,6 +127,12 @@ class PsIterationAxis(PsAstNodeChildrenMixin, PsStructuralNode):
     __match_args__ = ("range", "body")
     _ast_children = (("range", PsAxisRange), ("body", PsBlock))
 
+    can_hoist: bool = False
+    """Whether or not this axis type is subject to iteration-invariant code motion.
+
+    If set to `False`, the `HoistIterationInvariantDeclarations` pass will ignore this axis type.
+    """
+
     def __init__(self, range: PsAxisRange, body: PsBlock):
         self._range = range
         self._body = body
@@ -152,6 +160,8 @@ class PsLoopAxis(PsIterationAxis):
     Will be lowered to a `for-loop <PsLoop>`.
     """
 
+    can_hoist: bool = True
+
     def _clone_structural(self) -> PsStructuralNode:
         return PsLoopAxis(self._range.clone(), self._body._clone_structural())
 
@@ -170,6 +180,8 @@ class PsSimdAxis(PsIterationAxis):
     """
 
     __match_args__ = ("lanes", "range", "body")
+
+    can_hoist: bool = True
 
     def __init__(self, lanes: int, range: PsAxisRange, body: PsBlock):
         self._lanes = lanes
@@ -194,6 +206,8 @@ class PsParallelLoopAxis(PsIterationAxis):
 
     Will be lowered to a loop parallelized using OpenMP directives.
     """
+
+    can_hoist: bool = True
 
     def __init__(
         self,
@@ -241,3 +255,59 @@ class PsParallelLoopAxis(PsIterationAxis):
             schedule=self._schedule,
             collapse=self._collapse,
         )
+
+
+class PsGpuIndexingAxis(PsIterationAxis, ABC):
+    """Common base class for GPU block+thread indexing axes."""
+
+    __match_args__ = ("gpu_dimension", "range", "body")
+
+    #   Mustn't perform code motion outside of GPU axes,
+    #   as this would a) move code outside of the thread index guard, executing it unnecessarily
+    #   and b) would introduce code fragments between nested GPU axes, s.t. `MaterializeAxes`
+    #   can no longer combine their guards
+    can_hoist: bool = False
+
+    def __init__(self, gpu_dimension: GpuGridDimension, xrange: PsAxisRange, body: PsBlock):
+        super().__init__(xrange, body)
+        self._gpu_dimension = gpu_dimension
+
+    @property
+    def gpu_dimension(self) -> GpuGridDimension:
+        return self._gpu_dimension
+
+    @gpu_dimension.setter
+    def gpu_dimension(self, d: GpuGridDimension):
+        self._gpu_dimension = d
+
+    def _clone_structural(self) -> PsStructuralNode:
+        return type(self)(
+            self._gpu_dimension, self._range.clone(), self._body._clone_structural()
+        )
+
+
+class PsGpuBlockAxis(PsGpuIndexingAxis):
+    """Gpu block axis.
+
+    Set the axis counter as an affine expression of the GPU block index
+    in the given dimension; i.e. ``ctr = start + step * blockIdx.{c}``.
+    Only execute the body if ``ctr < stop``.
+    """
+
+
+class PsGpuThreadAxis(PsGpuIndexingAxis):
+    """Gpu thread axis.
+
+    Set the axis counter as an affine expression of the block-local GPU thread index
+    in the given dimension; i.e. ``ctr = start + step * threadIdx.{c}``.
+    Only execute the body if ``ctr < stop``.
+    """
+
+
+class PsGpuBlockXThreadAxis(PsGpuIndexingAxis):
+    """Gpu block x thread axis.
+
+    Set the axis counter as an affine expression of the global GPU thread index
+    in the given dimension; i.e. ``ctr = start + step * (blockIdx.{c} * blockDim.{c} + threadIdx.{c})``.
+    Only execute the body if ``ctr < stop``.
+    """

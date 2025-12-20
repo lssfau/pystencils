@@ -145,7 +145,9 @@ The following categories with target-specific options are exposed:
 
 ```
 
-## Code Generation Drivers
+## Code Generation Driver and Helper Classes
+
+### Driver
 
 ```{eval-rst}
 .. module:: pystencils.codegen.driver
@@ -156,12 +158,45 @@ The following categories with target-specific options are exposed:
   :template: autosummary/entire_class.rst
 
   DefaultKernelCreationDriver
+  KernelFactory
 
 .. autosummary::
   :toctree: generated
   :nosignatures:
 
   get_driver
+```
+
+### CPU Loop Strategies
+
+```{eval-rst}
+.. module:: pystencils.codegen.cpu_loop_strategies
+
+.. autosummary::
+  :toctree: generated
+  :nosignatures:
+  :template: autosummary/entire_class.rst
+
+  DefaultCpuLoopStrategies
+```
+
+### GPU Indexing
+
+```{eval-rst}
+.. module:: pystencils.codegen.gpu_indexing
+
+.. autosummary::
+  :toctree: generated
+  :nosignatures:
+  :template: autosummary/entire_class.rst
+
+  HardwareProperties
+  GpuIndexMappingStrategy
+  GpuIndexing
+  GpuLaunchConfiguration
+  AutomaticLaunchConfiguration
+  ManualLaunchConfiguration
+  DynamicBlockSizeLaunchConfiguration
 ```
 
 ## Output Code Objects

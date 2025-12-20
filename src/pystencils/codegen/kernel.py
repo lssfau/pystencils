@@ -12,7 +12,7 @@ from ..backend.ast.structural import PsBlock
 from ..field import Field
 
 if TYPE_CHECKING:
-    from ..jit import JitBase
+    from ..jit import JitBase, KernelWrapper
 
 
 class Kernel:
@@ -106,7 +106,7 @@ class Kernel:
         printer = IRAstPrinter()
         return printer(self)
 
-    def compile(self) -> Callable[..., None]:
+    def compile(self) -> KernelWrapper:
         """Invoke the underlying just-in-time compiler to obtain the kernel as an executable Python function."""
         return self._jit.compile(self)
     

@@ -1,11 +1,18 @@
 from __future__ import annotations
 from typing import Sequence, TYPE_CHECKING
 from abc import ABC
-from enum import Enum
+from enum import Enum, IntEnum
 
 from ..sympyextensions import ReductionOp
 from ..sympyextensions.random import RngState, Philox
-from ..types import PsType, PsNumericType, PsTypeError, PsIeeeFloatType, PsIntegerType, PsUnsignedIntegerType
+from ..types import (
+    PsType,
+    PsNumericType,
+    PsTypeError,
+    PsIeeeFloatType,
+    PsIntegerType,
+    PsUnsignedIntegerType,
+)
 from .exceptions import PsInternalCompilerError
 
 if TYPE_CHECKING:
@@ -35,7 +42,7 @@ class PsFunction(ABC):
         from .ast.expressions import PsCall
 
         return PsCall(self, args)
-    
+
 
 class PsIrFunction(PsFunction):
     """Base class for IR functions that must be lowered to target-specific implementations."""
@@ -76,7 +83,7 @@ class MathFunctions(Enum):
 
     def __str__(self) -> str:
         return self.function_name
-    
+
     def __repr__(self) -> str:
         return f"MathFunctions.{self.name}"
 
@@ -96,7 +103,7 @@ class PsMathFunction(PsIrFunction):
 
     def __str__(self) -> str:
         return f"{self._func.function_name}"
-    
+
     def __repr__(self) -> str:
         return f"PsMathFunction({repr(self._func)})"
 
@@ -126,7 +133,7 @@ class PsReductionWriteBack(PsIrFunction):
 
     def __str__(self) -> str:
         return f"{super().name}"
-    
+
     def __repr__(self) -> str:
         return f"PsReductionWriteBack({repr(self._reduction_op)})"
 
@@ -156,7 +163,7 @@ class ConstantFunctions(Enum):
 
     def __str__(self) -> str:
         return self.function_name
-    
+
     def __repr__(self) -> str:
         return f"ConstantFunctions.{self.name}"
 
@@ -205,7 +212,7 @@ class PsConstantFunction(PsIrFunction):
 
     def __str__(self) -> str:
         return f"{self._func.function_name}"
-    
+
     def __repr__(self) -> str:
         return f"PsConstantFunction({repr(self._func)})"
 
@@ -252,7 +259,7 @@ class GpuFpIntrinsics(Enum):
 
     def __str__(self) -> str:
         return f"{self.function_name}"
-    
+
     def __repr__(self) -> str:
         return f"GpuFpIntrinsics.{self.name}"
 
@@ -283,16 +290,85 @@ class PsGpuIntrinsicFunction(PsIrFunction):
         return hash(self._intrin)
 
 
+class GpuGridDimension(IntEnum):
+    X = 0
+    Y = 1
+    Z = 2
+
+
+class GpuGridScope(Enum):
+    threadIdx = "threadIdx"
+    blockIdx = "blockIdx"
+    blockDim = "blockDim"
+    gridDim = "gridDim"
+
+
+class PsGpuIndexingFunction(PsIrFunction):
+    """Gpu block, thread, and grid indexing functions.
+    
+    Calls to IR GPU indexing functions will always typify to the context's index data type.
+    Platforms must insert appropriate type casts when materializing.
+    """
+
+    __match_args__ = ("scope", "dimension")
+
+    def __init__(self, scope: GpuGridScope, dimension: GpuGridDimension):
+        func_name = f"gpu.{scope.name}.{dimension.name}"
+        super().__init__(func_name, 0)
+
+        self._scope = scope
+        self._dimension = dimension
+
+    @property
+    def scope(self) -> GpuGridScope:
+        return self._scope
+
+    @property
+    def dimension(self) -> GpuGridDimension:
+        return self._dimension
+
+    def __str__(self):
+        return self._name
+
+    def __eq__(self, other: object):
+        if not isinstance(other, PsGpuIndexingFunction):
+            return False
+
+        return (self._scope, self._dimension) == (other._scope, other._dimension)
+
+    def __hash__(self):
+        return hash(type(self), self._scope, self._dimension)
+
+
 class RngSpec(Enum):
     """Random number generator specifications for `PsRngEngineFunction`."""
 
-    PhiloxFp32 = ("philox_fp32", Philox._get_vector_type(PsIeeeFloatType(32)), 4, 2, PsUnsignedIntegerType(32))
+    PhiloxFp32 = (
+        "philox_fp32",
+        Philox._get_vector_type(PsIeeeFloatType(32)),
+        4,
+        2,
+        PsUnsignedIntegerType(32),
+    )
     """Philox W=32, N=4 RNG engine returning four float32-values"""
 
-    PhiloxFp64 = ("philox_fp64", Philox._get_vector_type(PsIeeeFloatType(64)), 4, 2, PsUnsignedIntegerType(32))
+    PhiloxFp64 = (
+        "philox_fp64",
+        Philox._get_vector_type(PsIeeeFloatType(64)),
+        4,
+        2,
+        PsUnsignedIntegerType(32),
+    )
     """Philox W=32, N=4 RNG engine returning two float64-values"""
 
-    def __init__(self, rng_name: str, dtype: PsType, num_ctrs: int, num_keys: int, int_arg_type: PsIntegerType):
+    def __init__(
+        self,
+        rng_name: str,
+        dtype: PsType,
+        num_ctrs: int,
+        num_keys: int,
+        int_arg_type: PsIntegerType,
+    ):
         self.rng_name = rng_name
         self.dtype = dtype
         self.num_ctrs = num_ctrs
@@ -302,7 +378,7 @@ class RngSpec(Enum):
 
 class PsRngEngineFunction(PsIrFunction):
     """IR function that represents the invocation of a random number generation engine.
-    
+
     This is the IR representation of the symbolic random number generators
     implemented in `pystencils.sympyextensions.random`.
     Each symbolic RNG invocation is mapped onto an RNG engine function
@@ -336,12 +412,17 @@ class PsRngEngineFunction(PsIrFunction):
         match state:
             case Philox.PhiloxState():
                 match state.dtype.width:
-                    case 32: spec = RngSpec.PhiloxFp32
-                    case 64: spec = RngSpec.PhiloxFp64
-                    case _: raise ValueError(f"Data type {state.dtype} not supported in Philox RNG")
+                    case 32:
+                        spec = RngSpec.PhiloxFp32
+                    case 64:
+                        spec = RngSpec.PhiloxFp64
+                    case _:
+                        raise ValueError(
+                            f"Data type {state.dtype} not supported in Philox RNG"
+                        )
             case _:
                 raise ValueError(f"Unexpected RNG type: {type(state)}")
-            
+
         return PsRngEngineFunction(spec)
 
     def __init__(self, rng_spec: RngSpec):
@@ -354,7 +435,7 @@ class PsRngEngineFunction(PsIrFunction):
 
     def __str__(self) -> str:
         return f"{self._rng_spec.rng_name}"
-    
+
     def __repr__(self) -> str:
         return f"PsRngEngineFunction({repr(self._rng_spec)})"
 

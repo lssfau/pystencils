@@ -10,6 +10,11 @@ from ..ast.axes import (
     PsAxisRange,
     PsSimdAxis,
     PsParallelLoopAxis,
+    PsGpuIndexingAxis,
+    PsGpuBlockAxis,
+    PsGpuThreadAxis,
+    PsGpuBlockXThreadAxis,
+    GpuGridDimension,
 )
 from ..ast.structural import PsStructuralNode, PsBlock, PsDeclaration
 from ..ast.expressions import PsExpression
@@ -354,3 +359,70 @@ class AxisExpansion:
         return self._type_fold(
             (extent + (rang.step - PsExpression.make(one))) / rang.step
         )
+
+    def gpu_block(
+        self, dim: str | GpuGridDimension, coordinate: int | None = None
+    ) -> ExpansionFunc:
+        """Map one cube coordinate onto the GPU block index in the given grid dimension.
+
+        Args:
+            dim: GPU grid coordinate, ``"x"``, ``"y"`` or ``"z"``.
+        """
+        return self._gpu_indexing_impl(
+            f"gpu_block({dim}, {coordinate})", dim, coordinate, PsGpuBlockAxis
+        )
+
+    def gpu_thread(
+        self, dim: str | GpuGridDimension, coordinate: int | None = None
+    ) -> ExpansionFunc:
+        """Map one cube coordinate onto the GPU thread index in the given grid dimension.
+
+        Args:
+            dim: GPU grid coordinate, ``"x"``, ``"y"`` or ``"z"``.
+        """
+        return self._gpu_indexing_impl(
+            f"gpu_thread({dim}, {coordinate})", dim, coordinate, PsGpuThreadAxis
+        )
+
+    def gpu_block_x_thread(
+        self, dim: str | GpuGridDimension, coordinate: int | None = None
+    ) -> ExpansionFunc:
+        """Map one cube coordinate onto the product of GPU block and thread index
+        in the given grid dimension.
+
+        Args:
+            dim: GPU grid coordinate, ``"x"``, ``"y"`` or ``"z"``.
+        """
+        return self._gpu_indexing_impl(
+            f"gpu_block_x_thread({dim}, {coordinate})",
+            dim,
+            coordinate,
+            PsGpuBlockXThreadAxis,
+        )
+
+    def _gpu_indexing_impl(
+        self,
+        func_name: str,
+        dim: str | GpuGridDimension,
+        coordinate: int | None,
+        axis_type: type[PsGpuIndexingAxis],
+    ):
+        gpu_dim = dim if isinstance(dim, GpuGridDimension) else GpuGridDimension[dim.upper()]
+        coordinate = 0 if coordinate is None else coordinate
+
+        def make_block_axis(cube: PsAxesCube) -> PsStructuralNode:
+            axis_range = cube.ranges[coordinate]
+
+            remaining_ranges = cube.ranges.copy()
+            del remaining_ranges[coordinate]
+
+            if remaining_ranges:
+                new_cube = PsAxesCube(remaining_ranges, cube.body)
+                body = PsBlock([new_cube])
+            else:
+                body = cube.body
+
+            loop_axis = axis_type(gpu_dim, axis_range, body)
+            return loop_axis
+
+        return ExpansionFunc(func_name, make_block_axis)

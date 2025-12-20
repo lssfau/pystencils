@@ -31,13 +31,15 @@ class Platform(ABC):
         running on this platform."""
         pass
 
-    @abstractmethod
     def materialize_iteration_space(
         self, body: PsBlock, ispace: IterationSpace
     ) -> PsBlock:
         """Materialize the given iteration space as an indexing structure and embed the given
-        kernel body into that structure."""
-        pass
+        kernel body into that structure.
+        
+        Deprecated; code generation pipelines should use the `axis expansion system <AxisExpansion>` instead.
+        """
+        raise NotImplementedError("`materialize_iteration_space` is not implemented by this platform.")
 
     def resolve_reduction(
         self,

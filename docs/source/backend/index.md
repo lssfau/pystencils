@@ -14,13 +14,13 @@ please read the [](page_backend_walkthrough).
 :maxdepth: 1
     
 backend_walkthrough
+gpu_codegen
 objects
 ast
 iteration_space
 translation
 platforms
 transformations
-gpu_codegen
 errors
 extensions
 :::

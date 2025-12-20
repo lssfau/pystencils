@@ -17,7 +17,14 @@ from pystencils.backend.ast.structural import (
     PsDeclaration,
 )
 
-from pystencils.backend.ast.axes import PsLoopAxis, PsParallelLoopAxis
+from pystencils.backend.ast.axes import (
+    PsLoopAxis,
+    PsParallelLoopAxis,
+    PsGpuBlockAxis,
+    PsGpuThreadAxis,
+    PsGpuBlockXThreadAxis,
+    GpuGridDimension,
+)
 
 from pystencils.backend.kernelcreation import (
     KernelCreationContext,
@@ -293,3 +300,60 @@ def test_hoist_from_nested_axes():
     assert isinstance(loop_k, PsLoopAxis)
     assert len(loop_k.body.statements) == 1
     assert loop_k.body.statements[0].structurally_equal(factory.parse_sympy(asms[4]))
+
+
+def test_dont_hoist_from_gpu_axes():
+    ctx = KernelCreationContext()
+    factory = AstFactory(ctx)
+    hoist = HoistIterationInvariantDeclarations(ctx)
+
+    x, y, z, v, w = sp.symbols("x, y, z, v, w")
+    f = Field.create_generic("f", 2, "const float64", field_type=FieldType.CUSTOM)
+    i, j, k = [TypedSymbol(name, ctx.index_dtype) for name in "ijk"]
+
+    asms = [
+        Assignment(w, 15),
+        Assignment(x, f.absolute_access((i, 1), ())),
+        Assignment(y, x + 2),
+        Assignment(z, f.absolute_access((0, j), ()) + y),
+        Assignment(v, f.absolute_access((i, j + k), ()) + y),
+    ]
+
+    body = PsBlock([factory.parse_sympy(asm) for asm in asms])
+
+    ast = PsGpuBlockAxis(
+        GpuGridDimension.X,
+        factory.axis_range(i, make_slice[0:31]),
+        PsBlock(
+            [
+                PsGpuThreadAxis(
+                    GpuGridDimension.Y,
+                    factory.axis_range(j, make_slice[0:i]),
+                    PsBlock(
+                        [
+                            PsLoopAxis(
+                                factory.axis_range(k, make_slice[j:i]),
+                                body,
+                            )
+                        ]
+                    ),
+                )
+            ]
+        ),
+    )
+
+    result = hoist(ast)
+    assert isinstance(result, PsGpuBlockAxis)
+    assert result.gpu_dimension == GpuGridDimension.X
+
+    thread_axis = result.body.statements[0]
+    assert isinstance(thread_axis, PsGpuThreadAxis)
+    assert thread_axis.gpu_dimension == GpuGridDimension.Y
+
+    assert len(thread_axis.body.statements) == 5
+    for decl, sp_asm in zip(thread_axis.body.statements[:-1], asms):
+        assert decl.structurally_equal(factory.parse_sympy(sp_asm))
+
+    loop_k = thread_axis.body.statements[-1]
+    assert isinstance(loop_k, PsLoopAxis)
+    assert loop_k.body.statements[0].structurally_equal(factory.parse_sympy(asms[-1]))

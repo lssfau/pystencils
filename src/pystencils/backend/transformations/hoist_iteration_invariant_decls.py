@@ -99,18 +99,26 @@ class HoistIterationInvariantDeclarations:
     def visit(self, node: PsAstNode) -> PsAstNode:
         """Search the outermost loop and start the hoisting cascade there."""
         match node:
-            case PsLoop() | PsAxesCube() | PsIterationAxis():
+            case PsLoop() | PsAxesCube() | PsIterationAxis() if (
+                not isinstance(node, PsIterationAxis) or node.can_hoist
+            ):
                 temp_block = PsBlock([node])
                 temp_block = cast(PsBlock, self.visit(temp_block))
                 if temp_block.statements == [node]:
                     return node
                 else:
                     return temp_block
+                
+            case PsIterationAxis() if not node.can_hoist:
+                node.body = cast(PsBlock, self.visit(node.body))
+                return node
 
             case PsBlock(statements):
                 statements_new: list[PsStructuralNode] = []
                 for stmt in statements:
-                    if isinstance(stmt, PsLoop | PsAxesCube | PsIterationAxis):
+                    if isinstance(stmt, PsLoop | PsAxesCube) or (
+                        isinstance(stmt, PsIterationAxis) and stmt.can_hoist
+                    ):
                         loop = stmt
                         hc = self._hoist(loop)
                         self._insert_hoisted_nodes(
@@ -135,8 +143,10 @@ class HoistIterationInvariantDeclarations:
 
         #   end match
 
-    def _hoist(self, iteration_node: PsLoop | PsAxesCube | PsIterationAxis) -> HoistContext:
-        """Hoist invariant declarations out of the given loop."""
+    def _hoist(
+        self, iteration_node: PsLoop | PsAxesCube | PsIterationAxis
+    ) -> HoistContext:
+        """Hoist invariant declarations out of the given iteration node."""
         hc = HoistContext()
 
         match iteration_node:
@@ -172,7 +182,9 @@ class HoistIterationInvariantDeclarations:
             case PsBlock(statements):
                 statements_new: list[PsStructuralNode] = []
                 for stmt in statements:
-                    if isinstance(stmt, PsLoop | PsAxesCube | PsIterationAxis):
+                    if isinstance(stmt, PsLoop | PsAxesCube) or (
+                        isinstance(stmt, PsIterationAxis) and stmt.can_hoist
+                    ):
                         loop = stmt
                         nested_hc = self._hoist(loop)
                         hc.assigned_symbols |= nested_hc.assigned_symbols

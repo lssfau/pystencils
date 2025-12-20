@@ -9,15 +9,23 @@ from warnings import warn
 from .functions import Lambda
 from .parameters import Parameter
 from .errors import CodegenError
-from .config import GpuIndexingScheme
+from .config import GpuIndexingScheme, GpuOptions
 from .target import Target
 
 from ..backend.kernelcreation import (
     KernelCreationContext,
+    IterationSpace,
     FullIterationSpace,
     SparseIterationSpace,
+    AstFactory,
 )
-from ..backend.platforms.generic_gpu import ThreadMapping
+from ..backend.ast.structural import PsBlock
+from ..backend.ast.axes import PsAxesCube
+from ..backend.transformations import CanonicalizeSymbols
+from ..backend.transformations.axis_expansion import (
+    AxisExpansion,
+    AxisExpansionStrategy,
+)
 
 from ..backend.ast.expressions import PsExpression, PsIntDiv
 from math import prod
@@ -292,7 +300,7 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
     def parameters(self) -> frozenset[Parameter]:
         """Parameters of this launch configuration"""
         return self._params
-    
+
     @property
     def default_block_size(self) -> dim3:
         return self._default_block_size
@@ -322,7 +330,7 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
             return (
                 *to_round[:index_to_round],
                 ceil_to_multiple(to_round[index_to_round], warp_size),
-                *to_round[index_to_round + 1:],
+                *to_round[index_to_round + 1 :],  # noqa: E203
             )
         else:
             return (
@@ -483,12 +491,103 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
         return ()
 
 
+class GpuIndexMappingStrategy:
+    def __init__(self, ctx: KernelCreationContext, gpu_options: GpuOptions):
+        self._ctx = ctx
+        self._scheme: GpuIndexingScheme = gpu_options.get_option("indexing_scheme")
+        self._factory = AstFactory(ctx)
+
+    def create_axes(self, body: PsBlock, ispace: IterationSpace) -> PsBlock:
+        match ispace:
+            case FullIterationSpace():
+                kernel_ast = self._dense_ispace_axes(body, ispace)
+            case SparseIterationSpace():
+                kernel_ast = self._sparse_ispace_axes(body, ispace)
+            case _:
+                assert False, "Invalid ispace type"
+
+        return kernel_ast
+
+    def _dense_ispace_axes(self, body: PsBlock, ispace: FullIterationSpace) -> PsBlock:
+        cube = self._factory.cube_from_ispace(ispace, body)
+
+        canonicalize = CanonicalizeSymbols(self._ctx, True)
+        cube = cast(PsAxesCube, canonicalize(cube))
+
+        strategy = self._get_dense_strategy(ispace)
+        kernel_ast: PsBlock = strategy(cube)
+
+        return kernel_ast
+
+    def _get_dense_strategy(self, ispace: FullIterationSpace) -> AxisExpansionStrategy:
+        ae = AxisExpansion(self._ctx)
+
+        match self._scheme:
+            case GpuIndexingScheme.Linear3D:
+                if ispace.rank > 3:
+                    raise CodegenError(
+                        f"Cannot handle {ispace.rank}-dimensional iteration space using the Linear3D indexing scheme"
+                    )
+
+                return ae.create_strategy(
+                    [
+                        ae.gpu_block_x_thread(dim)
+                        for dim in ["x", "y", "z"][: ispace.rank]
+                    ][::-1]
+                )
+
+            case GpuIndexingScheme.Blockwise4D:
+                if ispace.rank > 4:
+                    raise CodegenError(
+                        f"Cannot handle {ispace.rank}-dimensional iteration space using the Blockwise4D indexing scheme"
+                    )
+
+                return ae.create_strategy(
+                    [
+                        ae.gpu_block(dim)
+                        for dim in ["x", "y", "z"][: ispace.rank - 1][::-1]
+                    ]
+                    + [ae.gpu_thread("x")]
+                )
+
+            case _:
+                raise ValueError(f"Unknown indexing scheme: {self._scheme}")
+
+    def _sparse_ispace_axes(
+        self, body: PsBlock, ispace: SparseIterationSpace
+    ) -> PsBlock:
+        body.statements = (
+            ispace.get_spatial_counter_declarations(self._ctx) + body.statements
+        )
+        cube = self._factory.cube_from_ispace(ispace, body)
+
+        canonicalize = CanonicalizeSymbols(self._ctx, True)
+        cube = cast(PsAxesCube, canonicalize(cube))
+
+        strategy = self._get_sparse_strategy()
+        kernel_ast: PsBlock = strategy(cube)
+
+        return kernel_ast
+
+    def _get_sparse_strategy(self) -> AxisExpansionStrategy:
+        ae = AxisExpansion(self._ctx)
+
+        match self._scheme:
+            case GpuIndexingScheme.Linear3D:
+                return ae.create_strategy([ae.gpu_block_x_thread("x")])
+
+            case GpuIndexingScheme.Blockwise4D:
+                return ae.create_strategy([ae.gpu_thread("x")])
+
+            case _:
+                raise ValueError(f"Unknown indexing scheme: {self._scheme}")
+
+
 class GpuIndexing:
     """Factory for GPU indexing objects required during code generation.
 
     This class acts as a helper class for the code generation driver.
-    It produces both the `ThreadMapping` required by the backend,
-    as well as factories for the launch configuration required later by the runtime system.
+    It provides the factories for the launch configuration required later by the runtime system.
 
     Args:
         ctx: The kernel creation context
@@ -514,11 +613,7 @@ class GpuIndexing:
         self._manual_launch_grid = manual_launch_grid
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
 
-        self._hw_props = HardwareProperties(
-            warp_size,
-            self.get_max_threads_per_block(target),
-            self.get_max_block_sizes(target),
-        )
+        self._hw_props = self.get_hardware_properties(target, warp_size)
 
         from ..backend.kernelcreation import AstFactory
         from .driver import KernelFactory
@@ -548,16 +643,13 @@ class GpuIndexing:
                     f"Cannot determine max GPU threads per block for target {target}"
                 )
 
-    def get_thread_mapping(self) -> ThreadMapping:
-        """Retrieve a thread mapping object for use by the backend"""
-
-        from ..backend.platforms.generic_gpu import Linear3DMapping, Blockwise4DMapping
-
-        match self._scheme:
-            case GpuIndexingScheme.Linear3D:
-                return Linear3DMapping()
-            case GpuIndexingScheme.Blockwise4D:
-                return Blockwise4DMapping()
+    @staticmethod
+    def get_hardware_properties(target: Target, warp_size: int | None = None):
+        return HardwareProperties(
+            warp_size,
+            GpuIndexing.get_max_threads_per_block(target),
+            GpuIndexing.get_max_block_sizes(target),
+        )
 
     def get_launch_config_factory(self) -> Callable[[], GpuLaunchConfiguration]:
         """Retrieve a factory for the launch configuration for later consumption by the runtime system"""
