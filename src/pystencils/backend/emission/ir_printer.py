@@ -18,6 +18,9 @@ from ..ast.axes import (
     PsSimdAxis,
     PsIterationAxis,
     PsParallelLoopAxis,
+    PsGpuBlockAxis,
+    PsGpuThreadAxis,
+    PsGpuBlockXThreadAxis,
 )
 
 if TYPE_CHECKING:
@@ -165,8 +168,14 @@ class IRAstPrinter(BasePrinter):
                     directives = f"< {directives} >"
 
                 return f"parallel-loop-axis{directives}"
-            case PsSimdAxis():
-                return "simd-axis"
+            case PsSimdAxis(lanes):
+                return f"simd-axis< {lanes} >"
+            case PsGpuBlockAxis(dim):
+                return f"gpu-block-axis< {dim.name} >"
+            case PsGpuThreadAxis(dim):
+                return f"gpu-thread-axis< {dim.name} >"
+            case PsGpuBlockXThreadAxis(dim):
+                return f"gpu-block-x-thread-axis< {dim.name} >"
             case _:
                 raise NotImplementedError(
                     f"Don't know how to print axis of type{type(node)}"

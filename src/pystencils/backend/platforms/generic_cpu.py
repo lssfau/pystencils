@@ -20,27 +20,12 @@ from ...types import PsIntegerType, PsIeeeFloatType
 from .platform import Platform
 from ..exceptions import MaterializationError
 
-from ..kernelcreation import AstFactory
-from ..kernelcreation.iteration_space import (
-    IterationSpace,
-    FullIterationSpace,
-    SparseIterationSpace,
-)
-
 from ..constants import PsConstant
 from ..ast.structural import (
-    PsDeclaration,
-    PsLoop,
-    PsBlock,
     PsStructuralNode,
     PsAssignment,
 )
-from ..ast.expressions import (
-    PsSymbolExpr,
-    PsExpression,
-    PsBufferAcc,
-    PsLookup,
-)
+from ..ast.expressions import PsExpression
 from ..kernelcreation import Typifier
 from ..transformations import SelectIntrinsics
 
@@ -58,16 +43,6 @@ class GenericCpu(Platform):
     @property
     def required_headers(self) -> set[str]:
         return {"<cmath>", "<limits>", '"pystencils_runtime/generic_cpu.hpp"'}
-
-    def materialize_iteration_space(
-        self, body: PsBlock, ispace: IterationSpace
-    ) -> PsBlock:
-        if isinstance(ispace, FullIterationSpace):
-            return self._create_domain_loops(body, ispace)
-        elif isinstance(ispace, SparseIterationSpace):
-            return self._create_sparse_loop(body, ispace)
-        else:
-            raise MaterializationError(f"Unknown type of iteration space: {ispace}")
 
     def resolve_reduction(
         self,
@@ -192,55 +167,6 @@ class GenericCpu(Platform):
             raise MaterializationError(
                 f"No implementation available for function {call_func} on data type {dtype}"
             )
-
-    #   Internals
-
-    def _create_domain_loops(
-        self, body: PsBlock, ispace: FullIterationSpace
-    ) -> PsBlock:
-        factory = AstFactory(self._ctx)
-
-        #   Determine loop order by permuting dimensions
-        archetype_field = ispace.archetype_field
-        if archetype_field is not None:
-            loop_order = archetype_field.layout
-        else:
-            loop_order = None
-
-        loops = factory.loops_from_ispace(ispace, body, loop_order)
-        return PsBlock([loops])
-
-    def _create_sparse_loop(self, body: PsBlock, ispace: SparseIterationSpace):
-        factory = AstFactory(self._ctx)
-
-        mappings = [
-            PsDeclaration(
-                PsSymbolExpr(ctr),
-                PsLookup(
-                    PsBufferAcc(
-                        ispace.index_list.base_pointer,
-                        (
-                            PsExpression.make(ispace.sparse_counter),
-                            factory.parse_index(0),
-                        ),
-                    ),
-                    coord.name,
-                ),
-            )
-            for ctr, coord in zip(ispace.spatial_indices, ispace.coordinate_members)
-        ]
-
-        body = PsBlock(mappings + body.statements)
-
-        loop = PsLoop(
-            PsSymbolExpr(ispace.sparse_counter),
-            PsExpression.make(PsConstant(0, self._ctx.index_dtype)),
-            PsExpression.make(ispace.index_list.shape[0]),
-            PsExpression.make(PsConstant(1, self._ctx.index_dtype)),
-            body,
-        )
-
-        return PsBlock([loop])
 
 
 class GenericVectorCpu(GenericCpu, ABC):

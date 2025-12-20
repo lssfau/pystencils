@@ -43,13 +43,16 @@ class DefaultCpuLoopStrategies:
             raise NotImplementedError("CL-zeroing not implemented yet")
 
     def create_axes(self, body: PsBlock, ispace: IterationSpace) -> PsBlock:
+        kernel_ast: PsBlock
         match ispace:
             case FullIterationSpace():
-                return self._dense_ispace_axes(body, ispace)
+                kernel_ast = self._dense_ispace_axes(body, ispace)
             case SparseIterationSpace():
-                return self._sparse_ispace_axes(body, ispace)
+                kernel_ast = self._sparse_ispace_axes(body, ispace)
             case _:
                 assert False, "Invalid ispace type"
+
+        return kernel_ast
 
     def _dense_ispace_axes(self, body: PsBlock, ispace: FullIterationSpace) -> PsBlock:
         omp_options = self._cpu_options.openmp
@@ -70,7 +73,6 @@ class DefaultCpuLoopStrategies:
 
         omp_kwargs = self._get_parallel_loop_kwargs()
 
-        ispace = self._ctx.get_full_iteration_space()
         cube = self._factory.cube_from_ispace(ispace, body)
 
         canonicalize = CanonicalizeSymbols(self._ctx, True)

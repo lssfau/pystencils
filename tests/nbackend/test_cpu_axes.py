@@ -54,8 +54,8 @@ def _make_kernel(
     materialize_axes = MaterializeAxes(ctx)
     ast = materialize_axes(loops)
 
-    reduce_to_memory = ReductionsToMemory(ctx, ctx.reduction_data.values())
-    ast = reduce_to_memory(ast)
+    r_to_mem = ReductionsToMemory(ctx, ctx.reduction_data.values())
+    ast = r_to_mem(ast)
 
     lower = LowerToC(ctx)
     ast = cast(PsBlock, lower(ast))

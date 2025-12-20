@@ -1,11 +1,13 @@
 from __future__ import annotations
-from typing import overload, cast
+from typing import overload, cast, Iterable
 from dataclasses import dataclass
 from itertools import chain
 
-from ..kernelcreation import KernelCreationContext
+from ..kernelcreation import Typifier
+from ..kernelcreation.context import KernelCreationContext, ReductionInfo
 
 from ..memory import PsSymbol
+from ..functions import GpuGridScope, PsGpuIndexingFunction
 
 from ..ast.analysis import collect_undefined_symbols
 from ..ast.structural import (
@@ -15,8 +17,9 @@ from ..ast.structural import (
     PsDeclaration,
     PsPragma,
     PsAssignment,
+    PsConditional,
 )
-from ..ast.expressions import PsSymbolExpr
+from ..ast.expressions import PsExpression, PsSymbolExpr, PsLt, PsAnd
 from ..ast.vector import PsVecBroadcast, PsVecHorizontal
 from ..ast.axes import (
     PsAxisRange,
@@ -24,11 +27,16 @@ from ..ast.axes import (
     PsParallelLoopAxis,
     PsSimdAxis,
     PsIterationAxis,
+    PsGpuIndexingAxis,
+    PsGpuBlockAxis,
+    PsGpuThreadAxis,
+    PsGpuBlockXThreadAxis,
 )
 from ..ast.iteration import dfs_preorder
 
 from .ast_vectorizer import AstVectorizer, VectorizationAxis, VectorizationContext
 from .eliminate_constants import TypifyAndFold
+from .rewrite import collapse_blocks
 
 
 @dataclass
@@ -46,9 +54,23 @@ class MaterializationContext:
 
 
 class MaterializeAxes:
+    """Materialize iteration axes.
+
+    This transformer converts all iteration axis in a given AST to their lower-level
+    implementation.
+    It introduces loops for loop axes,
+    OpenMP constructs for parallel loops,
+    applies vectorization in SIMD axes
+    and constructs GPU index translations for GPU axes.
+
+    The axis materializer furthermore introduces declarations and agglomeration of modulo
+    variables for reductions occuring in the kernel.
+    """
+
     def __init__(self, ctx: KernelCreationContext) -> None:
         self._ctx = ctx
         self._type_fold = TypifyAndFold(ctx)
+        self._typify = Typifier(ctx)
 
     @overload
     def __call__(self, ast: PsBlock) -> PsBlock: ...
@@ -63,27 +85,23 @@ class MaterializeAxes:
         #   Initialize modulo variable stacks
         mc = MaterializationContext(
             {
-                name: [ModuloVariablePack(name, (rinfo.local_symbol,), (), ())]
+                name: [self._create_root_mvpack(name, rinfo)]
                 for name, rinfo in self._ctx.reduction_data.items()
             }
         )
 
-        result = self.visit(ast, mc)
+        if not isinstance(ast, PsBlock):
+            ast = PsBlock([ast])
 
-        nodes_before: list[PsStructuralNode] = []
-        nodes_after: list[PsStructuralNode] = []
-        for mvstack in mc.modulo_variables.values():
-            if mvstack:
-                for mvpack in mvstack[::-1]:
-                    nodes_before += list(mvpack.declarations)
-                    nodes_after = list(mvpack.reduction) + nodes_after
+        #   Transform remaining AST
+        body = cast(PsBlock, self.visit(ast, mc))
 
-        if nodes_before or nodes_after:
-            if not isinstance(result, PsBlock):
-                result = PsBlock([result])
-            result.statements = nodes_before + result.statements + nodes_after
+        #   Introduce and collapse reduction modulo variables
+        body = self._collapse_modulo_variables(body, mc.modulo_variables.keys(), mc)
 
-        return result
+        body = cast(PsBlock, collapse_blocks(body))
+
+        return body
 
     def visit(
         self, node: PsStructuralNode, mc: MaterializationContext
@@ -113,8 +131,12 @@ class MaterializeAxes:
                         nodes_after = list(mvpack.reduction) + nodes_after
 
                     rinfo = self._ctx.reduction_data[reduction_id]
+
+                    last_mvpack = mvstack[0]
+                    assert len(last_mvpack.symbols) == 1
+
                     parallel_construct += (
-                        f" reduction({rinfo.op.value}: {rinfo.local_symbol.name})"
+                        f" reduction({rinfo.op.value}: {last_mvpack.symbols[0].name})"
                     )
 
                 for_construct = "omp for"
@@ -199,17 +221,50 @@ class MaterializeAxes:
 
                 return simd_body
 
+            case PsGpuIndexingAxis():
+                #   Combine as many immediately nested indexing axes as possible into one guard
+                nested_axes, body = self._collect_nested_gpu_axes(node)
+                body = cast(PsBlock, self.visit(body, mc))
+                result = self._handle_nested_gpu_axes(nested_axes, body)
+                return result
+
             case PsIterationAxis():
                 raise NotImplementedError(
                     f"Don't know how to materialize axis of type {type(node)}"
                 )
 
-            case other:
-                other.children = [
+            case _:
+                node.children = [
                     (self.visit(c, mc) if isinstance(c, PsStructuralNode) else c)
-                    for c in other.children
+                    for c in node.children
                 ]
-                return other
+                return node
+
+    def _create_root_mvpack(
+        self, name: str, reduction_info: ReductionInfo
+    ) -> ModuloVariablePack:
+        local_symbol = reduction_info.local_symbol
+
+        return ModuloVariablePack(name, (local_symbol,), (), ())
+
+    def _collapse_modulo_variables(
+        self,
+        block: PsBlock,
+        var_names: Iterable[str],
+        mc: MaterializationContext,
+    ) -> PsBlock:
+        nodes_before: list[PsStructuralNode] = []
+        nodes_after: list[PsStructuralNode] = []
+        for mvstack in [mc.modulo_variables[name] for name in var_names]:
+            if mvstack:
+                for mvpack in mvstack:
+                    nodes_before += list(mvpack.declarations)
+                    nodes_after = list(mvpack.reduction) + nodes_after
+                mvstack.clear()
+
+        block.statements = nodes_before + block.statements + nodes_after
+
+        return block
 
     def _find_modulo_variables(
         self, ast: PsStructuralNode, mc: MaterializationContext
@@ -228,3 +283,66 @@ class MaterializeAxes:
                     result[mvsymb] = mvpack.reduction_id
 
         return result
+
+    def _collect_nested_gpu_axes(
+        self, first: PsGpuIndexingAxis
+    ) -> tuple[list[PsGpuIndexingAxis], PsBlock]:
+        nested_axes: list[PsGpuIndexingAxis] = []
+        candidate: PsGpuIndexingAxis | None = first
+
+        while candidate is not None:
+            nested_axes.append(candidate)
+
+            next_candidate: PsGpuIndexingAxis | None = None
+            if len(candidate.body.statements) == 1:
+                if isinstance(candidate.body.statements[0], PsGpuIndexingAxis):
+                    next_candidate = candidate.body.statements[0]
+
+            candidate = next_candidate
+
+        body = nested_axes[-1].body
+        return nested_axes, body
+
+    def _gpu_axis_ctr_and_guard(
+        self, axis: PsGpuIndexingAxis
+    ) -> tuple[PsDeclaration, PsExpression]:
+        gpu_idx: PsExpression
+        match axis:
+            case PsGpuBlockAxis(gpu_dim):
+                gpu_idx = PsGpuIndexingFunction(GpuGridScope.blockIdx, gpu_dim)()
+
+            case PsGpuThreadAxis(gpu_dim):
+                gpu_idx = PsGpuIndexingFunction(GpuGridScope.threadIdx, gpu_dim)()
+
+            case PsGpuBlockXThreadAxis(gpu_dim):
+                blockIdx = PsGpuIndexingFunction(GpuGridScope.blockIdx, gpu_dim)
+                blockDim = PsGpuIndexingFunction(GpuGridScope.blockDim, gpu_dim)
+                threadIdx = PsGpuIndexingFunction(GpuGridScope.threadIdx, gpu_dim)
+                gpu_idx = blockIdx() * blockDim() + threadIdx()
+
+        xrange = axis.range
+
+        ctr_decl = self._type_fold(
+            PsDeclaration(xrange.counter, xrange.start + xrange.step * gpu_idx)
+        )
+        ctr_guard = PsLt(xrange.counter.clone(), xrange.stop)
+
+        return ctr_decl, ctr_guard
+
+    def _handle_nested_gpu_axes(self, axes: list[PsGpuIndexingAxis], body: PsBlock):
+        ctr_decls: list[PsDeclaration] = []
+        guard_expr: PsExpression | None = None
+
+        for ax in axes:
+            ctr_decl, ctr_guard = self._gpu_axis_ctr_and_guard(ax)
+            ctr_decls.append(ctr_decl)
+
+            if guard_expr:
+                guard_expr = PsAnd(guard_expr, ctr_guard)
+            else:
+                guard_expr = ctr_guard
+
+        assert guard_expr is not None
+        guard_expr = self._type_fold(guard_expr)
+
+        return PsBlock(ctr_decls + [PsConditional(guard_expr, body)])

@@ -33,14 +33,29 @@ from pystencils.backend.ast.expressions import (
     PsLt,
     PsCall,
     PsTernary,
-    PsMemAcc
+    PsMemAcc,
 )
 from pystencils.backend.ast.vector import PsVecBroadcast, PsVecHorizontal
 from pystencils.backend.ast import dfs_preorder
 from pystencils.backend.ast.expressions import PsAdd
 from pystencils.backend.constants import PsConstant
-from pystencils.backend.functions import CFunction, PsConstantFunction, ConstantFunctions, PsReductionWriteBack
-from pystencils.types import constify, create_type, create_numeric_type, PsVectorType, PsTypeError, PsPointerType
+from pystencils.backend.functions import (
+    CFunction,
+    PsConstantFunction,
+    ConstantFunctions,
+    PsReductionWriteBack,
+    PsGpuIndexingFunction,
+    GpuGridDimension,
+    GpuGridScope,
+)
+from pystencils.types import (
+    constify,
+    create_type,
+    create_numeric_type,
+    PsVectorType,
+    PsTypeError,
+    PsPointerType,
+)
 from pystencils.types.quick import Fp, Int, Bool, Arr, Ptr
 from pystencils.backend.kernelcreation.context import KernelCreationContext
 from pystencils.backend.kernelcreation.freeze import FreezeExpressions
@@ -94,7 +109,15 @@ def test_typify_constants():
     freeze = FreezeExpressions(ctx)
     typify = Typifier(ctx)
 
-    for constant in [sp.sympify(0), sp.sympify(1), sp.Rational(1, 2), sp.pi, sp.E, sp.oo, - sp.oo]:
+    for constant in [
+        sp.sympify(0),
+        sp.sympify(1),
+        sp.Rational(1, 2),
+        sp.pi,
+        sp.E,
+        sp.oo,
+        -sp.oo,
+    ]:
         #   Constant on its own
         expr, _ = typify.typify_expression(freeze(constant), ctx.default_dtype)
 
@@ -116,8 +139,18 @@ def test_constants_contextual_typing():
     fp16 = Fp(16)
     x = TypedSymbol("x", fp16)
 
-    for constant in [sp.sympify(0), sp.sympify(1), sp.Rational(1, 2), sp.pi, sp.E, sp.oo, - sp.oo]:
-        expr = freeze(constant) + freeze(x)  # Freeze separately such that SymPy does not simplify
+    for constant in [
+        sp.sympify(0),
+        sp.sympify(1),
+        sp.Rational(1, 2),
+        sp.pi,
+        sp.E,
+        sp.oo,
+        -sp.oo,
+    ]:
+        expr = freeze(constant) + freeze(
+            x
+        )  # Freeze separately such that SymPy does not simplify
         expr = typify(expr)
 
         assert isinstance(expr, PsAdd)
@@ -137,7 +170,7 @@ def test_no_integer_infinities_and_transcendentals():
     freeze = FreezeExpressions(ctx)
     typify = Typifier(ctx)
 
-    for sp_expr in [sp.oo, - sp.oo, sp.pi, sp.E]:
+    for sp_expr in [sp.oo, -sp.oo, sp.pi, sp.E]:
         expr = freeze(sp_expr)
         with pytest.raises(PsTypeError):
             typify.typify_expression(expr, Int(32))
@@ -154,11 +187,15 @@ def test_typify_reduction_writeback():
         ptr_expr = freeze(arg1)
         symbol_expr = freeze(arg2)
 
-        writeback = PsCall(PsReductionWriteBack(ReductionOp.Add), [ptr_expr, symbol_expr])
+        writeback = PsCall(
+            PsReductionWriteBack(ReductionOp.Add), [ptr_expr, symbol_expr]
+        )
         return typify(writeback)
 
     # check types for successful usage of PsReductionWriteBack
-    successful_writeback = _typify(TypedSymbol("ptr", PsPointerType(dtype)), sp.Symbol("w"))
+    successful_writeback = _typify(
+        TypedSymbol("ptr", PsPointerType(dtype)), sp.Symbol("w")
+    )
 
     assert successful_writeback.dtype == dtype
 
@@ -172,7 +209,10 @@ def test_typify_reduction_writeback():
 
     # failing case: no scalar passed as second arg
     with pytest.raises(TypificationError):
-        _ = _typify(TypedSymbol("c", PsPointerType(dtype)), TypedSymbol("d", PsVectorType(dtype, 4)))
+        _ = _typify(
+            TypedSymbol("c", PsPointerType(dtype)),
+            TypedSymbol("d", PsVectorType(dtype, 4)),
+        )
 
 
 def test_lhs_constness():
@@ -363,15 +403,13 @@ def test_invalid_subscript():
         expr = typify(expr)
 
     #   raw pointers are not arrays, cannot enter subscript
-    ptr = sp.IndexedBase(
-        TypedSymbol("ptr", Ptr(Int(16)))
-    )
+    ptr = sp.IndexedBase(TypedSymbol("ptr", Ptr(Int(16))))
     expr = freeze(ptr[37])
-    
+
     with pytest.raises(TypificationError):
         expr = typify(expr)
 
-    
+
 def test_mem_acc():
     ctx = KernelCreationContext(default_dtype=Fp(16))
     freeze = FreezeExpressions(ctx)
@@ -379,7 +417,7 @@ def test_mem_acc():
 
     ptr = TypedSymbol("ptr", Ptr(Int(64)))
     idx = TypedSymbol("idx", Int(32))
-    
+
     expr = freeze(mem_acc(ptr, idx))
     expr = typify(expr)
 
@@ -395,17 +433,17 @@ def test_invalid_mem_acc():
 
     non_ptr = TypedSymbol("non_ptr", Int(64))
     idx = TypedSymbol("idx", Int(32))
-    
+
     expr = freeze(mem_acc(non_ptr, idx))
-    
+
     with pytest.raises(TypificationError):
         _ = typify(expr)
-    
+
     arr = TypedSymbol("arr", Arr(Int(64), (31,)))
     idx = TypedSymbol("idx", Int(32))
-    
+
     expr = freeze(mem_acc(arr, idx))
-    
+
     with pytest.raises(TypificationError):
         _ = typify(expr)
 
@@ -455,7 +493,7 @@ def test_array_declarations():
     typify = Typifier(ctx)
 
     x, y, z = sp.symbols("x, y, z")
-    
+
     #   Array type fallback to default
     arr1 = sp.Symbol("arr1")
     decl = freeze(Assignment(arr1, sp.Tuple(1, 2, 3, 4)))
@@ -627,7 +665,7 @@ def test_typify_bools_and_relations():
     expr = PsAnd(PsEq(x, y), PsAnd(true, PsNot(PsOr(p, q))))
     expr = typify(expr)
 
-    assert expr.dtype == Bool() 
+    assert expr.dtype == Bool()
 
 
 def test_bool_in_numerical_context():
@@ -739,7 +777,10 @@ def test_typify_integer_vectors():
     ctx = KernelCreationContext()
     typify = Typifier(ctx)
 
-    a, b, c = [PsExpression.make(ctx.get_symbol(name, PsVectorType(Int(32), 4))) for name in "abc"]
+    a, b, c = [
+        PsExpression.make(ctx.get_symbol(name, PsVectorType(Int(32), 4)))
+        for name in "abc"
+    ]
     d, e = [PsExpression.make(ctx.get_symbol(name, Int(32))) for name in "de"]
 
     result = typify(a + (b / c) - a * c)
@@ -753,8 +794,14 @@ def test_typify_bool_vectors():
     ctx = KernelCreationContext()
     typify = Typifier(ctx)
 
-    x, y = [PsExpression.make(ctx.get_symbol(name, PsVectorType(Fp(32), 4))) for name in "xy"]
-    p, q = [PsExpression.make(ctx.get_symbol(name, PsVectorType(Bool(), 4))) for name in "pq"]
+    x, y = [
+        PsExpression.make(ctx.get_symbol(name, PsVectorType(Fp(32), 4)))
+        for name in "xy"
+    ]
+    p, q = [
+        PsExpression.make(ctx.get_symbol(name, PsVectorType(Bool(), 4)))
+        for name in "pq"
+    ]
 
     result = typify(PsAnd(PsOr(p, q), p))
     assert result.get_dtype() == PsVectorType(Bool(), 4)
@@ -769,7 +816,7 @@ def test_propagate_constant_type_in_broadcast():
     for constant in [
         PsConstantFunction(ConstantFunctions.E, fp16)(),
         PsConstantFunction(ConstantFunctions.PosInfinity, fp16)(),
-        PsConstantExpr(PsConstant(3.5, fp16))
+        PsConstantExpr(PsConstant(3.5, fp16)),
     ]:
         ctx = KernelCreationContext(default_dtype=Fp(32))
         typify = Typifier(ctx)
@@ -793,7 +840,9 @@ def test_typify_horizontal_vector_reductions():
     # create valid horizontal and check if expression type is scalar
     result = typify(
         PsVecHorizontal(
-            create_symb_expr("s1", stype), create_symb_expr("v1", vtype), ReductionOp.Add
+            create_symb_expr("s1", stype),
+            create_symb_expr("v1", vtype),
+            ReductionOp.Add,
         )
     )
     assert result.get_dtype() == stype
@@ -802,7 +851,9 @@ def test_typify_horizontal_vector_reductions():
     with pytest.raises(TypificationError):
         _ = typify(
             PsVecHorizontal(
-                create_symb_expr("s2", stype), create_symb_expr("v2", stype), reduction_op
+                create_symb_expr("s2", stype),
+                create_symb_expr("v2", stype),
+                reduction_op,
             )
         )
 
@@ -810,7 +861,9 @@ def test_typify_horizontal_vector_reductions():
     with pytest.raises(TypificationError):
         _ = typify(
             PsVecHorizontal(
-                create_symb_expr("s3", vtype), create_symb_expr("v3", vtype), reduction_op
+                create_symb_expr("s3", vtype),
+                create_symb_expr("v3", vtype),
+                reduction_op,
             )
         )
 
@@ -818,7 +871,9 @@ def test_typify_horizontal_vector_reductions():
     with pytest.raises(TypificationError):
         _ = typify(
             PsVecHorizontal(
-                create_symb_expr("s4", Int(32)), create_symb_expr("v4", vtype), reduction_op
+                create_symb_expr("s4", Int(32)),
+                create_symb_expr("v4", vtype),
+                reduction_op,
             )
         )
 
@@ -852,7 +907,7 @@ def test_typify_gpu_intrinsics():
     assert expr.get_dtype() == create_type("float32")
 
     w = TypedSymbol("w", "float64")
-    
+
     expr = freeze(fast_division(w, 31.2))
     with pytest.raises(TypificationError):
         typify(expr)
@@ -860,3 +915,16 @@ def test_typify_gpu_intrinsics():
     expr = freeze(fast_sqrt(w))
     with pytest.raises(TypificationError):
         typify(expr)
+
+
+def test_typify_gpu_indexing():
+    ctx = KernelCreationContext(default_dtype=create_type("float32"))
+    typify = Typifier(ctx)
+
+    expr = PsGpuIndexingFunction(GpuGridScope.blockDim, GpuGridDimension.Y)()
+    expr = typify(expr)
+    assert expr.dtype == ctx.index_dtype
+
+    expr = PsGpuIndexingFunction(GpuGridScope.threadIdx, GpuGridDimension.Z)()
+    expr = typify(expr)
+    assert expr.dtype == ctx.index_dtype

@@ -42,3 +42,20 @@ def substitute_symbols(
         case _:
             node.children = [substitute_symbols(c, subs) for c in node.children]
             return node
+
+
+def collapse_blocks(node: PsStructuralNode) -> PsStructuralNode:
+    """Collapse trivially nested blocks to improve readability.
+
+    Blocks that just have another block as their single child are collapsed.
+    """
+
+    match node:
+        case PsBlock([PsBlock()]):
+            return collapse_blocks(node.statements[0])
+        case _:
+            node.children = [
+                (collapse_blocks(c) if isinstance(c, PsStructuralNode) else c)
+                for c in node.children
+            ]
+            return node

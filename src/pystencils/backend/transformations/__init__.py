@@ -34,6 +34,8 @@ Code Rewriting
 --------------
 
 .. autofunction:: substitute_symbols
+
+.. autofunction:: collapse_blocks
     
 Code Motion
 -----------
@@ -75,7 +77,6 @@ Code Lowering and Materialization
 ---------------------------------
 
 .. autoclass:: ReductionsToMemory
-    :members:
 
 .. autoclass:: LowerToC
     :members: __call__
@@ -90,7 +91,7 @@ Code Lowering and Materialization
 
 from .canonicalize_symbols import CanonicalizeSymbols
 from .canonical_clone import CanonicalClone
-from .rewrite import substitute_symbols
+from .rewrite import substitute_symbols, collapse_blocks
 from .eliminate_constants import EliminateConstants, TypifyAndFold
 from .eliminate_branches import EliminateBranches
 from .hoist_iteration_invariant_decls import HoistIterationInvariantDeclarations
@@ -108,6 +109,7 @@ __all__ = [
     "CanonicalizeSymbols",
     "CanonicalClone",
     "substitute_symbols",
+    "collapse_blocks",
     "EliminateConstants",
     "TypifyAndFold",
     "EliminateBranches",
