@@ -338,7 +338,7 @@ Let's go through the required lowering passes one by one.
 
 ### Select Vector Intrinsics
 
-Next, we lower vectorized operations and functions to a target architecture's vector intrinsics.
+First, we will lower vectorized operations and functions to a target architecture's vector intrinsics.
 We will use an x86 AVX512 architecture, and thus need to set up the corresponding [platform](Platform)
 object:
 

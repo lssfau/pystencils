@@ -98,6 +98,8 @@ def testsuite(session: nox.Session, cupy_version: str | None):
     if cupy_version is not None:
         install_cupy(session, cupy_version, skip_if_no_cuda=True)
 
+    #   FIXME remove once https://github.com/bashtage/randomgen/issues/426 is resolved
+    session.install("numpy<2.4")
     editable_install(session, ["alltrafos", "use_cython", "interactive", "testsuite"])
 
     num_cores = os.cpu_count()

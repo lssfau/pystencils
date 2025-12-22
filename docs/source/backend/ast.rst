@@ -18,7 +18,6 @@ This means that:
 The first requirement can be ensured by running the `Typifier` on each newly constructed subtree.
 The other three requirements are ensured by the `CanonicalizeSymbols` pass,
 which should be run first before applying any optimizing transformations.
-All transformations in this module retain canonicality of the AST.
 
 Canonicality allows transformations to forego various checks that would otherwise be necessary
 to prove their legality.
