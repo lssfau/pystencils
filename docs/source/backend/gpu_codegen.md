@@ -140,8 +140,26 @@ ps.inspect(kernel_ast)
 The resulting code uses IR functions `blockIdx.Y()`, `threadIdx.Y()`, etc., to define
 the axis counters. Also, kernel guards are introduced to make sure the kernel body runs only
 if the indices are inside the iteration space.
-Furthermore, you can see that the reduction to `w` is realized as an abstract write-back function
-within the iteration guard.
+The axes materializer attempts to combine as many directly nested GPU axes as it can find
+into a single guard.
+
+## Reductions to Memory
+
+At this point, the reduction to `wmax` needs to be completed by adding its memory-write-back code.
+We introduce this via the {any}`ReductionsToMemory` pass.
+The write-back IR function will later be transformed into an optimized GPU reduction implementation
+by the {any}`SelectFunctions` pass.
+
+```{code-cell} ipython3
+:tags: [hide-output]
+
+from pystencils.backend.transformations import ReductionsToMemory
+
+reduce_to_memory = ReductionsToMemory(ctx, ctx.reduction_data.values())
+kernel_ast = reduce_to_memory(kernel_ast)
+
+ps.inspect(kernel_ast)
+```
 
 ## Lowering
 
