@@ -71,7 +71,10 @@ class Target(Flag):
     """x86 architecture with AVX512 vector extensions (architecture level x86-64-v4) and fp16-support."""
 
     ARM_NEON = _CPU | _VECTOR | _ARM | _NEON
-    """ARM architecture with NEON vector extensions"""
+    """64-bit ARM architecture with NEON vector instructions"""
+
+    ARM_NEON_FP16 = _CPU | _VECTOR | _ARM | _NEON | _FP16
+    """64-bit ARM architecture with NEON vector instructions and half-precision support"""
 
     ARM_SVE = _CPU | _VECTOR | _ARM | _SVE
     """ARM architecture with SVE vector extensions"""
@@ -135,7 +138,7 @@ class Target(Flag):
         assert dtype.itemsize is not None
 
         match self:
-            case Target.X86_SSE:
+            case Target.X86_SSE | Target.ARM_NEON | Target.ARM_NEON_FP16:
                 return 128 // (dtype.itemsize * 8)
             case Target.X86_AVX:
                 return 256 // (dtype.itemsize * 8)
@@ -200,7 +203,9 @@ def _available_vector_targets() -> tuple[Target, ...]:
 
     import platform
 
-    if platform.machine() in ["x86_64", "x86", "AMD64", "i386"]:
+    machine_spec = platform.machine()
+
+    if machine_spec in ["x86_64", "x86", "AMD64", "i386"]:
         try:
             from cpuinfo import get_cpu_info
         except ImportError:
@@ -224,6 +229,32 @@ def _available_vector_targets() -> tuple[Target, ...]:
 
         if {"avx512_fp16"} < flags:
             targets.append(Target.X86_AVX512_FP16)
+    elif machine_spec in ["arm64", "ARM64", "aarch64"]:
+        targets.append(Target.ARM_NEON)
+
+        if platform.system() == "Darwin":
+            if _darwin_query_cpu_feature(b"hw.optional.arm.FEAT_FP16"):
+                targets.append(Target.ARM_NEON_FP16)
+
+        elif platform.system() == "Linux":
+            try:
+                from cpuinfo import get_cpu_info
+
+                flags = set(get_cpu_info()["flags"])
+
+                if "fphp" in flags:
+                    targets.append(Target.ARM_NEON_FP16)
+            except ImportError:
+                warn(
+                    "Unable to determine available ARM vector CPU features for this system: "
+                    "py-cpuinfo is not available.",
+                    UserWarning,
+                )
+                return ()
+        else:
+            warn(
+                f"Unable to determine ARM architecture features on system {platform.system()}"
+            )
     else:
         warn(
             "Unable to determine available vector CPU targets for this system: "
@@ -232,3 +263,19 @@ def _available_vector_targets() -> tuple[Target, ...]:
         )
 
     return tuple(targets)
+
+
+def _darwin_query_cpu_feature(feature: bytes) -> bool:
+    """See https://developer.apple.com/documentation/kernel/1387446-sysctlbyname/determining_instruction_set_characteristics"""  # noqa: E501
+    from ctypes import CDLL, c_int, c_size_t, sizeof, byref
+
+    libc = CDLL("/usr/lib/libc.dylib")
+    value = c_int(0)
+    size = c_size_t(sizeof(value))
+    status = libc.sysctlbyname(feature, byref(value), byref(size), None, 0)
+    if status == 0:
+        return value.value == 1
+    else:
+        raise RuntimeError(
+            f"Error while retrieving CPU features. `sysctlbyname` returned {status}"
+        )

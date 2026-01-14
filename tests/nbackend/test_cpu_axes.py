@@ -15,6 +15,7 @@ from pystencils.backend.platforms import (
     GenericVectorCpu,
     X86VectorCpu,
     X86VectorArch,
+    NeonCpu,
 )
 from pystencils.backend.ast.structural import PsBlock
 from pystencils.backend.transformations import (
@@ -44,8 +45,10 @@ def _make_kernel(
             platform = X86VectorCpu(ctx, X86VectorArch.SSE)
         case ps.Target.X86_AVX:
             platform = X86VectorCpu(ctx, X86VectorArch.AVX)
-        case ps.Target.X86_AVX512:
+        case ps.Target.X86_AVX512 | ps.Target.X86_AVX512_FP16:
             platform = X86VectorCpu(ctx, X86VectorArch.AVX512)
+        case ps.Target.ARM_NEON | ps.Target.ARM_NEON_FP16:
+            platform = NeonCpu(ctx)
         case _:
             platform = GenericCpu(ctx)
 
@@ -111,7 +114,9 @@ def test_omp_with_reduction(rank: int):
 
 @pytest.mark.parametrize("rank", [1, 2, 3])
 @pytest.mark.parametrize("target", ps.Target.available_vector_cpu_targets())
-@pytest.mark.parametrize("remainder_loop", [False, True], ids=["no_remainder", "with_remainder"])
+@pytest.mark.parametrize(
+    "remainder_loop", [False, True], ids=["no_remainder", "with_remainder"]
+)
 def test_simd_with_reduction(rank: int, target: ps.Target, remainder_loop: bool):
     rng = np.random.default_rng(seed=514)
     L = 51 if remainder_loop else 48

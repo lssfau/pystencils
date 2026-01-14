@@ -154,8 +154,10 @@ class CpuJit(JitBase):
 
         result = subprocess.run(args, capture_output=True)
         if result.returncode != 0:
+            cargs = " ".join(args)
             raise JitError(
                 "Compilation failed: C++ compiler terminated with an error.\n"
+                + f"Compiler arguments: {cargs}\n"
                 + result.stderr.decode()
             )
         else:

@@ -55,6 +55,7 @@ def binary_function(name, xp):
 
 
 AVAIL_TARGETS = Target.available_targets()
+TARGETS_WITHOUT_VECTOR_CPUS = [t for t in AVAIL_TARGETS if not t.is_vector_cpu()]
 
 
 @pytest.fixture
@@ -64,7 +65,16 @@ def function_domain(function_name, dtype):
 
     match function_name:
         case (
-            "exp" | "sin" | "cos" | "sinh" | "cosh" | "tanh" | "atan" | "abs" | "floor" | "ceil"
+            "exp"
+            | "sin"
+            | "cos"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "atan"
+            | "abs"
+            | "floor"
+            | "ceil"
         ):
             return np.concatenate(
                 [
@@ -150,12 +160,17 @@ def function_domain(function_name, dtype):
                 "acos",
                 "atan",
             ),
-            [t for t in AVAIL_TARGETS if Target._X86 not in t],
+            TARGETS_WITHOUT_VECTOR_CPUS,
         )
     )
     + list(
         product(
-            ["floor", "ceil"], [t for t in AVAIL_TARGETS if Target._AVX512 not in t]
+            ["floor", "ceil"],
+            [
+                t
+                for t in AVAIL_TARGETS
+                if not (Target._AVX512 in t or Target._NEON in t)
+            ],
         )
     )
     + list(product(["sqrt", "abs"], AVAIL_TARGETS)),
@@ -187,9 +202,7 @@ def test_unary_functions(gen_config, xp, function_name, dtype, function_domain):
 @pytest.mark.parametrize(
     "function_name,target",
     list(product(["min", "max"], AVAIL_TARGETS))
-    + list(
-        product(["pow", "atan2"], [t for t in AVAIL_TARGETS if Target._X86 not in t])
-    ),
+    + list(product(["pow", "atan2"], TARGETS_WITHOUT_VECTOR_CPUS)),
 )
 @pytest.mark.parametrize("dtype", (np.float32, np.float64))
 def test_binary_functions(gen_config, xp, function_name, dtype, function_domain):
@@ -220,23 +233,16 @@ def test_binary_functions(gen_config, xp, function_name, dtype, function_domain)
     xp.testing.assert_allclose(outp, reference, rtol=resolution)
 
 
-dtype_and_target_for_integer_funcs = pytest.mark.parametrize(
+@pytest.mark.parametrize(
     "dtype, target",
     list(product([np.int32], AVAIL_TARGETS))
     + list(
         product(
             [np.int64],
-            [
-                t
-                for t in AVAIL_TARGETS
-                if t not in (Target.X86_SSE, Target.X86_AVX)
-            ],
+            [t for t in AVAIL_TARGETS if t not in (Target.X86_SSE, Target.X86_AVX)],
         )
     ),
 )
-
-
-@dtype_and_target_for_integer_funcs
 def test_integer_abs(gen_config, xp, dtype):
     sp_func, xp_func = unary_function("abs", xp)
 
@@ -262,7 +268,26 @@ def test_integer_abs(gen_config, xp, dtype):
 
 
 @pytest.mark.parametrize("function_name", ("min", "max"))
-@dtype_and_target_for_integer_funcs
+@pytest.mark.parametrize(
+    "dtype, target",
+    list(product([np.int32], AVAIL_TARGETS))
+    + list(
+        product(
+            [np.int64],
+            [
+                t
+                for t in AVAIL_TARGETS
+                if t
+                not in (
+                    Target.X86_SSE,
+                    Target.X86_AVX,
+                    Target.ARM_NEON,
+                    Target.ARM_NEON_FP16,
+                )
+            ],
+        )
+    ),
+)
 def test_integer_binary_functions(gen_config, xp, function_name, dtype):
     sp_func, xp_func = binary_function(function_name, xp)
 

@@ -15,7 +15,12 @@ from pystencils.backend.kernelcreation import (
     AstFactory,
     FullIterationSpace,
 )
-from pystencils.backend.platforms import GenericVectorCpu, X86VectorArch, X86VectorCpu
+from pystencils.backend.platforms import (
+    GenericVectorCpu,
+    X86VectorArch,
+    X86VectorCpu,
+    NeonCpu,
+)
 from pystencils.backend.ast.structural import PsBlock
 from pystencils.backend.transformations import AxisExpansion, MaterializeAxes, LowerToC
 from pystencils.backend.constants import PsConstant
@@ -81,9 +86,25 @@ def get_setups(target: Target) -> list[VectorTestSetup]:
                 X86VectorCpu, vector_arch=X86VectorArch.AVX512_FP16
             )
             return [
-                VectorTestSetup(target, avx512_platform, 8, 32),
-                VectorTestSetup(target, avx512_platform, 16, 32),
-                VectorTestSetup(target, avx512_platform, 32, 32),
+                VectorTestSetup(target, avx512_platform, 8, 16),
+                VectorTestSetup(target, avx512_platform, 16, 16),
+                VectorTestSetup(target, avx512_platform, 32, 16),
+            ]
+
+        case Target.ARM_NEON | Target.ARM_NEON_FP16:
+            enable_fp16 = Target._FP16 in target
+            neon_platform = partial(NeonCpu, enable_fp16=enable_fp16)
+            return (
+                [
+                    VectorTestSetup(target, neon_platform, 4, 16),
+                    VectorTestSetup(target, neon_platform, 8, 16),
+                ]
+                if enable_fp16
+                else []
+            ) + [
+                VectorTestSetup(target, neon_platform, 2, 32),
+                VectorTestSetup(target, neon_platform, 4, 32),
+                VectorTestSetup(target, neon_platform, 2, 64),
             ]
 
         case _:
@@ -192,7 +213,13 @@ def test_update_kernel(vectorization_setup: VectorTestSetup, ghost_layers: int):
     src_arr = create_numpy_array_with_layout(
         shape + (2,), layout=(2, 1, 0), dtype=setup.floating_type.numpy_dtype
     )
-    rgen.random(dtype=setup.floating_type.numpy_dtype, out=src_arr)
+
+    np_ftype = setup.floating_type.numpy_dtype
+    if np_ftype == np.float16:
+        rnumbers = rgen.random(shape + (2,), dtype=np.float32)
+        src_arr[:] = rnumbers.astype(np_ftype)
+    else:
+        rgen.random(dtype=np_ftype, out=src_arr)
 
     dst_arr = create_numpy_array_with_layout(
         shape + (4,), layout=(2, 1, 0), dtype=setup.floating_type.numpy_dtype
@@ -287,11 +314,17 @@ def test_set(vectorization_setup: VectorTestSetup):
     np.testing.assert_equal(f_arr, reference)
 
 
-TEST_SETUPS_NO_SSE = [s for s in TEST_SETUPS if Target._SSE not in s.target]
+TEST_SETUPS_FOR_STRIDED_LOAD = [
+    s
+    for s in TEST_SETUPS
+    if s.target not in (Target.X86_SSE, Target.ARM_NEON, Target.ARM_NEON_FP16)
+]
 
 
 @pytest.mark.parametrize(
-    "vectorization_setup", TEST_SETUPS_NO_SSE, ids=[t.name for t in TEST_SETUPS_NO_SSE]
+    "vectorization_setup",
+    TEST_SETUPS_FOR_STRIDED_LOAD,
+    ids=[t.name for t in TEST_SETUPS_FOR_STRIDED_LOAD],
 )
 @pytest.mark.parametrize("int_or_float", ["int", "float"])
 def test_strided_load(vectorization_setup: VectorTestSetup, int_or_float):

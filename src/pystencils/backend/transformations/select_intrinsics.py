@@ -76,7 +76,7 @@ class SelectIntrinsics(ABC):
 
     @abstractmethod
     def op_intrinsic(
-        self, expr: PsExpression, operands: Sequence[PsExpression], sc: SelectionContext
+        self, expr: PsUnOp | PsBinOp, operands: Sequence[PsExpression], sc: SelectionContext
     ) -> PsExpression:
         """Return an expression intrinsically invoking the given operation
         or raise a `MaterializationError` if not supported."""
