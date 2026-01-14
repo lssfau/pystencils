@@ -60,7 +60,13 @@ def test_sliced_iteration():
     [
         t
         for t in Target.available_targets()
-        if t not in (Target.X86_SSE, Target.X86_AVX)  # don't have scatter stores
+        if t
+        not in (
+            Target.X86_SSE,
+            Target.X86_AVX,
+            Target.ARM_NEON,
+            Target.ARM_NEON_FP16,
+        )  # don't have scatter stores
     ],
 )
 @pytest.mark.parametrize(
@@ -166,7 +172,13 @@ def test_triangle_pattern(gen_config: CreateKernelConfig, xp):
     [
         t
         for t in Target.available_targets()
-        if t not in (Target.X86_SSE, Target.X86_AVX)  # don't have scatter stores
+        if t
+        not in (
+            Target.X86_SSE,
+            Target.X86_AVX,
+            Target.ARM_NEON,
+            Target.ARM_NEON_FP16,
+        )  # don't have scatter stores
     ],
 )
 def test_red_black_pattern(gen_config: CreateKernelConfig, xp):

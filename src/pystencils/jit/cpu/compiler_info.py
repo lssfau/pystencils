@@ -114,6 +114,10 @@ class _GnuLikeCliCompiler(CompilerInfo):
                 flags += ["-march=x86-64-v4"]
             case Target.X86_AVX512_FP16:
                 flags += ["-march=x86-64-v4", "-mavx512fp16"]
+            case Target.ARM_NEON:
+                flags += ["-march=armv8-a"]
+            case Target.ARM_NEON_FP16:
+                flags += ["-march=armv8.2-a+fp16"]
 
         return flags + self.extra_cxxflags
 
@@ -143,10 +147,12 @@ class ClangInfo(_GnuLikeCliCompiler):
 
     def cxxflags(self):
         flags = super().cxxflags()
+
         if self.optlevel == "fast":
             #   clang deprecates -Ofast
             flags.remove("-Ofast")
             flags += ["-O3", "-ffast-math"]
+
         return flags
 
 

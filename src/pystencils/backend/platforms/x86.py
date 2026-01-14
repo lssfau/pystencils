@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Sequence, Tuple, Callable
+from typing import Sequence, Tuple, Callable, cast
 from enum import Enum
 from functools import cache
 
@@ -185,23 +185,22 @@ class SelectIntrinsicsX86(SelectIntrinsics):
         return set_func(*values)
 
     def op_intrinsic(
-        self, expr: PsExpression, operands: Sequence[PsExpression], sc: SelectionContext
+        self,
+        expr: PsUnOp | PsBinOp,
+        operands: Sequence[PsExpression],
+        sc: SelectionContext,
     ) -> PsExpression:
-        match expr:
-            case PsUnOp() | PsBinOp():
-                vtype: PsType
-                if isinstance(expr, PsVecHorizontal):
-                    # return type of expression itself is scalar, but input argument to intrinsic is a vector
-                    vtype = expr.vector_operand.get_dtype()
-                else:
-                    vtype = expr.get_dtype()
+        vtype: PsVectorType
+        if isinstance(expr, PsVecHorizontal):
+            # return type of expression itself is scalar, but input argument to intrinsic is a vector
+            vtype = cast(PsVectorType, expr.vector_operand.get_dtype())
+        else:
+            vtype = cast(PsVectorType, expr.get_dtype())
 
-                func = _x86_op_intrin(self._vector_arch, expr, vtype)
-                intrinsic = func(*operands)
-                intrinsic.dtype = func.return_type
-                return intrinsic
-            case _:
-                raise MaterializationError(f"Cannot map {type(expr)} to x86 intrinsic")
+        func = _x86_op_intrin(self._vector_arch, expr, vtype)
+        intrinsic = func(*operands)
+        intrinsic.dtype = func.return_type
+        return intrinsic
 
     def math_func_intrinsic(
         self, expr: PsCall, operands: Sequence[PsExpression], sc: SelectionContext
@@ -321,7 +320,10 @@ class SelectIntrinsicsX86(SelectIntrinsics):
                 )
 
             offsets = [
-                self._type_fold(PsConstantExpr(PsConstant(steps, idx_type.scalar_type)) * acc.stride.clone())
+                self._type_fold(
+                    PsConstantExpr(PsConstant(steps, idx_type.scalar_type))
+                    * acc.stride.clone()
+                )
                 for steps in range(idx_type.vector_entries)
             ]
 
@@ -352,7 +354,10 @@ class SelectIntrinsicsX86(SelectIntrinsics):
             )
 
             offsets = [
-                self._type_fold(PsConstantExpr(PsConstant(steps, idx_type.scalar_type)) * acc.stride.clone())
+                self._type_fold(
+                    PsConstantExpr(PsConstant(steps, idx_type.scalar_type))
+                    * acc.stride.clone()
+                )
                 for steps in range(idx_type.vector_entries)
             ]
 
@@ -534,11 +539,10 @@ def _x86_set_intrin(varch: X86VectorArch, vtype: PsVectorType) -> Callable[..., 
 
     def make(*args):
         return set_func(*args[::-1])
-    
+
     return make
 
 
-@cache
 def _x86_op_intrin(
     varch: X86VectorArch, op: PsUnOp | PsBinOp, vtype: PsVectorType
 ) -> CFunction:

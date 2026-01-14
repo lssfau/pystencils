@@ -341,6 +341,10 @@ class DefaultKernelCreationDriver:
                     assert False, "unreachable code"
 
                 return X86VectorCpu(self._ctx, arch)
+            elif Target._NEON in self._target:
+                from ..backend.platforms.neon import NeonCpu
+
+                return NeonCpu(self._ctx, enable_fp16=Target._FP16 in self._target)
             elif self._target == Target.GenericCPU:
                 return GenericCpu(self._ctx)
             else:

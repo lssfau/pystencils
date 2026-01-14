@@ -6,7 +6,7 @@ from pystencils import Target
 from pystencils.sympyextensions import ReductionOp, reduction_assignment
 
 init_w = 5.0
-arr_size = 16
+SHAPE = (16, 16, 4)
 
 
 def init_arr(op):
@@ -42,14 +42,14 @@ def get_reduction_assign_ast(dtype, op, dims, config):
 
 
 def get_cpu_array(dtype, op, dims):
-    shape = (arr_size,) * dims
+    shape = SHAPE[:dims]
 
     # increase difficulty of min/max tests by using range of values
     match op:
         case ReductionOp.Min | ReductionOp.Max:
-            lo = init_arr(op) - arr_size
+            lo = init_arr(op) - shape[0]
             mi = init_arr(op)
-            hi = init_arr(op) + arr_size
+            hi = init_arr(op) + shape[0]
 
             if op is ReductionOp.Min:
                 return np.random.randint(mi, hi, size=shape).astype(dtype)
@@ -74,11 +74,7 @@ def get_cpu_array(dtype, op, dims):
     ],
 )
 @pytest.mark.parametrize("dims", [1, 2, 3])
-def test_reduction_cpu(
-        target: ps.Target,
-        dtype: str,
-        op: str,
-        dims: int):
+def test_reduction_cpu(target: ps.Target, dtype: str, op: str, dims: int):
     config = ps.CreateKernelConfig(target=target)
     config.cpu.openmp.enable = True
 
@@ -93,7 +89,11 @@ def test_reduction_cpu(
     reduction_array = np.full((1,), init_w, dtype=dtype)
 
     kernel_reduction(x=array, w=reduction_array)
-    assert np.allclose(reduction_array, get_expected_solution(op, array))
+
+    rtol = 1e-5 if op == ReductionOp.Mul and dtype == "float32" else 1e-7
+    np.testing.assert_allclose(
+        reduction_array, get_expected_solution(op, array), rtol=rtol
+    )
 
 
 @pytest.mark.parametrize("dtype", ["float64", "float32"])
@@ -142,4 +142,8 @@ def test_reduction_gpu(
     reduction_array_gpu = cp.asarray(reduction_array)
 
     kernel_reduction(x=array_gpu, w=reduction_array_gpu)
-    assert np.allclose(reduction_array_gpu.get(), get_expected_solution(op, array))
+
+    rtol = 1e-5 if op == ReductionOp.Mul and dtype == "float32" else 1e-7
+    np.testing.assert_allclose(
+        reduction_array_gpu.get(), get_expected_solution(op, array), rtol=rtol
+    )
