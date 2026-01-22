@@ -8,6 +8,8 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Sequence, Generic, TypeVar, Callable, Any, cast
 from dataclasses import dataclass, InitVar, fields
 
+import sympy as sp
+
 from .target import Target
 from ..field import Field, FieldType
 
@@ -294,7 +296,7 @@ class CpuOptions(ConfigBase):
     """Options governing intrinsic vectorization.
     """
 
-    loop_blocking: BasicOption[tuple[int, ...]] = BasicOption()
+    loop_blocking: BasicOption[tuple[int | sp.Expr | None, ...]] = BasicOption()
     """Block sizes for loop blocking.
     
     If set, the kernel's loops will be tiled according to the given block sizes.

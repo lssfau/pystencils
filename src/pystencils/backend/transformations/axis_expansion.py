@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Callable, overload, cast, Sequence
 from dataclasses import dataclass
 
-from ..kernelcreation import KernelCreationContext
+from ..kernelcreation import KernelCreationContext, AstFactory
 from ..ast.axes import (
     PsAxesCube,
     PsIterationAxis,
@@ -106,6 +106,7 @@ class AxisExpansion:
 
     def __init__(self, ctx: KernelCreationContext):
         self._ctx = ctx
+        self._factory = AstFactory(ctx)
         self._type_fold = TypifyAndFold(ctx)
         self._canon_clone = CanonicalClone(ctx)
 
@@ -193,7 +194,7 @@ class AxisExpansion:
 
     def block_loop(
         self,
-        block_size: int,
+        block_size: int | PsExpression,
         coordinate: int | None = None,
         *,
         assume_divisible: bool = False,
@@ -213,7 +214,7 @@ class AxisExpansion:
 
     def parallel_block_loop(
         self,
-        block_size: int,
+        block_size: int | PsExpression,
         coordinate: int | None = None,
         *,
         assume_divisible: bool = False,
@@ -255,7 +256,7 @@ class AxisExpansion:
     def _block_loop_impl(
         self,
         func_name: str,
-        block_size: int,
+        block_size: int | PsExpression,
         coordinate: int | None,
         assume_divisible: bool,
         loop_axis_ctor: Callable[[PsAxisRange, PsBlock], PsIterationAxis],
@@ -266,11 +267,16 @@ class AxisExpansion:
             cube: PsAxesCube,
         ) -> PsStructuralNode:
             my_range = cube.ranges[coordinate]
-            c_block_size = PsConstant(block_size)
+
+            block_size_expr: PsExpression
+            if not isinstance(block_size, PsExpression):
+                block_size_expr = self._factory.parse_index(block_size)
+            else:
+                block_size_expr = block_size
 
             blocked_ctr_symb = self._ctx.duplicate_symbol(my_range.counter.symbol)
             blocked_step = self._type_fold(
-                my_range.step.clone() * PsExpression.make(c_block_size)
+                my_range.step.clone() * block_size_expr
             )
             blocked_range = PsAxisRange(
                 PsExpression.make(blocked_ctr_symb),
@@ -282,7 +288,7 @@ class AxisExpansion:
             my_range.start = PsExpression.make(blocked_ctr_symb)
             block_stop = PsExpression.make(
                 blocked_ctr_symb
-            ) + my_range.step.clone() * PsExpression.make(c_block_size)
+            ) + my_range.step.clone() * block_size_expr.clone()
 
             if assume_divisible:
                 my_range.stop = self._type_fold(block_stop)

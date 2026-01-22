@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import cast
+import sympy as sp
 
 from .target import Target
 from .config import CpuOptions
@@ -36,9 +37,6 @@ class DefaultCpuLoopStrategies:
         self._factory = AstFactory(ctx)
 
     def _check_cpu_features(self) -> None:
-        if self._cpu_options.loop_blocking:
-            raise NotImplementedError("Loop blocking not implemented yet.")
-
         if self._cpu_options.use_cacheline_zeroing:
             raise NotImplementedError("CL-zeroing not implemented yet")
 
@@ -55,9 +53,6 @@ class DefaultCpuLoopStrategies:
         return kernel_ast
 
     def _dense_ispace_axes(self, body: PsBlock, ispace: FullIterationSpace) -> PsBlock:
-        omp_options = self._cpu_options.openmp
-        enable_omp: bool = omp_options.get_option("enable")
-
         vec_options = self._cpu_options.vectorize
         enable_vec = vec_options.get_option("enable")
 
@@ -81,17 +76,20 @@ class DefaultCpuLoopStrategies:
         ae = AxisExpansion(self._ctx)
         rank = ispace.rank
 
+        block_loops, parallelize = self._block_loop_expansions(ispace, ae)
+
         if rank == 1 and enable_vec:
             assert vec_lanes is not None
             strategy = ae.create_strategy(
-                [
+                block_loops
+                + [
                     ae.peel_for_divisibility(vec_lanes),
                     [
                         (
                             ae.parallel_block_loop(
                                 vec_lanes, assume_divisible=True, **omp_kwargs
                             )
-                            if enable_omp
+                            if parallelize
                             else ae.block_loop(vec_lanes, assume_divisible=True)
                         ),
                         ae.simd(vec_lanes),
@@ -102,7 +100,8 @@ class DefaultCpuLoopStrategies:
         elif enable_vec:
             assert vec_lanes is not None
             strategy = ae.create_strategy(
-                [ae.parallel_loop(**omp_kwargs) if enable_omp else ae.loop()]
+                block_loops
+                + [ae.parallel_loop(**omp_kwargs) if parallelize else ae.loop()]
                 + [ae.loop() for _ in range(rank - 2)]
                 + [
                     ae.peel_for_divisibility(vec_lanes),
@@ -115,7 +114,8 @@ class DefaultCpuLoopStrategies:
             )
         else:
             strategy = ae.create_strategy(
-                [ae.parallel_loop(**omp_kwargs) if enable_omp else ae.loop()]
+                block_loops
+                + [ae.parallel_loop(**omp_kwargs) if parallelize else ae.loop()]
                 + [ae.loop() for _ in range(rank - 1)]
             )
 
@@ -155,6 +155,45 @@ class DefaultCpuLoopStrategies:
                 else:
                     buf.strides[inner_loop_coord] = PsConstant(1, buf.index_type)
                     #   TODO: Communicate assumption to runtime system via a precondition
+
+    def _block_loop_expansions(
+        self, ispace: FullIterationSpace, ae: AxisExpansion
+    ) -> tuple[list, bool]:
+        """Generate expansion rules for CPU block loops.
+
+        Return:
+            (Possibly empty) list of expansion rules,
+            and a boolean indicating whether remaining inner loops should be parallelized
+        """
+
+        parallelize: bool = self._cpu_options.openmp.get_option("enable")
+        blocking_spec: tuple[int | sp.Expr | None, ...] = self._cpu_options.get_option(
+            "loop_blocking"
+        )
+
+        if blocking_spec is None:
+            return [], parallelize
+
+        if len(blocking_spec) != ispace.rank:
+            raise CodegenError(
+                f"Invalid value for `cpu.loop_blocking`: `{blocking_spec}`. "
+                "Must specify block size, or `None`, for each dimension."
+            )
+
+        expansions = []
+        omp_kwargs = self._get_parallel_loop_kwargs()
+
+        for axis_idx, dim_idx in enumerate(ispace.loop_order):
+            if (bs := blocking_spec[dim_idx]) is not None:
+                bs_expr = self._factory.parse_index(bs)
+                expansions.append(
+                    ae.parallel_block_loop(bs_expr, axis_idx, **omp_kwargs)
+                    if parallelize
+                    else ae.block_loop(bs_expr, axis_idx)
+                )
+                parallelize = False
+
+        return expansions, parallelize
 
     def _sparse_ispace_axes(
         self, body: PsBlock, ispace: SparseIterationSpace

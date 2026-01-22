@@ -51,13 +51,42 @@ This will cause pystencils to parallelize the outermost kernel loop
 with `static` scheduling:
 
 ```{code-cell} ipython3
-:tags: [hide-input]
 ker = ps.create_kernel(asm, cfg)
-ps.show_code(ker)
+ps.inspect(ker, show_cpp=True)
 ```
 
 The `cpu.openmp` category allows us to customize parallelization behaviour through OpenMP clauses.
 Use the `collapse`, `schedule` and `num_threads` options to set values for the respective clauses.
+
+## Tiling and Blocking
+
+Loop tiling and blocking can be effective optimizations for improving cache reuse and temporal locality in stencil kernels.
+Pystencils allows generating block loops by setting the desired block sizes in the code generator config:
+
+```{code-cell} ipython3
+cfg = ps.CreateKernelConfig()
+cfg.cpu.loop_blocking = (16, ps.TypedSymbol("k", ps.DynamicType.INDEX_TYPE))
+```
+
+The blocking spec must be a tuple with as many block sizes as there are iteration space dimensions.
+Block sizes must be either integers or SymPy expressions of the kernel's {any}`index type <DynamicType.INDEX_TYPE>`.
+They can also be `None`, in which case the corresponding dimension will not be blocked.
+
+The above configuration leads to the following kernel:
+
+```{code-cell} ipython3
+ker = ps.create_kernel(asm, cfg)
+ps.inspect(ker, show_cpp=True)
+```
+
+It now contains four loops: two block loops, and two inner loops.
+The outer block loop has a fixed size of $16$, while the second loop's block size depends on the kernel parameter $k$.
+
+Here's a few more things to consider:
+ - The block sizes refer to the *logical* dimensions of the iteration space, ordered $x$-$y$-$z$;
+   block loops will be ordered according to the same loop reordering rules as the primary iteration loops.
+ - When enabling OpenMP and blocking together, the outermost block loop will be parallelized.
+   To parallelize multiple block loops together, consider adding a `collapse` clause to the OpenMP options.
 
 ## Vectorization
 
@@ -79,7 +108,7 @@ both a vectorized SIMD-, and scalar remainder loop have been generated:
 
 ```{code-cell} ipython3
 ker = ps.create_kernel(asm, cfg)
-ps.show_code(ker)
+ps.inspect(ker, show_cpp=True)
 ```
 
 This vectorized kernel is far from ideal, though.
@@ -108,7 +137,7 @@ by setting `cpu.vectorize.assume_inner_stride_one` to `True`:
 cfg.cpu.vectorize.assume_inner_stride_one = True
 
 ker = ps.create_kernel(asm, cfg)
-ps.show_code(ker)
+ps.inspect(ker, show_cpp=True)
 ```
 
 ### Strided Iteration Spaces
@@ -128,5 +157,5 @@ cfg.iteration_slice = ps.make_slice[:, ::3]
 cfg.cpu.vectorize.assume_inner_stride_one = True
 
 ker = ps.create_kernel(asm, cfg)
-ps.show_code(ker)
+ps.inspect(ker, show_cpp=True)
 ```

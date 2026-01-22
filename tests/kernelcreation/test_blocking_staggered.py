@@ -4,7 +4,7 @@ import pytest
 import pystencils as ps
 
 
-@pytest.mark.xfail(reason="Blocking and staggered accesses are not yet implemented in the new backend")
+@pytest.mark.xfail(reason="Staggered accesses are not yet implemented in the new backend")
 def test_blocking_staggered():
     f = ps.fields("f: double[3D]")
     stag = ps.fields("stag(3): double[3D]", field_type=ps.FieldType.STAGGERED)
