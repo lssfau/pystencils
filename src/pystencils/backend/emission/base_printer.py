@@ -175,6 +175,7 @@ class BasePrinter(ABC):
 
     def __call__(self, obj: PsAstNode | Kernel) -> str:
         from ...codegen import Kernel
+
         if isinstance(obj, Kernel):
             sig = self.print_signature(obj)
             body_code = self.visit(obj.body, PrinterCtx())
@@ -213,7 +214,12 @@ class BasePrinter(ABC):
 
                 ctr_decl = self._symbol_decl(ctr_symbol)
                 start_code = self.visit(start, pc)
+
+                #   stop is operand to `<` -> parenthesize correctly
+                pc.push_op(Ops.RelOp, LR.Right)
                 stop_code = self.visit(stop, pc)
+                pc.pop_op()
+
                 step_code = self.visit(step, pc)
                 body_code = self.visit(body, pc)
 
@@ -380,7 +386,7 @@ class BasePrinter(ABC):
         )
 
         from ...codegen import GpuKernel
-        
+
         sig_parts = [self._func_prefix] if self._func_prefix is not None else []
         if isinstance(func, GpuKernel) and func.target.is_gpu():
             sig_parts.append("__global__")
