@@ -266,7 +266,7 @@ def test_buffer_indexing():
     assert len(spatial_shape_symbols) <= 3
 
 
-@pytest.mark.parametrize('indexing_scheme', ("linear3d", "blockwise4d"))
+@pytest.mark.parametrize('indexing_scheme', ("linear3d", "gridstrided_linear3d", "blockwise4d"))
 def test_iteration_slices(indexing_scheme):
     num_cell_values = 19
     dt = np.uint64

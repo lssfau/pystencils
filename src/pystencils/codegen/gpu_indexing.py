@@ -536,6 +536,23 @@ class GpuIndexMappingStrategy:
                     ][::-1]
                 )
 
+            case GpuIndexingScheme.GridstridedLinear3D:
+                if ispace.rank > 3:
+                    raise CodegenError(
+                        f"Cannot handle {ispace.rank}-dimensional iteration space "
+                        f"using the GridstridedLinear3D indexing scheme"
+                    )
+
+                return ae.create_strategy(
+                    [
+                        ae.gridstrided_loop(dim, ispace.rank - i - 1)
+                        for i, dim in enumerate(["x", "y", "z"][: ispace.rank])
+                    ][::-1] + [
+                        ae.gpu_block_x_thread(dim)
+                        for dim in ["x", "y", "z"][: ispace.rank]
+                    ][::-1]
+                )
+
             case GpuIndexingScheme.Blockwise4D:
                 if ispace.rank > 4:
                     raise CodegenError(
@@ -578,6 +595,9 @@ class GpuIndexMappingStrategy:
 
             case GpuIndexingScheme.Blockwise4D:
                 return ae.create_strategy([ae.gpu_thread("x")])
+
+            case GpuIndexingScheme.GridstridedLinear3D:
+                return ae.create_strategy([ae.gridstrided_loop("x"), ae.gpu_thread("x")])
 
             case _:
                 raise ValueError(f"Unknown indexing scheme: {self._scheme}")
@@ -663,7 +683,7 @@ class GpuIndexing:
             return factory
 
         match self._scheme:
-            case GpuIndexingScheme.Linear3D:
+            case GpuIndexingScheme.Linear3D | GpuIndexingScheme.GridstridedLinear3D:
                 return self._get_linear3d_config_factory()
             case GpuIndexingScheme.Blockwise4D:
                 return self._get_blockwise4d_config_factory()

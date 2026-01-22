@@ -119,7 +119,7 @@ ctr_2 = start_2 + step_2 * (blockSize.z * blockIdx.z + threadIdx.z);
 
 For most kernels with an at most three-dimensional iteration space,
 this behavior is sufficient and desired.
-It can be enforced by setting `gpu.indexing_scheme = "Linear3D"`.
+It can be enforced by setting `gpu.indexing_scheme = "linear3D"`.
 
 The GPU thread block size of a compiled kernel's wrapper object can only be directly modified
 for manual launch configurations, cf. the section for [manual launch configurations](#manual_launch_grids).
@@ -162,8 +162,18 @@ the trimmed block's dimension that is closest the next multiple of the warp size
 of the warp size. For all cases, the final block size is checked against the imposed hardware limits and an error
 is thrown in case these limits are exceeded.
 
-In any case. pystencils will automatically compute the grid size from the shapes of the kernel's array arguments
+In any case, pystencils will automatically compute the grid size from the shapes of the kernel's array arguments
 and the final thread block size.
+There are, however, cases where the span of such a launch configuration may not cover the whole iteration space.
+This issue can be overcome with so-called grid-strided loops, where the underlying GPU kernel employs loops with
+a step size of the GPU grid, i.e. `GpuGridScope.gridDim` * `GpuGridScope.blockDim` for all dimensions.
+We expose this functionality as extension to the "Linear3D" indexing scheme,
+namely by setting `"gpu.indexing_scheme = "gridstrided_linear3d"`.
+While this may increase the workload per thread, using the grid size as stride allows us to still retain the same
+memory coalescing properties.
+Moreover, when used with [manual launch grids](#manual_launch_grids), this allows for fine-grained control over 
+the number of GPU blocks being mapped on streaming multiprocessors (SMs) on NVIDIA GPUs or compute units (CUs) 
+on AMD GPUs for improving the hardware occupancy.
 
 :::{attention}
 
