@@ -10,6 +10,8 @@ from ..ast.expressions import (
     PsAnd,
     PsConstantExpr,
     PsSymbolExpr,
+    PsEq,
+    PsNot
 )
 from ..ast.structural import (
     PsConditional,
@@ -61,9 +63,17 @@ class CudaPlatform(GenericGpu):
             case _:
                 actual_reduction_op = reduction_op
 
+        # get neutral element for reduction op
+        init_val_expr = self._typify(self._ctx.reduction_data[ptr_expr.symbol.name].init_val.clone())
+        neutral_elem_expr: PsExpression
+        if isinstance(init_val_expr, PsCall):
+            neutral_elem_expr = self.select_function(init_val_expr)
+        else:
+            neutral_elem_expr = init_val_expr
+
         # check if thread is valid for performing reduction
         ispace = self._ctx.get_iteration_space()
-        is_valid_thread = self._get_condition_for_translation(ispace)
+        is_valid_thread = PsNot(PsEq(symbol_expr, neutral_elem_expr))
 
         cond: PsExpression
         shuffles: tuple[PsAssignment, ...]

@@ -320,6 +320,14 @@ class GpuIndexingScheme(Enum):
     (where c :math:`\\in` (x, y, z)).
     """
 
+    GridstridedLinear3D = auto()
+    """Extension to `GpuIndexingScheme.Linear3D` scheme which introduces additional loops with strides over 
+    the execution configuration's grid size. 
+    
+    This increases the workload per thread as it now performs multiple iterations and thus opens up the possibility
+    to handle iteration spaces that are larger than the span of the execution configuration.
+    """
+
     Blockwise4D = auto()
     """On a 3D grid of 1D blocks, map the fastest coordinate onto the intra-block thread index,
     and slower coordinates onto the block index.
@@ -398,6 +406,8 @@ class GpuOptions(ConfigBase):
                 return GpuIndexingScheme.Blockwise4D
             case "linear3d":
                 return GpuIndexingScheme.Linear3D
+            case "gridstrided_linear3d":
+                return GpuIndexingScheme.GridstridedLinear3D
             case "blockwise4d":
                 return GpuIndexingScheme.Blockwise4D
             case _:

@@ -12,8 +12,6 @@ from .platform import Platform
 from ..kernelcreation import (
     Typifier,
     IterationSpace,
-    FullIterationSpace,
-    SparseIterationSpace,
 )
 
 from ..constants import PsConstant
@@ -27,8 +25,6 @@ from ..ast.expressions import (
     PsAdd,
     PsRem,
     PsEq,
-    PsLt,
-    PsAnd,
 )
 from ...types import PsSignedIntegerType, PsIeeeFloatType
 from ..literals import PsLiteral
@@ -108,33 +104,6 @@ class GenericGpu(Platform):
             idx * reduce(operator.mul, BLOCK_DIM[:i]) if i > 0 else idx
             for i, idx in enumerate(THREAD_IDX[: ispace.rank])
         )
-
-    @staticmethod
-    def _get_condition_for_translation(ispace: IterationSpace) -> PsExpression:
-        """Return the condition that determines whether the current thread
-        lies inside the iteration space."""
-
-        if isinstance(ispace, FullIterationSpace):
-            conds = []
-
-            dimensions = ispace.dimensions_in_loop_order()
-
-            for dim in dimensions:
-                ctr_expr = PsExpression.make(dim.counter)
-                conds.append(PsLt(ctr_expr, dim.stop))
-
-            condition: PsExpression = conds[0]
-            for cond in conds[1:]:
-                condition = PsAnd(condition, cond)
-
-            return condition
-        elif isinstance(ispace, SparseIterationSpace):
-            sparse_ctr_expr = PsExpression.make(ispace.sparse_counter)
-            stop = PsExpression.make(ispace.index_list.shape[0])
-
-            return PsLt(sparse_ctr_expr.clone(), stop)
-        else:
-            raise MaterializationError(f"Unknown type of iteration space: {ispace}")
 
     def _first_thread_in_warp(self, ispace: IterationSpace) -> PsExpression:
         """Returns expression that determines whether a thread is the first within a warp."""

@@ -19,7 +19,12 @@ from ..ast.axes import (
 from ..ast.structural import PsStructuralNode, PsBlock, PsDeclaration
 from ..ast.expressions import PsExpression
 from ..constants import PsConstant
-from ..functions import PsMathFunction, MathFunctions
+from ..functions import (
+    PsMathFunction,
+    MathFunctions,
+    PsGpuIndexingFunction,
+    GpuGridScope,
+)
 
 from .eliminate_constants import TypifyAndFold
 from .canonical_clone import CanonicalClone
@@ -407,7 +412,9 @@ class AxisExpansion:
         coordinate: int | None,
         axis_type: type[PsGpuIndexingAxis],
     ):
-        gpu_dim = dim if isinstance(dim, GpuGridDimension) else GpuGridDimension[dim.upper()]
+        gpu_dim = (
+            dim if isinstance(dim, GpuGridDimension) else GpuGridDimension[dim.upper()]
+        )
         coordinate = 0 if coordinate is None else coordinate
 
         def make_block_axis(cube: PsAxesCube) -> PsStructuralNode:
@@ -426,3 +433,55 @@ class AxisExpansion:
             return loop_axis
 
         return ExpansionFunc(func_name, make_block_axis)
+
+    def gridstrided_loop(
+        self,
+        dim: str | GpuGridDimension,
+        coordinate: int | None = None,
+    ):
+        """Introduce a grid-strided loop in the given dimension.
+
+        Args:
+            dim: GPU grid coordinate, ``"x"``, ``"y"`` or ``"z"``.
+            coordinate: Which dimension to block; if `None`, the first dimension is used
+        """
+
+        return self._gridstrided_loop_impl("gridstrided_loop", dim, coordinate)
+
+    def _gridstrided_loop_impl(
+        self,
+        func_name: str,
+        dim: str | GpuGridDimension,
+        coordinate: int | None,
+    ) -> ExpansionFunc:
+        gpu_dim = (
+            dim if isinstance(dim, GpuGridDimension) else GpuGridDimension[dim.upper()]
+        )
+        coordinate = 0 if coordinate is None else coordinate
+
+        def make_gridstrided_loop(
+            cube: PsAxesCube,
+        ) -> PsStructuralNode:
+            my_range = cube.ranges[coordinate]
+
+            gridstride = self._type_fold(
+                PsGpuIndexingFunction(GpuGridScope.gridDim, gpu_dim)()
+                * PsGpuIndexingFunction(GpuGridScope.blockDim, gpu_dim)()
+            )
+
+            # create new axis range with duplicated ctr symbol, adapt stride to grid stride
+            blocked_ctr_symb = self._ctx.duplicate_symbol(my_range.counter.symbol)
+            blocked_step = self._type_fold(my_range.step.clone() * gridstride)
+            blocked_range = PsAxisRange(
+                PsExpression.make(blocked_ctr_symb),
+                my_range.start,
+                my_range.stop,
+                blocked_step,
+            )
+
+            # offset axr start with ctr of grid-strided loop, stop & step remain the same
+            my_range.start = PsExpression.make(blocked_ctr_symb)
+
+            return PsLoopAxis(blocked_range, PsBlock([cube]))
+
+        return ExpansionFunc(f"{func_name}({coordinate})", make_gridstrided_loop)
