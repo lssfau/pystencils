@@ -1,256 +1,10 @@
 stages:
   - "Code Quality"
   - "Unit Tests"
-  - legacy_test
+  - "Reporting"
   - docs
   - deploy
 
-
-# --------------------------  Legacy Tests  ------------------------------------------------------------------------------------
-
-# Normal test with longruns
-tests-and-coverage-with-longrun:
-  stage: legacy_test
-  when: manual
-  allow_failure: true
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/full
-  before_script:
-    - pip install sympy --upgrade
-    - pip install -e .
-  script:
-    - env
-    - pip list
-    - export NUM_CORES=$(nproc --all)
-    - mkdir -p ~/.config/matplotlib
-    - echo "backend:template" > ~/.config/matplotlib/matplotlibrc
-    - mkdir public
-    - py.test -v -n $NUM_CORES
-  tags:
-    - docker
-    - cuda11
-    - AVX
-
-# pipeline with latest python version
-latest-python:
-  stage: legacy_test
-  allow_failure: true
-  when: manual
-  except:
-    variables:
-      - $ENABLE_NIGHTLY_BUILDS
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/latest_python
-  before_script:
-    - pip install -e .
-  script:
-    - env
-    - pip list
-    - pip install -e .
-    - export NUM_CORES=$(nproc --all)
-    - mkdir -p ~/.config/matplotlib
-    - echo "backend:template" > ~/.config/matplotlib/matplotlibrc
-    - mkdir public
-    - py.test -v -n $NUM_CORES -m "not longrun" --junitxml=report.xml
-  tags:
-    - docker
-    - AVX
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-
-
-# Minimal tests in windows environment
-#minimal-windows:
-#  stage: test
-#  except:
-#    variables:
-#      - $ENABLE_NIGHTLY_BUILDS
-#  tags:
-#    - win
-#  script:
-#    - export NUM_CORES=$(nproc --all)
-#    - source /cygdrive/c/Users/build/Miniconda3/Scripts/activate
-#    - source activate pystencils
-#    - pip install joblib
-#    - pip list
-#    - python -c "import numpy"
-#    - py.test -v -m "not (notebook or longrun)"
-
-ubuntu:
-  stage: legacy_test
-  allow_failure: true
-  when: manual
-  except:
-    variables:
-      - $ENABLE_NIGHTLY_BUILDS
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/ubuntu
-  before_script:
-    - ln -s /usr/include/locale.h /usr/include/xlocale.h
-    - pip3 install -e .
-  script:
-    - export NUM_CORES=$(nproc --all)
-    - mkdir -p ~/.config/matplotlib
-    - echo "backend:template" > ~/.config/matplotlib/matplotlibrc
-    - sed -i 's/--doctest-modules //g' pytest.ini
-    - env
-    - pip list
-    - pytest -v -n $NUM_CORES -m "not longrun" --junitxml=report.xml
-  tags:
-    - docker
-    - cuda11
-    - AVX
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-
-.multiarch_template:
-  stage: legacy_test
-  allow_failure: true
-  when: manual
-  except:
-    variables:
-      - $ENABLE_NIGHTLY_BUILDS
-  before_script: &multiarch_before_script
-    # - pip3 install -v .
-    - export PYTHONPATH=src
-    - python3 -c "import pystencils as ps; ps.cpu.cpujit.read_config()"
-    - sed -i '/^fail_under.*/d' pytest.ini
-  script:
-    - export NUM_CORES=$(nproc --all)
-    - mkdir -p ~/.config/matplotlib
-    - echo "backend:template" > ~/.config/matplotlib/matplotlibrc
-    - sed -i 's/--doctest-modules //g' pytest.ini
-    - env
-    - pip3 list
-    - python3 -m pytest -v -n $NUM_CORES --junitxml=report.xml tests/test_*vec*.py tests/test_random.py tests/test_half_precision.py
-  tags:
-    - docker
-    - AVX
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-
-arm64v8:
-  extends: .multiarch_template
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/arm64
-  variables:
-    QEMU_CPU: "cortex-a76"
-  before_script:
-    - *multiarch_before_script
-    - sed -i s/march=native/march=armv8-a/g ~/.config/pystencils/config.json
-
-ppc64le:
-  extends: .multiarch_template
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/ppc64le
-  before_script:
-    - *multiarch_before_script
-    - sed -i s/mcpu=native/mcpu=power8/g ~/.config/pystencils/config.json
-
-arm64v9:
-  # SVE support is still unreliable in GCC 11 (incorrect code for fixed-width vectors, internal compiler errors).
-  # For half precision Clang is necessary
-  extends: .multiarch_template
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/arm64
-  before_script:
-    - *multiarch_before_script
-    - sed -i s/march=native/march=armv8-a+sve/g ~/.config/pystencils/config.json
-    - sed -i s/g\+\+/clang++/g ~/.config/pystencils/config.json
-
-riscv64:
-  # RISC-V vector extension are currently not supported by GCC.
-  # Also, the image is built without the libomp package which is not yet available on Ubuntu.
-  extends: .multiarch_template
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/riscv64
-  variables:
-    # explicitly set SIMD as detection does not appear to work on QEMU
-    PYSTENCILS_SIMD: "rvv"
-    QEMU_CPU: "rv64,v=true"
-  before_script:
-    - *multiarch_before_script
-    - sed -i 's/march=native/march=rv64imfdv/g' ~/.config/pystencils/config.json
-    - sed -i s/g\+\+/clang++/g ~/.config/pystencils/config.json
-    - sed -i 's/fopenmp/fopenmp=libgomp -I\/usr\/include\/riscv64-linux-gnu/g' ~/.config/pystencils/config.json
-
-minimal-conda:
-  stage: legacy_test
-  allow_failure: true
-  when: manual
-  except:
-    variables:
-      - $ENABLE_NIGHTLY_BUILDS
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/minimal_conda
-  before_script:
-    - pip install -e .
-  script:
-    - python quicktest.py
-  tags:
-    - docker
-    - cuda
-
-
-minimal-sympy-master:
-  stage: legacy_test
-  allow_failure: true
-  when: manual
-  except:
-    variables:
-      - $ENABLE_NIGHTLY_BUILDS
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/minimal_conda
-  before_script:
-    - pip install -e .
-  script:
-    - python -m pip install --upgrade git+https://github.com/sympy/sympy.git
-    - python quicktest.py
-  tags:
-    - docker
-    - cuda
-
-
-pycodegen-integration:
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/full
-  stage: legacy_test
-  when: manual
-  allow_failure: true
-  script:
-    - git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@i10git.cs.fau.de/pycodegen/pycodegen.git
-    - cd pycodegen
-    - git submodule sync --recursive
-    - git submodule update --init --recursive
-    - git submodule foreach git fetch origin   # compare the latest master version!
-    - git submodule foreach git reset --hard origin/master
-    - cd pystencils
-    - git remote add test $CI_REPOSITORY_URL
-    - git fetch test
-    - git reset --hard $CI_COMMIT_SHA
-    - cd ..
-    - pip install -e pystencils/
-    - pip install -e lbmpy/
-    - cmake --version
-    - ./install_walberla.sh
-    - export NUM_CORES=$(nproc --all)
-    - mkdir -p ~/.config/matplotlib
-    - echo "backend:template" > ~/.config/matplotlib/matplotlibrc
-    - cd pystencils
-    - py.test -v -n $NUM_CORES --junitxml=report.xml .
-    - cd ../lbmpy
-    - py.test -v -n $NUM_CORES --junitxml=report.xml .
-    - cd ../walberla/build/
-    - make -j $NUM_CORES CodegenJacobiCPU CodegenJacobiGPU CodegenPoissonCPU CodegenPoissonGPU MicroBenchmarkGpuLbm LbCodeGenerationExample
-    - make -j $NUM_CORES multiphaseCPU multiphaseGPU FluctuatingMRT FlowAroundSphereCodeGen FieldLayoutAndVectorizationTest GeneratedOutflowBC
-    - cd apps/benchmarks/UniformGridGPU
-    - make -j $NUM_CORES
-    - cd ../UniformGridCPU
-    - make -j $NUM_CORES
-  tags:
-    - docker
-    - cuda11
-    - AVX
-  artifacts:
-    when: always
-    reports:
-      junit: pycodegen/*/report.xml
 
 # -------------------- Code Quality ---------------------------------------------------------------------
 
@@ -276,32 +30,24 @@ typecheck:
 
 # -------------------- Unit Tests ---------------------------------------------------------------------
 
-# TODO: Combine coverage information from these tasks into a single report
-# to get more accurate numbers
-
 .testsuite-base:
   stage: "Unit Tests"
   needs: []
-  coverage: /Total coverage:\s\d+.\d+\%/
+  after_script:
+    - mv .coverage .coverage.${CI_JOB_ID}
   artifacts:
     when: always
     paths:
-      - htmlcov
+      - .coverage.*
       - test-report
     reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage.xml
       junit: report.xml
 
 "testsuite-gpu-py3.10":
   extends: .testsuite-base
   image: i10git.cs.fau.de:5005/pycodegen/pycodegen/nox:ubuntu24.04-cuda12.6
   script:
-    - mkdir -p ~/.config/matplotlib
-    - echo "backend:template" > ~/.config/matplotlib/matplotlibrc
-    - mkdir public
-    - nox --session "testsuite-3.10(cupy12)"
+    - nox -s "testsuite-3.10(cupy12)"
   tags:
     - docker
     - cuda
@@ -312,7 +58,7 @@ typecheck:
   extends: .testsuite-base
   image: i10git.cs.fau.de:5005/pycodegen/pycodegen/nox:alpine
   script:
-    - nox --session "testsuite-3.13(cpu)"
+    - nox -s "testsuite-3.13(cpu)"
   tags:
     - docker
     - AVX
@@ -323,10 +69,30 @@ typecheck:
   before_script:
     - python -m pip install nox
   script:
-    - python -m nox -s "testsuite-3.11(cpu)" -- --cov-fail-under=70
+    - python -m nox -s "testsuite-3.11(cpu)"
   tags:
     - macmini
     - arm64
+
+
+# -------------------- Reporting -------------------------------------------------------------------------
+
+coverage-report:
+  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/nox:alpine
+  stage: "Reporting"
+  script:
+    - nox -s "coverage_report"
+  coverage: /TOTAL.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/
+  tags:
+    - docker
+  artifacts:
+    when: always
+    paths:
+      - coverage_report
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
 
 
 # -------------------- Documentation ---------------------------------------------------------------------
