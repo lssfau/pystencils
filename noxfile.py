@@ -125,7 +125,7 @@ def coverage_report(session: nox.Session):
 
     cov_args = ["--rcfile=pytest.ini"]
 
-    session.run("coverage", "combine")
+    session.run("coverage", "combine", *cov_args)
     session.run("coverage", "report", "--precision=2", *cov_args)
     session.run("coverage", "html", *cov_args)
     session.run("coverage", "xml", *cov_args)
