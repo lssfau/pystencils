@@ -139,7 +139,7 @@ def test_vec_maskscatter(instruction_set, dtype, nontemporal):
                                                        'nontemporal': nontemporal},
                                    default_number_float=dtype)
     if 'maskStoreS' not in get_vector_instruction_set(dtype, instruction_set) \
-            and not instruction_set.startswith('sve'):
+            and not instruction_set in ['sve', 'sve2']:
         with pytest.warns(UserWarning) as warn:
             ast = ps.create_kernel(assignmets, config=config)
             assert 'Could not vectorize loop' in warn[0].message.args[0]

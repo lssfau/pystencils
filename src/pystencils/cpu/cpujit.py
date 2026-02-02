@@ -171,9 +171,9 @@ def read_config():
             # -mcpu=native is available, but only works when the compiler recognizes the exact CPU model. This fails in
             # QEMU or when the compiler is older than the CPU, so we do our own detection here.
             flag = '-march=armv8-a+crypto'
-            if any(i.startswith('sve2') and i not in ('sve256', 'sve2048') for i in get_supported_instruction_sets()):
+            if 'sve2' in get_supported_instruction_sets():
                 flag += '+sve2'
-            elif any(i.startswith('sve') for i in get_supported_instruction_sets()):
+            elif 'sve' in get_supported_instruction_sets():
                 flag += '+sve'
             if 'sme' in get_supported_instruction_sets():
                 flag += '+sme'

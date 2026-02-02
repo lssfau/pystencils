@@ -67,14 +67,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 typedef std::uint32_t uint32;
 typedef std::uint64_t uint64;
 
-#if defined(__ARM_FEATURE_SVE) && defined(__ARM_FEATURE_SVE_BITS) && __ARM_FEATURE_SVE_BITS > 0
-typedef svfloat32_t svfloat32_st __attribute__((arm_sve_vector_bits(__ARM_FEATURE_SVE_BITS)));
-typedef svfloat64_t svfloat64_st __attribute__((arm_sve_vector_bits(__ARM_FEATURE_SVE_BITS)));
-#elif defined(__ARM_FEATURE_SVE)
-typedef svfloat32_t svfloat32_st;
-typedef svfloat64_t svfloat64_st;
-#endif
-
 template <typename T, std::size_t Alignment>
 class AlignedAllocator
 {
@@ -1145,7 +1137,7 @@ QUALIFIERS svuint32_t aesni1xm128i(const svuint32_t & in, const uint32x4_t & k0)
 
 QUALIFIERS void aesni_float4(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
-                             svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+                             svfloat32_t & rnd1, svfloat32_t & rnd2, svfloat32_t & rnd3, svfloat32_t & rnd4)
 {
     uint32x4_t k128 = {key0, key1, key2, key3};
     svuint32x4_t ctr = svcreate4_u32(ctr0, ctr1, ctr2, ctr3);
@@ -1171,7 +1163,7 @@ QUALIFIERS void aesni_float4(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, 
 
 QUALIFIERS void aesni_double2(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
                               uint32 key0, uint32 key1, uint32 key2, uint32 key3,
-                              svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+                              svfloat64_t & rnd1lo, svfloat64_t & rnd1hi, svfloat64_t & rnd2lo, svfloat64_t & rnd2hi)
 {
     uint32x4_t k128 = {key0, key1, key2, key3};
     svuint32x4_t ctr = svcreate4_u32(ctr0, ctr1, ctr2, ctr3);
@@ -1190,7 +1182,7 @@ QUALIFIERS void aesni_double2(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2,
 
 QUALIFIERS void aesni_float4(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
-                             svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+                             svfloat32_t & rnd1, svfloat32_t & rnd2, svfloat32_t & rnd3, svfloat32_t & rnd4)
 {
     svuint32_t ctr0v = svdup_u32(ctr0);
     svuint32_t ctr2v = svdup_u32(ctr2);
@@ -1201,14 +1193,14 @@ QUALIFIERS void aesni_float4(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 c
 
 QUALIFIERS void aesni_float4(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
                              uint32 key0, uint32 key1, uint32 key2, uint32 key3,
-                             svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+                             svfloat32_t & rnd1, svfloat32_t & rnd2, svfloat32_t & rnd3, svfloat32_t & rnd4)
 {
     aesni_float4(ctr0, svreinterpret_u32_s32(ctr1), ctr2, ctr3, key0, key1, key2, key3, rnd1, rnd2, rnd3, rnd4);
 }
 
 QUALIFIERS void aesni_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
                               uint32 key0, uint32 key1, uint32 key2, uint32 key3,
-                              svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+                              svfloat64_t & rnd1lo, svfloat64_t & rnd1hi, svfloat64_t & rnd2lo, svfloat64_t & rnd2hi)
 {
     svuint32_t ctr0v = svdup_u32(ctr0);
     svuint32_t ctr2v = svdup_u32(ctr2);
@@ -1219,19 +1211,19 @@ QUALIFIERS void aesni_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 
 
 QUALIFIERS void aesni_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
                               uint32 key0, uint32 key1, uint32 key2, uint32 key3,
-                              svfloat64_st & rnd1, svfloat64_st & rnd2)
+                              svfloat64_t & rnd1, svfloat64_t & rnd2)
 {
     svuint32_t ctr0v = svdup_u32(ctr0);
     svuint32_t ctr2v = svdup_u32(ctr2);
     svuint32_t ctr3v = svdup_u32(ctr3);
 
-    svfloat64_st ignore;
+    svfloat64_t ignore;
     aesni_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, key2, key3, rnd1, ignore, rnd2, ignore);
 }
 
 QUALIFIERS void aesni_double2(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
                               uint32 key0, uint32 key1, uint32 key2, uint32 key3,
-                              svfloat64_st & rnd1, svfloat64_st & rnd2)
+                              svfloat64_t & rnd1, svfloat64_t & rnd2)
 {
     aesni_double2(ctr0, svreinterpret_u32_s32(ctr1), ctr2, ctr3, key0, key1, key2, key3, rnd1, rnd2);
 }

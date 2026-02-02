@@ -108,14 +108,6 @@ typedef std::uint32_t uint32;
 typedef std::uint64_t uint64;
 #endif
 
-#if defined(__ARM_FEATURE_SVE) && defined(__ARM_FEATURE_SVE_BITS) && __ARM_FEATURE_SVE_BITS > 0
-typedef svfloat32_t svfloat32_st __attribute__((arm_sve_vector_bits(__ARM_FEATURE_SVE_BITS)));
-typedef svfloat64_t svfloat64_st __attribute__((arm_sve_vector_bits(__ARM_FEATURE_SVE_BITS)));
-#elif defined(__ARM_FEATURE_SVE) || defined(__ARM_FEATURE_SME)
-typedef svfloat32_t svfloat32_st;
-typedef svfloat64_t svfloat64_st;
-#endif
-
 
 QUALIFIERS uint32 mulhilo32(uint32 a, uint32 b, uint32* hip)
 {
@@ -809,7 +801,7 @@ SVE_QUALIFIERS
 
 QUALIFIERS void philox_float4(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
                               uint32 key0, uint32 key1,
-                              svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+                              svfloat32_t & rnd1, svfloat32_t & rnd2, svfloat32_t & rnd3, svfloat32_t & rnd4)
 SVE_QUALIFIERS
 {
     svuint32x2_t key = svcreate2_u32(svdup_u32(key0), svdup_u32(key1));
@@ -840,7 +832,7 @@ SVE_QUALIFIERS
 
 QUALIFIERS void philox_double2(svuint32_t ctr0, svuint32_t ctr1, svuint32_t ctr2, svuint32_t ctr3,
                                uint32 key0, uint32 key1,
-                               svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+                               svfloat64_t & rnd1lo, svfloat64_t & rnd1hi, svfloat64_t & rnd2lo, svfloat64_t & rnd2hi)
 SVE_QUALIFIERS
 {
     svuint32x2_t key = svcreate2_u32(svdup_u32(key0), svdup_u32(key1));
@@ -864,7 +856,7 @@ SVE_QUALIFIERS
 
 QUALIFIERS void philox_float4(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
                               uint32 key0, uint32 key1,
-                              svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+                              svfloat32_t & rnd1, svfloat32_t & rnd2, svfloat32_t & rnd3, svfloat32_t & rnd4)
 SVE_QUALIFIERS
 {
     svuint32_t ctr0v = svdup_u32(ctr0);
@@ -876,7 +868,7 @@ SVE_QUALIFIERS
 
 QUALIFIERS void philox_float4(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
                               uint32 key0, uint32 key1,
-                              svfloat32_st & rnd1, svfloat32_st & rnd2, svfloat32_st & rnd3, svfloat32_st & rnd4)
+                              svfloat32_t & rnd1, svfloat32_t & rnd2, svfloat32_t & rnd3, svfloat32_t & rnd4)
 SVE_QUALIFIERS
 {
     philox_float4(ctr0, svreinterpret_u32_s32(ctr1), ctr2, ctr3, key0, key1, rnd1, rnd2, rnd3, rnd4);
@@ -884,7 +876,7 @@ SVE_QUALIFIERS
 
 QUALIFIERS void philox_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
                                uint32 key0, uint32 key1,
-                               svfloat64_st & rnd1lo, svfloat64_st & rnd1hi, svfloat64_st & rnd2lo, svfloat64_st & rnd2hi)
+                               svfloat64_t & rnd1lo, svfloat64_t & rnd1hi, svfloat64_t & rnd2lo, svfloat64_t & rnd2hi)
 SVE_QUALIFIERS
 {
     svuint32_t ctr0v = svdup_u32(ctr0);
@@ -896,20 +888,20 @@ SVE_QUALIFIERS
 
 QUALIFIERS void philox_double2(uint32 ctr0, svuint32_t ctr1, uint32 ctr2, uint32 ctr3,
                                uint32 key0, uint32 key1,
-                               svfloat64_st & rnd1, svfloat64_st & rnd2)
+                               svfloat64_t & rnd1, svfloat64_t & rnd2)
 SVE_QUALIFIERS
 {
     svuint32_t ctr0v = svdup_u32(ctr0);
     svuint32_t ctr2v = svdup_u32(ctr2);
     svuint32_t ctr3v = svdup_u32(ctr3);
 
-    svfloat64_st ignore;
+    svfloat64_t ignore;
     philox_double2(ctr0v, ctr1, ctr2v, ctr3v, key0, key1, rnd1, ignore, rnd2, ignore);
 }
 
 QUALIFIERS void philox_double2(uint32 ctr0, svint32_t ctr1, uint32 ctr2, uint32 ctr3,
                                uint32 key0, uint32 key1,
-                               svfloat64_st & rnd1, svfloat64_st & rnd2)
+                               svfloat64_t & rnd1, svfloat64_t & rnd2)
 SVE_QUALIFIERS
 {
     philox_double2(ctr0, svreinterpret_u32_s32(ctr1), ctr2, ctr3, key0, key1, rnd1, rnd2);

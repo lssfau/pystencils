@@ -143,7 +143,7 @@ def test_aligned_and_nt_stores(openmp, instruction_set=instruction_set):
     # Without the base pointer spec, the inner store is not aligned
     config = pystencils.config.CreateKernelConfig(target=dh.default_target, cpu_vectorize_info=opt, cpu_openmp=openmp)
     ast = ps.create_kernel(update_rule, config=config)
-    if instruction_set in ['sse'] or instruction_set.startswith('avx') or instruction_set.startswith('sve'):
+    if instruction_set in ['sse', 'sve', 'sve2'] or instruction_set.startswith('avx'):
         assert 'stream' in ast.instruction_set
         assert 'streamFence' in ast.instruction_set
     if instruction_set in ['neon', 'vsx', 'rvv']:
