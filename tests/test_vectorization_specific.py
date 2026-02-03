@@ -88,7 +88,7 @@ def test_strided(instruction_set, dtype, nontemporal):
                                                                       'nontemporal': nontemporal},
                                                   default_number_float=dtype)
     if 'storeS' not in get_vector_instruction_set(dtype, instruction_set) \
-            and instruction_set not in ['avx512', 'avx512vl', 'rvv'] and not instruction_set.startswith('sve'):
+            and instruction_set not in ['avx512', 'avx512vl', 'rvv', 'sve', 'sve2']:
         with pytest.warns(UserWarning) as warn:
             ast = ps.create_kernel(update_rule, config=config)
             assert 'Could not vectorize loop' in warn[0].message.args[0]

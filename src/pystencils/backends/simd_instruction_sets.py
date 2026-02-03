@@ -22,7 +22,7 @@ def get_vector_instruction_set(data_type='double', instruction_set='avx'):
 
     type_name = numpy_name_to_c(np.dtype(data_type).name)
 
-    if instruction_set in ['neon', 'sme'] or instruction_set.startswith('sve'):
+    if instruction_set in ['neon', 'sme', 'sve', 'sve2']:
         return get_vector_instruction_set_arm(type_name, instruction_set)
     elif instruction_set in ['vsx']:
         return get_vector_instruction_set_ppc(type_name, instruction_set)
@@ -58,12 +58,6 @@ def get_supported_instruction_sets():
                 name = 'sve2'
             else:
                 name = 'sve'
-            length = 8 * libc.prctl(51, 0, 0, 0, 0)  # PR_SVE_GET_VL
-            if length < 0:
-                raise OSError("SVE length query failed")
-            while length >= 128:
-                result.append(f"{name}{length}")
-                length //= 2
             result.append(name)
         if hwcap2 & (1 << 23):  # HWCAP2_SME
             result.insert(0, "sme")  # prepend to list so it is not automatically chosen as best instruction set

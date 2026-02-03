@@ -19,19 +19,12 @@ def get_argument_string(function_shortcut, first=''):
 
 
 def get_vector_instruction_set_arm(data_type='double', instruction_set='neon'):
-    if instruction_set not in ['neon', 'sme'] and not instruction_set.startswith('sve'):
-        raise NotImplementedError(instruction_set)
     if instruction_set in ['sve', 'sve2', 'sme']:
         cmp = 'cmp'
-    elif instruction_set.startswith('sve2') and instruction_set not in ('sve256', 'sve2048'):
-        cmp = 'cmp'
-        bitwidth = int(instruction_set[4:])
-    elif instruction_set.startswith('sve'):
-        cmp = 'cmp'
-        bitwidth = int(instruction_set[3:])
     elif instruction_set == 'neon':
         cmp = 'c'
-        bitwidth = 128
+    else:
+        raise NotImplementedError(instruction_set)
 
     base_names = {
         '+': 'add[0, 1]',
@@ -63,10 +56,10 @@ def get_vector_instruction_set_arm(data_type='double', instruction_set='neon'):
         intwidth = 'svcntw()'
         result['bytes'] = 'svcntb()'
     else:
-        width = bitwidth // bits[data_type]
-        intwidth = bitwidth // bits['int']
-        result['bytes'] = bitwidth // 8
-    if instruction_set.startswith('sve') or instruction_set == 'sme':
+        width = 128 // bits[data_type]
+        intwidth = 128 // bits['int']
+        result['bytes'] = 128 // 8
+    if instruction_set in ['sve', 'sve2', 'sme']:
         base_names['stream'] = 'stnt1[0, 1]'
         prefix = 'sv'
         suffix = f'_f{bits[data_type]}'
@@ -100,7 +93,7 @@ def get_vector_instruction_set_arm(data_type='double', instruction_set='neon'):
         result['width'] = width
         result['intwidth'] = intwidth
 
-    if instruction_set.startswith('sve') or instruction_set == 'sme':
+    if instruction_set in ['sve', 'sve2', 'sme']:
         result['makeVecConst'] = f'svdup_f{bits[data_type]}' + '({0})'
         result['makeVecConstInt'] = f'svdup_s{bits["int"]}' + '({0})'
         result['makeVecIndex'] = f'svindex_s{bits["int"]}' + '({0}, {1})'
@@ -111,7 +104,7 @@ def get_vector_instruction_set_arm(data_type='double', instruction_set='neon'):
                                vindex.format("{2}") + ', {1})'
             result['loadS'] = f'svld1_gather_u{bits[data_type]}index_f{bits[data_type]}({predicate}, {{0}}, ' + \
                               vindex.format("{1}") + ')'
-        if instruction_set.startswith('sve2') and instruction_set not in ('sve256', 'sve2048'):
+        if instruction_set == 'sve2':
             result['streamS'] = f'svstnt1_scatter_u{bits[data_type]}offset_f{bits[data_type]}({predicate}, {{0}}, ' + \
                                 vindex.format(f"{{2}}*{bits[data_type]//8}") + ', {1})'
 
@@ -134,15 +127,13 @@ def get_vector_instruction_set_arm(data_type='double', instruction_set='neon'):
         result['maskStream'] = result['stream'].replace(predicate, '{2}')
         if instruction_set != 'sme':
             result['maskStoreS'] = result['storeS'].replace(predicate, '{3}')
-            if instruction_set.startswith('sve2') and instruction_set not in ('sve256', 'sve2048'):
+            if instruction_set == 'sve2':
                 result['maskStreamS'] = result['streamS'].replace(predicate, '{3}')
 
         result['streamFence'] = '__dmb(15)'
 
         if instruction_set == 'sme':
             result['function_prefix'] = '__arm_locally_streaming'
-        elif instruction_set not in ['sve', 'sve2', 'sme']:
-            result['compile_flags'] = [f'-msve-vector-bits={bitwidth}']
     else:
         result['makeVecConst'] = f'vdupq_n_f{bits[data_type]}' + '({0})'
         result['makeVec'] = f'makeVec_f{bits[data_type]}' + '(' + ", ".join(['{' + str(i) + '}' for i in

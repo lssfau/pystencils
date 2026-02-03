@@ -188,7 +188,7 @@ ppc64le:
     - *multiarch_before_script
 
 arm64v9:
-  # SVE support is still unreliable in GCC 13 (incorrect code for fixed-width vectors, internal compiler errors).
+  # SVE support is still unreliable in GCC 13 (internal compiler errors).
   # For half precision Clang is necessary
   extends: .multiarch_template
   image: i10git.cs.fau.de:5005/pycodegen/pycodegen/arm64
