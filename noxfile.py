@@ -109,7 +109,7 @@ def testsuite(session: nox.Session, cupy_version: str | None):
         "-v",
         "-n",
         str(num_cores),
-        "--cov=.",
+        "--cov",
         "-m",
         "not longrun",
         "--html",
@@ -123,12 +123,10 @@ def testsuite(session: nox.Session, cupy_version: str | None):
 def coverage_report(session: nox.Session):
     session.install("coverage")
 
-    cov_args = ["--rcfile=pytest.ini"]
-
-    session.run("coverage", "combine", *cov_args)
-    session.run("coverage", "report", "--precision=2", *cov_args)
-    session.run("coverage", "html", *cov_args)
-    session.run("coverage", "xml", *cov_args)
+    session.run("coverage", "combine")
+    session.run("coverage", "report", "--precision=2")
+    session.run("coverage", "html")
+    session.run("coverage", "xml")
 
 
 @nox.session(python=["3.10"], tags=["docs"])

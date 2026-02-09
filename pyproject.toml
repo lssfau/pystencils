@@ -13,14 +13,20 @@ authors = [
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-dependencies = ["sympy~=1.14", "numpy>=1.8.0", "appdirs", "joblib", "pyyaml", "fasteners"]
+dependencies = [
+    "sympy~=1.14",
+    "numpy>=1.8.0",
+    "appdirs",
+    "joblib",
+    "pyyaml",
+    "fasteners",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Framework :: Jupyter",
     "Topic :: Software Development :: Code Generators",
     "Topic :: Scientific/Engineering :: Physics",
     "Intended Audience :: Developers",
-    "Intended Audience :: Science/Research"
+    "Intended Audience :: Science/Research",
 ]
 
 [project.urls]
@@ -40,18 +46,12 @@ interactive = [
     'rich',
     'graphviz',
 ]
-use_cython = [
-    'Cython'
-]
-dev = [
-    "flake8",
-    "mypy",
-    "black",
-]
+use_cython = ['Cython']
+dev = ["flake8", "mypy", "black"]
 doc = [
     'sphinx',
     'pydata-sphinx-theme==0.15.4',
-    'sphinx-book-theme==1.1.3',  # workaround for https://github.com/executablebooks/sphinx-book-theme/issues/865
+    'sphinx-book-theme==1.1.3',    # workaround for https://github.com/executablebooks/sphinx-book-theme/issues/865
     'sphinxcontrib-bibtex',
     'sphinx_autodoc_typehints',
     'pandoc',
@@ -61,6 +61,7 @@ doc = [
     'graphviz',
 ]
 testsuite = [
+    'tomli ; python_version<="3.10"',
     'pytest',
     'pytest-cov',
     'pytest-html',
@@ -91,7 +92,7 @@ pystencils = [
     "include/**/*.hpp",
     "include/**/*.cuh",
     "jit/cpu/*.tmpl.cpp",
-    "boundaries/createindexlistcython.pyx"
+    "boundaries/createindexlistcython.pyx",
 ]
 
 [tool.setuptools.packages.find]
@@ -109,3 +110,88 @@ versionfile_source = "src/pystencils/_version.py"
 versionfile_build = "pystencils/_version.py"
 tag_prefix = "release/"
 parentdir_prefix = "pystencils-"
+
+[tool.pytest]
+testpaths = ["src", "tests", "docs/source/tutorials"]
+python_files = ["test_*.py", "*_test.py", "scenario_*.py"]
+norecursedirs = [
+    "*.egg-info",
+    ".git",
+    ".cache",
+    ".ipynb_checkpoints",
+    "coverage_report",
+]
+addopts = [
+    "--doctest-modules",
+    "--durations=20 ",
+    "--cov-config=pyproject.toml",
+    "--ignore=src/pystencils/old",
+    "--ignore=src/pystencils/rng.py",
+    "--ignore=src/pystencils/kernelcreation.py",
+    "--ignore=src/pystencils/typing.py",
+    "--ignore=src/pystencils/enums.py",
+    "--ignore=tests/_old",
+    "--ignore=tests/_todo",
+]
+markers = [
+    "longrun: tests only run at night since they have large execution time",
+    "notebook: mark for notebooks",
+]
+filterwarnings = [
+    "ignore:an integer is required:DeprecationWarning",
+    "ignore:.*load will be removed, use:PendingDeprecationWarning",
+    "ignore:the imp module is deprecated in favour of importlib:DeprecationWarning",
+    "ignore:.*is a deprecated alias for the builtin `bool`:DeprecationWarning",
+    "ignore:'contextfilter' is renamed to 'pass_context':DeprecationWarning",
+    "ignore:Using or importing the ABCs from 'collections' instead of from 'collections.abc':DeprecationWarning",
+    "ignore:Animation was deleted without rendering anything:UserWarning",
+]
+
+[tool.coverage.run]
+branch = true
+include = ["src/pystencils/**/*.py", "tests/**/*.py"]
+relative_files = true
+omit = [
+    "doc/*",
+    "setup.py",
+    "noxfile.py",
+    "quicktest.py",
+    "conftest.py",
+    "versioneer.py",
+    "src/pystencils/jupyter.py",
+    "src/pystencils/cache.py",
+    "src/pystencils/_version.py",
+    "src/pystencils/_deprecation.py",
+    "src/pystencils/old",
+    "src/pystencils/rng.py",
+    "tests/_todo/*",
+]
+
+[tool.coverage.report]
+include = ["src/pystencils/**/*.py", "tests/**/*.py"]
+exclude_lines = [
+    # Have to re-enable the standard pragma
+    "pragma: no cover",
+
+    "def __repr__",
+    "def _repr_html_",
+
+    # Don't complain if tests don't hit defensive assertion code:
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "NotImplementedError()",
+    #raise ValueError
+
+    # Don't complain if non-runnable code isn't run:
+    "if 0:",
+    "if False:",
+    "if __name__ == .__main__.:",
+    "assert False",
+
+    # Don't cover type checking imports
+    "if TYPE_CHECKING:",
+]
+skip_covered = true
+
+[tool.coverage.html]
+directory = "coverage_report"

@@ -7,7 +7,11 @@ import sympy as sp
 
 import pystencils
 from ..assignment import Assignment
-from .simplifications import (sort_assignments_topologically, transform_lhs_and_rhs, transform_rhs)
+from .simplifications import (
+    sort_assignments_topologically,
+    transform_lhs_and_rhs,
+    transform_rhs,
+)
 from ..sympyextensions import count_operations, fast_subs
 
 
@@ -36,25 +40,32 @@ class AssignmentCollection:
 
     # ------------------------------- Creation & Inplace Manipulation --------------------------------------------------
 
-    def __init__(self, main_assignments: Union[List[Assignment], Dict[sp.Expr, sp.Expr]],
-                 subexpressions: Union[List[Assignment], Dict[sp.Expr, sp.Expr]] = None,
-                 simplification_hints: Optional[Dict[str, Any]] = None,
-                 subexpression_symbol_generator: Iterator[sp.Symbol] = None) -> None:
+    def __init__(
+        self,
+        main_assignments: Union[List[Assignment], Dict[sp.Expr, sp.Expr]],
+        subexpressions: Union[List[Assignment], Dict[sp.Expr, sp.Expr]] = None,
+        simplification_hints: Optional[Dict[str, Any]] = None,
+        subexpression_symbol_generator: Iterator[sp.Symbol] = None,
+    ) -> None:
 
         if subexpressions is None:
             subexpressions = {}
 
         if isinstance(main_assignments, Dict):
-            main_assignments = [Assignment(k, v)
-                                for k, v in main_assignments.items()]
+            main_assignments = [Assignment(k, v) for k, v in main_assignments.items()]
         if isinstance(subexpressions, Dict):
-            subexpressions = [Assignment(k, v)
-                              for k, v in subexpressions.items()]
+            subexpressions = [Assignment(k, v) for k, v in subexpressions.items()]
 
-        main_assignments = list(itertools.chain.from_iterable(
-            [(a if isinstance(a, Iterable) else [a]) for a in main_assignments]))
-        subexpressions = list(itertools.chain.from_iterable(
-            [(a if isinstance(a, Iterable) else [a]) for a in subexpressions]))
+        main_assignments = list(
+            itertools.chain.from_iterable(
+                [(a if isinstance(a, Iterable) else [a]) for a in main_assignments]
+            )
+        )
+        subexpressions = list(
+            itertools.chain.from_iterable(
+                [(a if isinstance(a, Iterable) else [a]) for a in subexpressions]
+            )
+        )
 
         self.main_assignments = main_assignments
         self.subexpressions = subexpressions
@@ -64,7 +75,7 @@ class AssignmentCollection:
 
         self.simplification_hints = simplification_hints
 
-        ctrs = [int(n.name[3:])for n in self.rhs_symbols if "xi_" in n.name]
+        ctrs = [int(n.name[3:]) for n in self.rhs_symbols if "xi_" in n.name]
         max_ctr = max(ctrs) + 1 if len(ctrs) > 0 else 0
 
         if subexpression_symbol_generator is None:
@@ -77,7 +88,9 @@ class AssignmentCollection:
         assert key not in self.simplification_hints, "This hint already exists"
         self.simplification_hints[key] = value
 
-    def add_subexpression(self, rhs: sp.Expr, lhs: Optional[sp.Symbol] = None, topological_sort=True) -> sp.Symbol:
+    def add_subexpression(
+        self, rhs: sp.Expr, lhs: Optional[sp.Symbol] = None, topological_sort=True
+    ) -> sp.Symbol:
         """Adds a subexpression to current collection.
 
         Args:
@@ -94,16 +107,19 @@ class AssignmentCollection:
         eq = Assignment(lhs, rhs)
         self.subexpressions.append(eq)
         if topological_sort:
-            self.topological_sort(sort_subexpressions=True,
-                                  sort_main_assignments=False)
+            self.topological_sort(sort_subexpressions=True, sort_main_assignments=False)
         return lhs
 
-    def topological_sort(self, sort_subexpressions: bool = True, sort_main_assignments: bool = True) -> None:
+    def topological_sort(
+        self, sort_subexpressions: bool = True, sort_main_assignments: bool = True
+    ) -> None:
         """Sorts subexpressions and/or main_equations topologically to make sure symbol usage comes after definition."""
         if sort_subexpressions:
             self.subexpressions = sort_assignments_topologically(self.subexpressions)
         if sort_main_assignments:
-            self.main_assignments = sort_assignments_topologically(self.main_assignments)
+            self.main_assignments = sort_assignments_topologically(
+                self.main_assignments
+            )
 
     # ---------------------------------------------- Properties  -------------------------------------------------------
 
@@ -133,11 +149,16 @@ class AssignmentCollection:
     def bound_symbols(self) -> Set[sp.Symbol]:
         """All symbols which occur on the left hand side of a main assignment or a subexpression."""
         bound_symbols_set = set(
-            [assignment.lhs for assignment in self.all_assignments if isinstance(assignment, Assignment)]
+            [
+                assignment.lhs
+                for assignment in self.all_assignments
+                if isinstance(assignment, Assignment)
+            ]
         )
 
-        assert len(bound_symbols_set) == len(list(a for a in self.all_assignments if isinstance(a, Assignment))), \
-            "Not in SSA form - same symbol assigned multiple times"
+        assert len(bound_symbols_set) == len(
+            list(a for a in self.all_assignments if isinstance(a, Assignment))
+        ), "Not in SSA form - same symbol assigned multiple times"
 
         # bound_symbols_set = bound_symbols_set.union(*[
         #     assignment.symbols_defined for assignment in self.all_assignments
@@ -149,29 +170,35 @@ class AssignmentCollection:
     @property
     def rhs_fields(self):
         """All fields accessed in the assignment collection, which do not occur as left hand sides in any assignment."""
-        return {s.field for s in self.rhs_symbols if hasattr(s, 'field')}
+        return {s.field for s in self.rhs_symbols if hasattr(s, "field")}
 
     @property
     def free_fields(self):
         """All fields accessed in the assignment collection, which do not occur as left hand sides in any assignment."""
-        return {s.field for s in self.free_symbols if hasattr(s, 'field')}
+        return {s.field for s in self.free_symbols if hasattr(s, "field")}
 
     @property
     def bound_fields(self):
         """All field accessed on the left hand side of a main assignment or a subexpression."""
-        return {s.field for s in self.bound_symbols if hasattr(s, 'field')}
+        return {s.field for s in self.bound_symbols if hasattr(s, "field")}
 
     @property
     def defined_symbols(self) -> Set[sp.Symbol]:
         """All symbols which occur as left-hand-sides of one of the main equations"""
-        lhs_set = set([assignment.lhs for assignment in self.main_assignments if isinstance(assignment, Assignment)])
+        lhs_set = set(
+            [
+                assignment.lhs
+                for assignment in self.main_assignments
+                if isinstance(assignment, Assignment)
+            ]
+        )
         return lhs_set
         # return (lhs_set.union(*[assignment.symbols_defined for assignment in self.main_assignments
         #                         if isinstance(assignment, pystencils.astnodes.Node)])) TODO
 
     @property
     def operation_count(self):
-        """See :func:`count_operations` """
+        """See :func:`count_operations`"""
         return count_operations(self.all_assignments, only_type=None)
 
     def atoms(self, *args):
@@ -204,7 +231,12 @@ class AssignmentCollection:
 
         return handled_symbols
 
-    def lambdify(self, symbols: Sequence[sp.Symbol], fixed_symbols: Optional[Dict[sp.Symbol, Any]] = None, module=None):
+    def lambdify(
+        self,
+        symbols: Sequence[sp.Symbol],
+        fixed_symbols: Optional[Dict[sp.Symbol, Any]] = None,
+        module=None,
+    ):
         """Returns a python function to evaluate this equation collection.
 
         Args:
@@ -220,9 +252,16 @@ class AssignmentCollection:
               >>> python_function(4)
               {c: 6, d: 18}
         """
-        assignments = self.new_with_substitutions(fixed_symbols, substitute_on_lhs=False) if fixed_symbols else self
+        assignments = (
+            self.new_with_substitutions(fixed_symbols, substitute_on_lhs=False)
+            if fixed_symbols
+            else self
+        )
         assignments = assignments.new_without_subexpressions().main_assignments
-        lambdas = {assignment.lhs: sp.lambdify(symbols, assignment.rhs, module) for assignment in assignments}
+        lambdas = {
+            assignment.lhs: sp.lambdify(symbols, assignment.rhs, module)
+            for assignment in assignments
+        }
 
         def f(*args, **kwargs):
             return {s: func(*args, **kwargs) for s, func in lambdas.items()}
@@ -231,9 +270,11 @@ class AssignmentCollection:
 
     # ---------------------------- Creating new modified collections ---------------------------------------------------
 
-    def copy(self,
-             main_assignments: Optional[List[Assignment]] = None,
-             subexpressions: Optional[List[Assignment]] = None) -> 'AssignmentCollection':
+    def copy(
+        self,
+        main_assignments: Optional[List[Assignment]] = None,
+        subexpressions: Optional[List[Assignment]] = None,
+    ) -> "AssignmentCollection":
         """Returns a copy with optionally replaced main_assignments and/or subexpressions."""
 
         res = copy(self)
@@ -252,9 +293,13 @@ class AssignmentCollection:
 
         return res
 
-    def new_with_substitutions(self, substitutions: Dict, add_substitutions_as_subexpressions: bool = False,
-                               substitute_on_lhs: bool = True,
-                               sort_topologically: bool = True) -> 'AssignmentCollection':
+    def new_with_substitutions(
+        self,
+        substitutions: Dict,
+        add_substitutions_as_subexpressions: bool = False,
+        substitute_on_lhs: bool = True,
+        sort_topologically: bool = True,
+    ) -> "AssignmentCollection":
         """Returns new object, where terms are substituted according to the passed substitution dict.
 
         Args:
@@ -267,22 +312,30 @@ class AssignmentCollection:
             New AssignmentCollection where substitutions have been applied, self is not altered.
         """
         transform = transform_lhs_and_rhs if substitute_on_lhs else transform_rhs
-        transformed_subexpressions = transform(self.subexpressions, fast_subs, substitutions)
-        transformed_assignments = transform(self.main_assignments, fast_subs, substitutions)
+        transformed_subexpressions = transform(
+            self.subexpressions, fast_subs, substitutions
+        )
+        transformed_assignments = transform(
+            self.main_assignments, fast_subs, substitutions
+        )
 
         if add_substitutions_as_subexpressions:
-            transformed_subexpressions = [Assignment(b, a) for a, b in
-                                          substitutions.items()] + transformed_subexpressions
+            transformed_subexpressions = [
+                Assignment(b, a) for a, b in substitutions.items()
+            ] + transformed_subexpressions
             if sort_topologically:
-                transformed_subexpressions = sort_assignments_topologically(transformed_subexpressions)
+                transformed_subexpressions = sort_assignments_topologically(
+                    transformed_subexpressions
+                )
         return self.copy(transformed_assignments, transformed_subexpressions)
 
-    def new_merged(self, other: 'AssignmentCollection') -> 'AssignmentCollection':
+    def new_merged(self, other: "AssignmentCollection") -> "AssignmentCollection":
         """Returns a new collection which contains self and other. Subexpressions are renamed if they clash."""
         own_definitions = set([e.lhs for e in self.main_assignments])
         other_definitions = set([e.lhs for e in other.main_assignments])
-        assert len(own_definitions.intersection(other_definitions)) == 0, \
-            "Cannot merge collections, since both define the same symbols"
+        assert (
+            len(own_definitions.intersection(other_definitions)) == 0
+        ), "Cannot merge collections, since both define the same symbols"
 
         own_subexpression_symbols = {e.lhs: e.rhs for e in self.subexpressions}
         substitution_dict = {}
@@ -300,13 +353,21 @@ class AssignmentCollection:
                     processed_other_subexpression_equations.append(new_eq)
                     substitution_dict[other_subexpression_eq.lhs] = new_lhs
             else:
-                processed_other_subexpression_equations.append(fast_subs(other_subexpression_eq, substitution_dict))
+                processed_other_subexpression_equations.append(
+                    fast_subs(other_subexpression_eq, substitution_dict)
+                )
 
-        processed_other_main_assignments = [fast_subs(eq, substitution_dict) for eq in other.main_assignments]
-        return self.copy(self.main_assignments + processed_other_main_assignments,
-                         self.subexpressions + processed_other_subexpression_equations)
+        processed_other_main_assignments = [
+            fast_subs(eq, substitution_dict) for eq in other.main_assignments
+        ]
+        return self.copy(
+            self.main_assignments + processed_other_main_assignments,
+            self.subexpressions + processed_other_subexpression_equations,
+        )
 
-    def new_filtered(self, symbols_to_extract: Iterable[sp.Symbol]) -> 'AssignmentCollection':
+    def new_filtered(
+        self, symbols_to_extract: Iterable[sp.Symbol]
+    ) -> "AssignmentCollection":
         """Extracts equations that have symbols_to_extract as left hand side, together with necessary subexpressions.
 
         Returns:
@@ -319,16 +380,21 @@ class AssignmentCollection:
             if eq.lhs in symbols_to_extract:
                 new_assignments.append(eq)
 
-        new_sub_expr = [eq for eq in self.all_assignments
-                        if eq.lhs in dependent_symbols and eq.lhs not in symbols_to_extract]
+        new_sub_expr = [
+            eq
+            for eq in self.all_assignments
+            if eq.lhs in dependent_symbols and eq.lhs not in symbols_to_extract
+        ]
         return self.copy(new_assignments, new_sub_expr)
 
-    def new_without_unused_subexpressions(self) -> 'AssignmentCollection':
+    def new_without_unused_subexpressions(self) -> "AssignmentCollection":
         """Returns new collection that only contains subexpressions required to compute the main assignments."""
         all_lhs = [eq.lhs for eq in self.main_assignments]
         return self.new_filtered(all_lhs)
 
-    def new_with_inserted_subexpression(self, symbol: sp.Symbol) -> 'AssignmentCollection':
+    def new_with_inserted_subexpression(
+        self, symbol: sp.Symbol
+    ) -> "AssignmentCollection":
         """Eliminates the subexpression with the given symbol on its left hand side, by substituting it everywhere."""
         new_subexpressions = []
         subs_dict = None
@@ -340,11 +406,19 @@ class AssignmentCollection:
         if subs_dict is None:
             return self
 
-        new_subexpressions = [Assignment(eq.lhs, fast_subs(eq.rhs, subs_dict)) for eq in new_subexpressions]
-        new_eqs = [Assignment(eq.lhs, fast_subs(eq.rhs, subs_dict)) for eq in self.main_assignments]
+        new_subexpressions = [
+            Assignment(eq.lhs, fast_subs(eq.rhs, subs_dict))
+            for eq in new_subexpressions
+        ]
+        new_eqs = [
+            Assignment(eq.lhs, fast_subs(eq.rhs, subs_dict))
+            for eq in self.main_assignments
+        ]
         return self.copy(new_eqs, new_subexpressions)
 
-    def new_without_subexpressions(self, subexpressions_to_keep=None) -> 'AssignmentCollection':
+    def new_without_subexpressions(
+        self, subexpressions_to_keep=None
+    ) -> "AssignmentCollection":
         """Returns a new collection where all subexpressions have been inserted."""
         if subexpressions_to_keep is None:
             subexpressions_to_keep = set()
@@ -368,7 +442,9 @@ class AssignmentCollection:
             else:
                 substitution_dict[subexpression[i].lhs] = subexpression[i].rhs
 
-        new_assignment = [fast_subs(eq, substitution_dict) for eq in self.main_assignments]
+        new_assignment = [
+            fast_subs(eq, substitution_dict) for eq in self.main_assignments
+        ]
         return self.copy(new_assignment, kept_subexpressions)
 
     # ----------------------------------------- Display and Printing   -------------------------------------------------
@@ -379,10 +455,12 @@ class AssignmentCollection:
         def make_html_equation_table(equations):
             no_border = 'style="border:none"'
             html_table = '<table style="border:none; width: 100%; ">'
-            line = '<tr {nb}> <td {nb}>$${eq}$$</td>  </tr> '
+            line = "<tr {nb}> <td {nb}>$${eq}$$</td>  </tr> "
             for eq in equations:
-                format_dict = {'eq': sp.latex(eq),
-                               'nb': no_border, }
+                format_dict = {
+                    "eq": sp.latex(eq),
+                    "nb": no_border,
+                }
                 html_table += line.format(**format_dict)
             html_table += "</table>"
             return html_table
@@ -419,17 +497,17 @@ class AssignmentCollection:
         return {a.lhs: a.rhs for a in self.subexpressions}
 
     def set_main_assignments_from_dict(self, main_assignments_dict):
-        self.main_assignments = [Assignment(k, v)
-                                 for k, v in main_assignments_dict.items()]
+        self.main_assignments = [
+            Assignment(k, v) for k, v in main_assignments_dict.items()
+        ]
 
     def set_sub_expressions_from_dict(self, sub_expressions_dict):
-        self.subexpressions = [Assignment(k, v)
-                               for k, v in sub_expressions_dict.items()]
+        self.subexpressions = [
+            Assignment(k, v) for k, v in sub_expressions_dict.items()
+        ]
 
     def find(self, *args, **kwargs):
-        return set.union(
-            *[a.find(*args, **kwargs) for a in self.all_assignments]
-        )
+        return set.union(*[a.find(*args, **kwargs) for a in self.all_assignments])
 
     def match(self, *args, **kwargs):
         rtn = {}
@@ -442,13 +520,15 @@ class AssignmentCollection:
     def subs(self, *args, **kwargs):
         return AssignmentCollection(
             main_assignments=[a.subs(*args, **kwargs) for a in self.main_assignments],
-            subexpressions=[a.subs(*args, **kwargs) for a in self.subexpressions]
+            subexpressions=[a.subs(*args, **kwargs) for a in self.subexpressions],
         )
 
     def replace(self, *args, **kwargs):
         return AssignmentCollection(
-            main_assignments=[a.replace(*args, **kwargs) for a in self.main_assignments],
-            subexpressions=[a.replace(*args, **kwargs) for a in self.subexpressions]
+            main_assignments=[
+                a.replace(*args, **kwargs) for a in self.main_assignments
+            ],
+            subexpressions=[a.replace(*args, **kwargs) for a in self.subexpressions],
         )
 
     def __eq__(self, other):
