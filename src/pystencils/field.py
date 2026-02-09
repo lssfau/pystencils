@@ -304,16 +304,20 @@ class Field:
                 "beware that `memory_strides` takes the number of *elements* to skip, "
                 "instead of the number of bytes.",
                 FutureWarning,
-                stacklevel=2
+                stacklevel=2,
             )
 
             if memory_strides is not None:
-                raise ValueError("Cannot specify `memory_strides` and deprecated parameter `strides` at the same time.")
-            
+                raise ValueError(
+                    "Cannot specify `memory_strides` and deprecated parameter `strides` at the same time."
+                )
+
             if isinstance(dtype, DynamicType):
-                raise ValueError("Cannot specify the deprecated parameter `strides` together with a `DynamicType`. "
-                                 "Set `memory_strides` instead.")
-            
+                raise ValueError(
+                    "Cannot specify the deprecated parameter `strides` together with a `DynamicType`. "
+                    "Set `memory_strides` instead."
+                )
+
             np_type = create_type(dtype).numpy_dtype
             assert np_type is not None
             memory_strides = tuple([s // np_type.itemsize for s in strides])
@@ -439,7 +443,7 @@ class Field:
 
     @property
     def index_shape(self):
-        return self.shape[self.spatial_dimensions:]
+        return self.shape[self.spatial_dimensions :]  # noqa: E203
 
     @property
     def has_fixed_index_shape(self):
@@ -451,7 +455,7 @@ class Field:
 
     @property
     def index_strides(self):
-        return self.strides[self.spatial_dimensions:]
+        return self.strides[self.spatial_dimensions :]  # noqa: E203
 
     @property
     def dtype(self) -> PsType | DynamicType:
@@ -1185,7 +1189,9 @@ def fields(
             if field_name in kwargs:
                 arr = kwargs[field_name]
                 idx_shape_of_arr = (
-                    () if not len(idx_shape) else arr.shape[-len(idx_shape):]
+                    ()
+                    if not len(idx_shape)
+                    else arr.shape[-len(idx_shape) :]  # noqa: E203
                 )
                 assert idx_shape_of_arr == idx_shape
                 f = Field.create_from_numpy_array(
@@ -1439,7 +1445,7 @@ def _parse_part1(d):
         name, index_str = result.group(1), result.group(2)
         index = tuple(int(e) for e in index_str.split(",")) if index_str else ()
         yield name, index
-        d = d[result.end():]
+        d = d[result.end() :]  # noqa: E203
         result = field_description_regex.match(d)
 
 
@@ -1453,9 +1459,12 @@ def _parse_description(description):
 
             if data_type_str:
                 match data_type_str:
-                    case "dyn": dtype = DynamicType.NUMERIC_TYPE
-                    case "dynidx": dtype = DynamicType.INDEX_TYPE
-                    case _: dtype = create_type(data_type_str)
+                    case "dyn":
+                        dtype = DynamicType.NUMERIC_TYPE
+                    case "dynidx":
+                        dtype = DynamicType.INDEX_TYPE
+                    case _:
+                        dtype = create_type(data_type_str)
             else:
                 dtype = DynamicType.NUMERIC_TYPE
 

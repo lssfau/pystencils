@@ -11,8 +11,16 @@ class IntegerFunctionTwoArgsMixIn(sp.Function):
         return super().__new__(cls, *args)
 
     def _eval_evalf(self, *pargs, **kwargs):
-        arg1 = self.args[0].evalf(*pargs, **kwargs) if hasattr(self.args[0], 'evalf') else self.args[0]
-        arg2 = self.args[1].evalf(*pargs, **kwargs) if hasattr(self.args[1], 'evalf') else self.args[1]
+        arg1 = (
+            self.args[0].evalf(*pargs, **kwargs)
+            if hasattr(self.args[0], "evalf")
+            else self.args[0]
+        )
+        arg2 = (
+            self.args[1].evalf(*pargs, **kwargs)
+            if hasattr(self.args[1], "evalf")
+            else self.args[1]
+        )
         return self._eval_op(arg1, arg2)
 
     def _eval_op(self, arg1, arg2):
