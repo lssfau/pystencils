@@ -16,6 +16,7 @@ from pystencils.backend.platforms import (
     X86VectorCpu,
     X86VectorArch,
     NeonCpu,
+    SveCpu,
 )
 from pystencils.backend.ast.structural import PsBlock
 from pystencils.backend.transformations import (
@@ -28,7 +29,7 @@ from pystencils.backend.transformations import (
 from pystencils.backend.transformations.axis_expansion import AxisExpansionStrategy
 
 from pystencils.codegen.driver import KernelFactory
-from pystencils.jit.cpu import CompilerInfo, CpuJit
+from pystencils.jit.cpu import CpuJit
 
 
 def _make_kernel(
@@ -36,6 +37,7 @@ def _make_kernel(
     target: ps.Target,
     body: PsBlock,
     ae_strategy: AxisExpansionStrategy,
+    cpujit: CpuJit,
 ):
     factory = AstFactory(ctx)
     cube = factory.cube_from_ispace(ctx.get_full_iteration_space(), body)
@@ -49,6 +51,8 @@ def _make_kernel(
             platform = X86VectorCpu(ctx, X86VectorArch.AVX512)
         case ps.Target.ARM_NEON | ps.Target.ARM_NEON_FP16:
             platform = NeonCpu(ctx)
+        case ps.Target.ARM_SVE:
+            platform = SveCpu(ctx)
         case _:
             platform = GenericCpu(ctx)
 
@@ -70,22 +74,21 @@ def _make_kernel(
     select_functions = SelectFunctions(platform)
     ast = cast(PsBlock, select_functions(ast))
 
-    cinfo = CompilerInfo.get_default(target=target)
-
     kfactory = KernelFactory(ctx)
     kernel = kfactory.create_generic_kernel(
         platform,
         ast,
         "vector_kernel",
         target,
-        CpuJit(cinfo),
+        cpujit,
     )
 
     return kernel
 
 
 @pytest.mark.parametrize("rank", [1, 2, 3])
-def test_omp_with_reduction(rank: int):
+@pytest.mark.parametrize("target", [ps.Target.GenericCPU])
+def test_omp_with_reduction(rank: int, target, cpujit):
     f = ps.fields(f"f: [{rank}D]")
     w = ps.TypedSymbol("w", ps.DynamicType.NUMERIC_TYPE)
 
@@ -100,7 +103,7 @@ def test_omp_with_reduction(rank: int):
     strategy = ae.create_strategy(
         [ae.parallel_loop()] + [ae.loop() for _ in range(rank - 1)]
     )
-    kernel = _make_kernel(ctx, ps.Target.GenericCPU, body, strategy)
+    kernel = _make_kernel(ctx, target, body, strategy, cpujit)
     kfunc = kernel.compile()
 
     rng = np.random.default_rng(seed=514)
@@ -117,7 +120,9 @@ def test_omp_with_reduction(rank: int):
 @pytest.mark.parametrize(
     "remainder_loop", [False, True], ids=["no_remainder", "with_remainder"]
 )
-def test_simd_with_reduction(rank: int, target: ps.Target, remainder_loop: bool):
+def test_simd_with_reduction(
+    rank: int, target: ps.Target, remainder_loop: bool, cpujit
+):
     rng = np.random.default_rng(seed=514)
     L = 51 if remainder_loop else 48
     f_arr = rng.random((L,) * rank)  # x-size divisible by eight
@@ -133,7 +138,13 @@ def test_simd_with_reduction(rank: int, target: ps.Target, remainder_loop: bool)
     body = PsBlock([factory.parse_sympy(ps.MaxReductionAssignment(w, f()))])
 
     ae = AxisExpansion(ctx)
-    lanes = target.default_vector_lanes(cast(ps.types.PsScalarType, ctx.default_dtype))
+
+    if target == ps.Target.ARM_SVE:
+        lanes = 2
+    else:
+        lanes = target.default_vector_lanes(
+            cast(ps.types.PsScalarType, ctx.default_dtype)
+        )
 
     if remainder_loop:
         strategy = ae.create_strategy(
@@ -150,7 +161,7 @@ def test_simd_with_reduction(rank: int, target: ps.Target, remainder_loop: bool)
             + [ae.block_loop(lanes, assume_divisible=True), ae.simd(lanes)]
         )
 
-    kernel = _make_kernel(ctx, target, body, strategy)
+    kernel = _make_kernel(ctx, target, body, strategy, cpujit)
     kfunc = kernel.compile()
 
     w_arr = np.zeros((1,))
@@ -162,7 +173,7 @@ def test_simd_with_reduction(rank: int, target: ps.Target, remainder_loop: bool)
 
 @pytest.mark.parametrize("rank", [1, 2, 3])
 @pytest.mark.parametrize("target", ps.Target.available_vector_cpu_targets())
-def test_omp_simd_with_reduction(rank: int, target: ps.Target):
+def test_omp_simd_with_reduction(rank: int, target: ps.Target, cpujit):
     rng = np.random.default_rng(seed=514)
     f_arr = rng.random((48,) * rank)  # x-size divisible by eight
 
@@ -177,7 +188,14 @@ def test_omp_simd_with_reduction(rank: int, target: ps.Target):
     body = PsBlock([factory.parse_sympy(ps.MaxReductionAssignment(w, f()))])
 
     ae = AxisExpansion(ctx)
-    lanes = target.default_vector_lanes(cast(ps.types.PsScalarType, ctx.default_dtype))
+
+    if target == ps.Target.ARM_SVE:
+        lanes = 2
+    else:
+        lanes = target.default_vector_lanes(
+            cast(ps.types.PsScalarType, ctx.default_dtype)
+        )
+
     if rank == 1:
         strategy = ae.create_strategy(
             [
@@ -191,7 +209,7 @@ def test_omp_simd_with_reduction(rank: int, target: ps.Target):
             + [ae.loop() for _ in range(rank - 2)]
             + [ae.block_loop(lanes, assume_divisible=True), ae.simd(lanes)]
         )
-    kernel = _make_kernel(ctx, target, body, strategy)
+    kernel = _make_kernel(ctx, target, body, strategy, cpujit)
     kfunc = kernel.compile()
 
     w_arr = np.zeros((1,))

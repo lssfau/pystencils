@@ -169,7 +169,7 @@ def function_domain(function_name, dtype):
             [
                 t
                 for t in AVAIL_TARGETS
-                if not (Target._AVX512 in t or Target._NEON in t)
+                if not (Target._AVX512 in t or Target._NEON in t or t == Target.ARM_SVE)
             ],
         )
     )
@@ -322,11 +322,7 @@ def test_integer_binary_functions(gen_config, xp, function_name, dtype):
 @pytest.mark.parametrize(
     "target, dtype",
     list(product(AVAIL_TARGETS, [np.float32, np.float64]))
-    + [
-        (t, np.float16)
-        for t in AVAIL_TARGETS
-        if t.is_gpu() or t in (Target.X86_AVX512_FP16,)
-    ],
+    + [(t, np.float16) for t in AVAIL_TARGETS if t.is_gpu()],
 )
 def test_constants(c_name, dtype, gen_config, xp):
     c_sp, c_np = constant(c_name, dtype)

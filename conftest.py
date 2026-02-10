@@ -5,7 +5,6 @@ import tempfile
 import warnings
 import pathlib
 
-import nbformat
 import pytest
 
 # Trigger config file reading / creation once - to avoid race conditions when multiple instances are creating it
@@ -117,86 +116,95 @@ for root, sub_dirs, files in os.walk("."):
         ):
             collect_ignore.append(f)
 
-
-class IPythonMockup:
-    def run_line_magic(self, *args, **kwargs):
-        pass
-
-    def run_cell_magic(self, *args, **kwargs):
-        pass
-
-    def magic(self, *args, **kwargs):
-        pass
-
-    def __bool__(self):
-        return False
+try:
+    import nbformat
+    from nbconvert import PythonExporter
+    jupyter_support = True
+except ImportError:
+    jupyter_support = False
 
 
-class IPyNbTest(pytest.Item):
-    def __init__(self, name, parent, code):
-        super(IPyNbTest, self).__init__(name, parent)
-        self.code = code
-        self.add_marker("notebook")
+if jupyter_support:
+    class IPythonMockup:
+        def run_line_magic(self, *args, **kwargs):
+            pass
 
-    def runtest(self):
-        global_dict = {"get_ipython": lambda: IPythonMockup(), "is_test_run": True}
+        def run_cell_magic(self, *args, **kwargs):
+            pass
 
-        # disable matplotlib output
-        exec(
-            "import matplotlib.pyplot as p; "
-            "p.close('all'); "
-            "p.switch_backend('Template')",
-            global_dict,
-        )
+        def magic(self, *args, **kwargs):
+            pass
 
-        # in notebooks there is an implicit plt.show() - if this is not called a warning is shown when the next
-        # plot is created. This warning is suppressed here
-        exec(
-            "import warnings;"
-            "warnings.filterwarnings('ignore', 'Adding an axes using the same arguments as a previous.*');"
-            "warnings.filterwarnings('ignore', 'Animation was deleted without rendering anything.*');",
-            global_dict,
-        )
-        with tempfile.NamedTemporaryFile() as f:
-            f.write(self.code.encode())
-            f.flush()
-            runpy.run_path(f.name, init_globals=global_dict, run_name=self.name)
+        def __bool__(self):
+            return False
 
-        #   Close any open figures
-        exec("import matplotlib.pyplot as p; p.close('all')", global_dict)
+    class IPyNbTest(pytest.Item):
+        def __init__(self, name, parent, code):
+            super(IPyNbTest, self).__init__(name, parent)
+            self.code = code
+            self.add_marker("notebook")
 
+        def runtest(self):
+            global_dict = {"get_ipython": lambda: IPythonMockup(), "is_test_run": True}
 
-class IPyNbFile(pytest.File):
-    def collect(self):
-        from nbconvert import PythonExporter
-
-        exporter = PythonExporter()
-        exporter.exclude_markdown = True
-        exporter.exclude_input_prompt = True
-
-        notebook_contents = self.path.open(encoding="utf-8")
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", "IPython.core.inputsplitter is deprecated"
+            # disable matplotlib output
+            exec(
+                "import matplotlib.pyplot as p; "
+                "p.close('all'); "
+                "p.switch_backend('Template')",
+                global_dict,
             )
-            notebook = nbformat.read(notebook_contents, 4)
-            code, _ = exporter.from_notebook_node(notebook)
-        if pytest_version >= 50403:
-            yield IPyNbTest.from_parent(name=self.name, parent=self, code=code)
-        else:
-            yield IPyNbTest(self.name, self, code)
 
-    def teardown(self):
-        pass
+            # in notebooks there is an implicit plt.show() - if this is not called a warning is shown when the next
+            # plot is created. This warning is suppressed here
+            exec(
+                "import warnings;"
+                "warnings.filterwarnings('ignore', 'Adding an axes using the same arguments as a previous.*');"
+                "warnings.filterwarnings('ignore', 'Animation was deleted without rendering anything.*');",
+                global_dict,
+            )
+            with tempfile.NamedTemporaryFile() as f:
+                f.write(self.code.encode())
+                f.flush()
+                runpy.run_path(f.name, init_globals=global_dict, run_name=self.name)
 
+            #   Close any open figures
+            exec("import matplotlib.pyplot as p; p.close('all')", global_dict)
 
-def pytest_collect_file(file_path: pathlib.Path, parent):
-    glob_exprs = ["*demo*.ipynb", "*tutorial*.ipynb", "test_*.ipynb"]
-    if any(file_path.match(g) for g in glob_exprs):
-        return IPyNbFile.from_parent(path=file_path, parent=parent)
+    class IPyNbFile(pytest.File):
+        def collect(self):
+            exporter = PythonExporter()
+            exporter.exclude_markdown = True
+            exporter.exclude_input_prompt = True
+
+            notebook_contents = self.path.open(encoding="utf-8")
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", "IPython.core.inputsplitter is deprecated"
+                )
+                notebook = nbformat.read(notebook_contents, 4)
+                code, _ = exporter.from_notebook_node(notebook)
+            if pytest_version >= 50403:
+                yield IPyNbTest.from_parent(name=self.name, parent=self, code=code)
+            else:
+                yield IPyNbTest(self.name, self, code)
+
+        def teardown(self):
+            pass
+
+    def pytest_collect_file(file_path: pathlib.Path, parent):
+        glob_exprs = ["*demo*.ipynb", "*tutorial*.ipynb", "test_*.ipynb"]
+        if any(file_path.match(g) for g in glob_exprs):
+            return IPyNbFile.from_parent(path=file_path, parent=parent)
 
 
 #   Fixtures
 
 from tests.fixtures import *
+
+try:
+    from override_fixtures import *
+except ImportError:
+    pass
+

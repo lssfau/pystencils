@@ -73,14 +73,19 @@ def get_cpu_array(dtype, op, dims):
         ReductionOp.Max,
     ],
 )
-@pytest.mark.parametrize("dims", [1, 2, 3])
-def test_reduction_cpu(target: ps.Target, dtype: str, op: str, dims: int):
-    config = ps.CreateKernelConfig(target=target)
-    config.cpu.openmp.enable = True
+@pytest.mark.parametrize("dims", [1, 2, 3], ids=["1D", "2D", "3D"])
+def test_reduction_cpu(
+    target: ps.Target,
+    gen_config: ps.CreateKernelConfig,
+    dtype: str,
+    op: ReductionOp,
+    dims: int,
+):
+    if target == ps.Target.ARM_SVE and op == ReductionOp.Mul:
+        pytest.xfail("Multiplication reduction not available on SVE")
 
-    if target.is_vector_cpu():
-        config.cpu.vectorize.enable = True
-        config.cpu.vectorize.assume_inner_stride_one = True
+    config = gen_config.copy()
+    config.cpu.openmp.enable = True
 
     ast_reduction = get_reduction_assign_ast(dtype, op, dims, config)
     kernel_reduction = ast_reduction.compile()

@@ -62,19 +62,14 @@ def test_basic_blocking_staggered():
     np.testing.assert_almost_equal(stag_arr, stag_ref)
 
 
-def test_basic_vectorization():
-    target = ps.Target.auto_cpu()
-    if not target.is_vector_cpu():
-        pytest.skip("No vector CPU available")
-
+@pytest.mark.parametrize("target", [ps.Target.auto_cpu()])
+@pytest.mark.skipif(not ps.Target.auto_cpu().is_vector_cpu(), reason="No vector CPU available")
+def test_basic_vectorization(gen_config):
     f, g = ps.fields("f, g : double[2D]")
     update_rule = [
         ps.Assignment(g[0, 0], f[0, 0] + f[-1, 0] + f[1, 0] + f[0, 1] + f[0, -1] + 42.0)
     ]
-    cfg = ps.CreateKernelConfig(target=target)
-    cfg.cpu.vectorize.enable = True
-    cfg.cpu.vectorize.assume_inner_stride_one = True
-    ast = ps.create_kernel(update_rule, cfg)
+    ast = ps.create_kernel(update_rule, gen_config)
 
     func = ast.compile()
 

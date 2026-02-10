@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from ..kernelcreation import KernelCreationContext
 from ..constants import PsConstant
 from ..memory import PsSymbol
-from ..ast.structural import PsAstNode, PsDeclaration, PsAssignment, PsStatement
+from ..ast.structural import PsAstNode, PsDeclaration, PsAssignment, PsStatement, PsBlock
 from ..ast.expressions import PsExpression, PsCall, PsCast, PsLiteral
 from ...types import PsCustomType, PsVectorType, constify, deconstify
 from ..ast.expressions import PsSymbolExpr, PsConstantExpr, PsUnOp, PsBinOp
@@ -108,8 +108,8 @@ class SelectIntrinsics(ABC):
         self._ctx = ctx
         self._use_builtin_convertvector = use_builtin_convertvector
 
-    def __call__(self, node: PsAstNode) -> PsAstNode:
-        return self.visit(node, SelectionContext(self))
+    def __call__(self, node: PsBlock) -> PsBlock:
+        return cast(PsBlock, self.visit(node, SelectionContext(self)))
 
     def visit(self, node: PsAstNode, sc: SelectionContext) -> PsAstNode:
         match node:
