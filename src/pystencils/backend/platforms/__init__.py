@@ -5,6 +5,7 @@ from .cuda import CudaPlatform
 from .hip import HipPlatform
 from .x86 import X86VectorCpu, X86VectorArch
 from .neon import NeonCpu
+from .sve import SveCpu
 from .sycl import SyclPlatform
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "X86VectorCpu",
     "X86VectorArch",
     "NeonCpu",
+    "SveCpu",
     "GenericGpu",
     "CudaPlatform",
     "HipPlatform",

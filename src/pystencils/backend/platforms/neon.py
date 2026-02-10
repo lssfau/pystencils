@@ -6,8 +6,8 @@ from pystencils.backend.constants import PsConstant
 
 from ...types import (
     PsVectorType,
-    PsCustomType,
     PsScalarType,
+    PsCustomType,
     PsIntegerType,
     PsSignedIntegerType,
     PsUnsignedIntegerType,
@@ -70,7 +70,35 @@ class NeonCpu(GenericVectorCpu):
         )
 
 
-class SelectIntrinsicsNeon(SelectIntrinsics):
+class ArmCommonIntrinsics:
+    def _cast_fp16_ptr(self, expr: PsExpression) -> PsExpression:
+        ptr_type: PsPointerType = cast(PsPointerType, expr.get_dtype())
+        if (
+            isinstance(ptr_type.base_type, PsIeeeFloatType)
+            and ptr_type.base_type.width == 16
+        ):
+            target_ptr_type = PsPointerType(
+                PsCustomType("float16_t", const=ptr_type.base_type.const)
+            )
+            return PsCast(target_ptr_type, expr)
+        else:
+            return expr
+
+    def _op_type_suffix(self, sctype: PsScalarType) -> str:
+        match sctype:
+            case PsUnsignedIntegerType(w):
+                return f"u{w}"
+            case PsSignedIntegerType(w):
+                return f"s{w}"
+            case PsIeeeFloatType(w):
+                return f"f{w}"
+            case _:
+                raise MaterializationError(
+                    f"Invalid base type for SVE vector operation: {sctype}"
+                )
+
+
+class SelectIntrinsicsNeon(ArmCommonIntrinsics, SelectIntrinsics):
     def __init__(
         self,
         ctx: KernelCreationContext,
@@ -183,32 +211,6 @@ class SelectIntrinsicsNeon(SelectIntrinsics):
         st_intrin = self._vst1(vtype)
         return st_intrin(addr, arg)
 
-    def _cast_fp16_ptr(self, expr: PsExpression) -> PsExpression:
-        ptr_type: PsPointerType = cast(PsPointerType, expr.get_dtype())
-        if (
-            isinstance(ptr_type.base_type, PsIeeeFloatType)
-            and ptr_type.base_type.width == 16
-        ):
-            target_ptr_type = PsPointerType(
-                PsCustomType("float16_t", const=ptr_type.base_type.const)
-            )
-            return PsCast(target_ptr_type, expr)
-        else:
-            return expr
-
-    def _op_type_suffix(self, sctype: PsScalarType) -> str:
-        match sctype:
-            case PsUnsignedIntegerType(w):
-                return f"u{w}"
-            case PsSignedIntegerType(w):
-                return f"s{w}"
-            case PsIeeeFloatType(w):
-                return f"f{w}"
-            case _:
-                raise MaterializationError(
-                    f"Invalid base type for Neon vector operation: {sctype}"
-                )
-
     def _q(self, vtype: PsVectorType) -> str:
         if vtype.width == 128:
             return "q"
@@ -256,7 +258,7 @@ class SelectIntrinsicsNeon(SelectIntrinsics):
 
         vtype_intrin = self._vtype_intrin(vtype)
         nargs = 1 if isinstance(op, PsUnOp) else 2
-        atypes = (sctype,) * nargs
+        atypes = (vtype_intrin,) * nargs
         q = self._q(vtype)
 
         opstr: str
@@ -266,7 +268,7 @@ class SelectIntrinsicsNeon(SelectIntrinsics):
                 #   is an alias of `__fp16` instead of C _Float16 type
                 #   So we need to cast here.
                 #   See also https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
-                ifunc = CFunction(f"vdup{q}_n_{vtype_suffix}", atypes, vtype_intrin)
+                ifunc = CFunction(f"vdup{q}_n_{vtype_suffix}", (sctype,), vtype_intrin)
 
                 def intrin(arg: PsExpression) -> PsCall:
                     cast_arg = PsCast(PsCustomType("float16_t"), arg)

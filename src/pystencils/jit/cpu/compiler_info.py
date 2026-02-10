@@ -118,6 +118,8 @@ class _GnuLikeCliCompiler(CompilerInfo):
                 flags += ["-march=armv8-a"]
             case Target.ARM_NEON_FP16:
                 flags += ["-march=armv8.2-a+fp16"]
+            case Target.ARM_SVE:
+                flags += ["-march=armv8.2-a+sve"]
 
         return flags + self.extra_cxxflags
 
@@ -151,7 +153,7 @@ class ClangInfo(_GnuLikeCliCompiler):
         if self.optlevel == "fast":
             #   clang deprecates -Ofast
             flags.remove("-Ofast")
-            flags += ["-O3", "-ffast-math"]
+            flags += ["-O3", "-ffast-math", "-fhonor-infinities"]
 
         return flags
 

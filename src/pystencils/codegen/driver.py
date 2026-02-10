@@ -345,6 +345,9 @@ class DefaultKernelCreationDriver:
                 from ..backend.platforms.neon import NeonCpu
 
                 return NeonCpu(self._ctx, enable_fp16=Target._FP16 in self._target)
+            elif self._target == Target.ARM_SVE:
+                from ..backend.platforms.sve import SveCpu
+                return SveCpu(self._ctx)
             elif self._target == Target.GenericCPU:
                 return GenericCpu(self._ctx)
             else:

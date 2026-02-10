@@ -31,15 +31,13 @@ def target(request) -> ps.Target:
 
 
 @pytest.fixture
-def cpujit(target: ps.Target, tmp_path) -> CpuJit:
-    #   Set target in compiler info such that `-march` is set accordingly
-    cinfo = CompilerInfo.get_default(target=target)
+def compiler_info(target: ps.Target) -> CompilerInfo:
+    return CompilerInfo.get_default(target=target)
 
-    return CpuJit(
-        compiler_info=cinfo,
-        objcache=tmp_path,
-        emit_warnings=True
-    )
+
+@pytest.fixture
+def cpujit(compiler_info, tmp_path) -> CpuJit:
+    return CpuJit(compiler_info=compiler_info, objcache=tmp_path, emit_warnings=True)
 
 
 @pytest.fixture
@@ -58,6 +56,9 @@ def gen_config(request: pytest.FixtureRequest, target: ps.Target, cpujit: CpuJit
     if target.is_vector_cpu():
         gen_config.cpu.vectorize.enable = True
         gen_config.cpu.vectorize.assume_inner_stride_one = True
+
+        if target == ps.Target.ARM_SVE:
+            gen_config.cpu.vectorize.lanes = 2
 
     return gen_config
 

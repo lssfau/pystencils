@@ -2,9 +2,12 @@ __pycache__
 .ipynb_checkpoints
 .venv
 
+override_fixtures.py
+
 .coverage*
 coverage.xml
 
+*.swp
 *.pyc
 *.vti
 /build

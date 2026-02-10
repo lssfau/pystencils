@@ -64,6 +64,24 @@ if Target.ARM_NEON_FP16 in AVAILABLE_TARGETS:
         ]
     ]
 
+if Target.ARM_SVE in AVAILABLE_TARGETS:
+    TYPE_CAST_COMBINATIONS += [
+        (Target.ARM_SVE, from_type, to_type)
+        for from_type, to_type in product(
+            [
+                np.int16,
+                np.int32,
+                np.int64,
+                np.float16,
+                np.float32,
+                np.float64,
+            ],
+            repeat=2,
+        )
+        if from_type != to_type
+        and np.dtype(from_type).itemsize == np.dtype(to_type).itemsize
+    ]
+
 
 @pytest.mark.parametrize("target, from_type, to_type", TYPE_CAST_COMBINATIONS)
 def test_type_cast(gen_config, xp, from_type, to_type):

@@ -42,6 +42,8 @@ you can and should use in your tests:
  - `target`: Provides code generation targets for your test.
    Using this fixture will make pytest create a copy of your test for each target
    available on the current machine (see {any}`Target.available_targets`).
+ - `compiler_info` and `cpujit`: Define the compiler info, and create the just-in-time compiler,
+   for compiling CPU kernels
  - `gen_config`: Provides default code generation configurations for your test.
    This fixture depends on `target` and provides a {any}`CreateKernelConfig` instance
    with target-specific optimization options (in particular vectorization) enabled.
@@ -50,7 +52,7 @@ you can and should use in your tests:
 
 These fixtures are defined in `tests/fixtures.py`.
 
-### Overriding Fixtures
+### Overriding Fixtures for Individual Tests
 
 Pytest allows you to locally override fixtures, which can be especially handy when you wish
 to restrict the target selection of a test.

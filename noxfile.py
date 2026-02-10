@@ -90,7 +90,7 @@ def typecheck(session: nox.Session):
 @nox.parametrize("cupy_version", [None, "12", "13"], ids=["cpu", "cupy12", "cupy13"])
 def testsuite(session: nox.Session, cupy_version: str | None):
     """Run the pystencils test suite.
-    
+
     **Positional Arguments:** Any positional arguments passed to nox after `--`
     are propagated to pytest.
     """
@@ -115,7 +115,7 @@ def testsuite(session: nox.Session, cupy_version: str | None):
         "--html",
         "test-report/index.html",
         "--junitxml=report.xml",
-        *session.posargs
+        *session.posargs,
     )
 
 
@@ -127,6 +127,38 @@ def coverage_report(session: nox.Session):
     session.run("coverage", "report", "--precision=2")
     session.run("coverage", "html")
     session.run("coverage", "xml")
+
+
+@nox.session(tags=["minitest"])
+@nox.parametrize("target", ["ARM_SVE"], ids=["SVE"])
+def minitest_simd(session: nox.Session, target: str):
+    """Run a reduced testsuite for only testing vectorization features for a specific target."""
+
+    if session.venv_backend != "none":
+        session.install(
+            "pytest", "randomgen", "py-cpuinfo"
+        )
+        editable_install(session)
+
+    test_files = [
+        "tests/nbackend/test_vectorization.py",
+    ]
+    pytest_filter = (
+        f"{target} and "
+        "((test_update_kernel and 16bit) or "
+        "(test_set and 32bit) or "
+        "(test_strided_load and float and 32bit) or "
+        "(test_strided_store and float and 64bit))"
+    )
+
+    session.run(
+        "pytest",
+        "-v",
+        "-k",
+        pytest_filter,
+        *session.posargs,
+        *test_files,
+    )
 
 
 @nox.session(python=["3.10"], tags=["docs"])

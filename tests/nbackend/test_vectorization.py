@@ -20,6 +20,7 @@ from pystencils.backend.platforms import (
     X86VectorArch,
     X86VectorCpu,
     NeonCpu,
+    SveCpu,
 )
 from pystencils.backend.ast.structural import PsBlock
 from pystencils.backend.transformations import AxisExpansion, MaterializeAxes, LowerToC
@@ -106,7 +107,12 @@ def get_setups(target: Target) -> list[VectorTestSetup]:
                 VectorTestSetup(target, neon_platform, 4, 32),
                 VectorTestSetup(target, neon_platform, 2, 64),
             ]
-
+        case Target.ARM_SVE:
+            return [
+                VectorTestSetup(target, SveCpu, 8, 16),
+                VectorTestSetup(target, SveCpu, 4, 32),
+                VectorTestSetup(target, SveCpu, 2, 64),
+            ]
         case _:
             return []
 
@@ -320,6 +326,12 @@ TEST_SETUPS_FOR_STRIDED_LOAD = [
     if s.target not in (Target.X86_SSE, Target.ARM_NEON, Target.ARM_NEON_FP16)
 ]
 
+TEST_SETUPS_FOR_STRIDED_LOAD = [
+    s
+    for s in TEST_SETUPS_FOR_STRIDED_LOAD
+    if not (s.target == Target.ARM_SVE and s.type_width == 16)
+]
+
 
 @pytest.mark.parametrize(
     "vectorization_setup",
@@ -370,11 +382,19 @@ def test_strided_load(vectorization_setup: VectorTestSetup, int_or_float):
     np.testing.assert_allclose(f_arr, f_reference)
 
 
-TEST_SETUPS_AVX512 = get_setups(Target.X86_AVX512)
+TEST_SETUPS_FOR_STRIDED_STORE = get_setups(Target.X86_AVX512)
+
+if Target.ARM_SVE in Target.available_vector_cpu_targets():
+    TEST_SETUPS_FOR_STRIDED_STORE += [
+        VectorTestSetup(Target.ARM_SVE, SveCpu, 4, 32),
+        VectorTestSetup(Target.ARM_SVE, SveCpu, 2, 64),
+    ]
 
 
 @pytest.mark.parametrize(
-    "vectorization_setup", TEST_SETUPS_AVX512, ids=[t.name for t in TEST_SETUPS_AVX512]
+    "vectorization_setup",
+    TEST_SETUPS_FOR_STRIDED_STORE,
+    ids=[t.name for t in TEST_SETUPS_FOR_STRIDED_STORE],
 )
 @pytest.mark.parametrize("int_or_float", ["int", "float"])
 def test_strided_store(vectorization_setup: VectorTestSetup, int_or_float):
@@ -409,30 +429,31 @@ def test_strided_store(vectorization_setup: VectorTestSetup, int_or_float):
 
     kernel = create_vector_kernel(update, f, setup)
 
-    bits = setup.type_width * setup.lanes
-    prefix = "_mm" if bits == 128 else f"_mm{bits}"
+    if setup.target == Target.X86_AVX512:
+        bits = setup.type_width * setup.lanes
+        prefix = "_mm" if bits == 128 else f"_mm{bits}"
 
-    if int_or_float == "int":
-        suffix = f"epi{setup.type_width}"
-    else:
-        match setup.type_width:
-            case 32:
-                suffix = "ps"
-            case 64:
-                suffix = "pd"
-            case _:
-                assert False, "unexpected width"
+        if int_or_float == "int":
+            suffix = f"epi{setup.type_width}"
+        else:
+            match setup.type_width:
+                case 32:
+                    suffix = "ps"
+                case 64:
+                    suffix = "pd"
+                case _:
+                    assert False, "unexpected width"
 
-    scatter_pattern = (
-        f"{prefix}_i{setup.type_width}scatter_{suffix}"
-        + r"\(.*,.*,.*,\s*"
-        + str(setup.type_width // 8)
-        + r"\);"
-    )
+        scatter_pattern = (
+            f"{prefix}_i{setup.type_width}scatter_{suffix}"
+            + r"\(.*,.*,.*,\s*"
+            + str(setup.type_width // 8)
+            + r"\);"
+        )
 
-    assert len(re.findall(scatter_pattern, kernel.get_c_code())) == 3
+        assert len(re.findall(scatter_pattern, kernel.get_c_code())) == 3
 
-    if Target.X86_AVX512 in Target.available_vector_cpu_targets():
+    if setup.target in Target.available_vector_cpu_targets():
         #   We don't have AVX512 CPUs on the CI runners
         kernel = kernel.compile()
 

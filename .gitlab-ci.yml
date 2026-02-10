@@ -2,6 +2,7 @@ stages:
   - "Code Quality"
   - "Unit Tests"
   - "Reporting"
+  - "Minitest"
   - docs
   - deploy
 
@@ -74,7 +75,6 @@ typecheck:
     - macmini
     - arm64
 
-
 # -------------------- Reporting -------------------------------------------------------------------------
 
 coverage-report:
@@ -93,6 +93,25 @@ coverage-report:
       coverage_report:
         coverage_format: cobertura
         path: coverage.xml
+
+
+# -------------------- Minitest -------------------------------------------------------------------------
+
+"minitest-qemu-sve":
+  stage: "Minitest"
+  needs: []
+  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/nox:qemu-aarch64
+  allow_failure: true
+  variables:
+    PYTHONPATH: ${CI_PROJECT_DIR}/src
+  before_script:
+    - source ${PYCODEGEN_VENV}/bin/activate
+    - ln -s maintainer/qemu_armv8_fixtures.py override_fixtures.py
+  script:
+    - nox -s "minitest_simd(SVE)" --force-venv-backend=none
+  tags:
+    - docker
+    - multiarch
 
 
 # -------------------- Documentation ---------------------------------------------------------------------

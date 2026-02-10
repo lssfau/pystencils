@@ -5,6 +5,7 @@ from warnings import warn
 from functools import cache
 
 from ..types import PsScalarType
+from .errors import CodegenError
 
 
 class Target(Flag):
@@ -144,6 +145,10 @@ class Target(Flag):
                 return 256 // (dtype.itemsize * 8)
             case Target.X86_AVX512 | Target.X86_AVX512_FP16:
                 return 512 // (dtype.itemsize * 8)
+            case Target.ARM_SVE:
+                raise CodegenError(
+                    "Number of lanes for scalable vectors of the SVE architecture must be specified manually"
+                )
             case _:
                 raise NotImplementedError(
                     f"No default number of lanes known for {dtype} on {self}"
@@ -244,6 +249,9 @@ def _available_vector_targets() -> tuple[Target, ...]:
 
                 if "fphp" in flags:
                     targets.append(Target.ARM_NEON_FP16)
+
+                if "sve" in flags:
+                    targets.append(Target.ARM_SVE)
             except ImportError:
                 warn(
                     "Unable to determine available ARM vector CPU features for this system: "
