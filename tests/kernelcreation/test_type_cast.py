@@ -97,12 +97,12 @@ def test_type_cast(gen_config, xp, from_type, to_type):
     else:
         inp = xp.array([15, 0, 1, 3, 5, 312, 42, 6, 9], dtype=from_type)
 
-    outp = xp.zeros_like(inp).astype(to_type)
-    truncated = inp.astype(to_type)
-    rounded = xp.round(inp).astype(to_type)
+    outp = xp.ndarray.astype(xp.zeros_like(inp), to_type)
+    truncated = xp.ndarray.astype(inp, to_type)
+    rounded = xp.ndarray.astype(xp.round(inp), to_type)
 
-    inp_field = Field.create_from_numpy_array("inp", inp)
-    outp_field = Field.create_from_numpy_array("outp", outp)
+    inp_field = Field.create_from_numpy_array("inp", xp.asarray(inp))
+    outp_field = Field.create_from_numpy_array("outp", xp.asarray(outp))
 
     asms = [Assignment(outp_field.center(), tcast(inp_field.center(), to_type))]
 

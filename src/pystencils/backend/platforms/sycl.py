@@ -1,29 +1,21 @@
 from __future__ import annotations
 
-from ..functions import CFunction, PsMathFunction, MathFunctions
-from ..kernelcreation.iteration_space import (
-    IterationSpace,
-    FullIterationSpace,
-    SparseIterationSpace,
-)
-from ..ast.structural import PsDeclaration, PsBlock, PsConditional
-from ..ast.expressions import (
-    PsExpression,
-    PsSymbolExpr,
-    PsSubscript,
-    PsLt,
-    PsAnd,
-    PsCall,
-    PsLookup,
-    PsBufferAcc,
-)
-from ..extensions.cpp import CppMethodCall
+import numpy as np
 
-from ..kernelcreation import KernelCreationContext, AstFactory
+from ...codegen.properties import SYCLItem, SYCLNDItem
+from ...types import PsCustomType, PsIeeeFloatType, PsIntegerType, PsUnsignedIntegerType, constify
+from ..ast.expressions import (
+    PsAnd, PsBufferAcc, PsCall, PsCast, PsExpression, PsLookup, PsLt, PsSubscript, PsSymbolExpr)
+from ..ast.structural import PsBlock, PsConditional, PsDeclaration
 from ..constants import PsConstant
 from ..exceptions import MaterializationError
-from ...types import PsCustomType, PsIeeeFloatType, constify, PsIntegerType
-
+from ..extensions.cpp import CppMethodCall
+from ..functions import (
+    CFunction, ConstantFunctions, MathFunctions, PsConstantFunction, PsIrFunction, PsMathFunction,
+    PsRngEngineFunction, RngSpec)
+from ..kernelcreation import AstFactory, KernelCreationContext, Typifier
+from ..kernelcreation.iteration_space import (
+    FullIterationSpace, IterationSpace, SparseIterationSpace)
 from .platform import Platform
 
 
@@ -40,7 +32,7 @@ class SyclPlatform(Platform):
 
     @property
     def required_headers(self) -> set[str]:
-        return {"<sycl/sycl.hpp>"}
+        return {"<sycl/sycl.hpp>", '"pystencils_runtime/generic_cpu.hpp"'}
 
     def materialize_iteration_space(
         self, body: PsBlock, ispace: IterationSpace
@@ -55,46 +47,96 @@ class SyclPlatform(Platform):
     def select_function(
         self, call: PsCall
     ) -> PsExpression:
-        assert isinstance(call.function, PsMathFunction)
+        assert isinstance(call.function, PsIrFunction)
 
-        func = call.function.func
         dtype = call.get_dtype()
-        arg_types = (dtype,) * func.num_args
 
-        if isinstance(dtype, PsIeeeFloatType) and dtype.width in (16, 32, 64):
-            match func:
-                case (
-                    MathFunctions.Exp
-                    | MathFunctions.Log
-                    | MathFunctions.Sin
-                    | MathFunctions.Cos
-                    | MathFunctions.Tan
-                    | MathFunctions.Sinh
-                    | MathFunctions.Cosh
-                    | MathFunctions.ASin
-                    | MathFunctions.ACos
-                    | MathFunctions.ATan
-                    | MathFunctions.ATan2
-                    | MathFunctions.Pow
-                    | MathFunctions.Sqrt
-                    | MathFunctions.Floor
-                    | MathFunctions.Ceil
-                ):
-                    cfunc = CFunction(f"sycl::{func.function_name}", arg_types, dtype)
+        expr: PsExpression | None = None
+        if isinstance(call.function, PsMathFunction | PsConstantFunction):
+            func = call.function.func
+            arg_types = (dtype,) * call.function.arg_count
 
-                case MathFunctions.Abs | MathFunctions.Min | MathFunctions.Max:
-                    cfunc = CFunction(f"sycl::f{func.function_name}", arg_types, dtype)
+            if isinstance(dtype, PsIeeeFloatType) and dtype.width in (16, 32, 64):
+                match func:
+                    case (
+                        MathFunctions.Exp
+                        | MathFunctions.Log
+                        | MathFunctions.Sin
+                        | MathFunctions.Cos
+                        | MathFunctions.Tan
+                        | MathFunctions.Sinh
+                        | MathFunctions.Cosh
+                        | MathFunctions.Tanh
+                        | MathFunctions.ASin
+                        | MathFunctions.ACos
+                        | MathFunctions.ATan
+                        | MathFunctions.ATan2
+                        | MathFunctions.Pow
+                        | MathFunctions.Sqrt
+                        | MathFunctions.Floor
+                        | MathFunctions.Ceil
+                    ):
+                        call.function = CFunction(f"sycl::{func.function_name}", arg_types, dtype)
+                        expr = call
 
-            call.function = cfunc
-            return call
+                    case MathFunctions.Abs | MathFunctions.Min | MathFunctions.Max:
+                        call.function = CFunction(f"sycl::f{func.function_name}", arg_types, dtype)
+                        expr = call
 
-        if isinstance(dtype, PsIntegerType):
-            if (expr := self._select_integer_function(call)) is not None:
-                return expr
+                match func:
+                    case ConstantFunctions.Pi:
+                        assert dtype.numpy_dtype is not None
+                        expr = PsExpression.make(
+                            PsConstant(dtype.numpy_dtype.type(np.pi), dtype)
+                        )
 
-        raise MaterializationError(
-            f"No implementation available for function {func} on data type {dtype}"
-        )
+                    case ConstantFunctions.E:
+                        assert dtype.numpy_dtype is not None
+                        expr = PsExpression.make(
+                            PsConstant(dtype.numpy_dtype.type(np.e), dtype)
+                        )
+
+                    case ConstantFunctions.PosInfinity | ConstantFunctions.NegInfinity:
+                        call.function = CFunction(
+                            f"std::numeric_limits< {dtype.c_string()} >::infinity",
+                            [],
+                            dtype,
+                        )
+                        if func == ConstantFunctions.NegInfinity:
+                            expr = -call
+                        else:
+                            expr = call
+
+            elif isinstance(dtype, PsIntegerType):
+                expr = self._select_integer_function(call)
+
+        elif isinstance(call.function, PsRngEngineFunction):
+            # raise NotImplementedError("Random Functions are currently not Implemented in Sycl backend")
+            
+            spec = call.function.rng_spec
+            atypes = (spec.int_arg_type,) * call.function.arg_count
+
+            match spec:
+                case RngSpec.PhiloxFp32:
+                    rng_func = CFunction(
+                        "pystencils::runtime::random::philox_fp32x4", atypes, spec.dtype
+                    )
+                case RngSpec.PhiloxFp64:
+                    rng_func = CFunction(
+                        "pystencils::runtime::random::philox_fp64x2", atypes, spec.dtype
+                    )
+
+            expr = rng_func(*call.args)
+
+        if expr is not None:
+            if expr.dtype is None:
+                typify = Typifier(self._ctx)
+                expr = typify(expr)
+            return expr
+        else:
+            raise MaterializationError(
+                f"No implementation available for function {func} on data type {dtype}"
+            )
 
     def _prepend_dense_translation(
         self, body: PsBlock, ispace: FullIterationSpace
@@ -118,11 +160,12 @@ class SyclPlatform(Platform):
             work_item_idx = PsSubscript(id_symbol, (coord,))
 
             dim.counter.dtype = constify(dim.counter.get_dtype())
-            work_item_idx.dtype = dim.counter.get_dtype()
+            # work_item_idx.dtype = dim.counter.get_dtype()
+            work_item_idx.dtype = PsUnsignedIntegerType(64)
 
             ctr = PsExpression.make(dim.counter)
             indexing_decls.append(
-                PsDeclaration(ctr, dim.start + work_item_idx * dim.step)
+                PsDeclaration(ctr, dim.start + PsCast(self._ctx.index_dtype, work_item_idx) * dim.step)
             )
             conds.append(PsLt(ctr, dim.stop))
 
@@ -184,7 +227,13 @@ class SyclPlatform(Platform):
 
     def _id_declaration(self, rank: int, id: PsSymbolExpr) -> PsDeclaration:
         item_type = self._item_type(rank)
-        item = PsExpression.make(self._ctx.get_symbol("sycl_item", item_type))
+         
+        item_symbol = self._ctx.get_symbol("sycl_item", item_type)
+        if self._automatic_block_size:
+            item_symbol.add_property(SYCLItem(rank))
+        else:
+            item_symbol.add_property(SYCLNDItem(rank))
+        item = PsExpression.make(item_symbol)
 
         if not self._automatic_block_size:
             rhs = CppMethodCall(item, "get_global_id", self._id_type(rank))

@@ -1,10 +1,13 @@
 import numpy as np
+import pytest
 
-from pystencils import Assignment, Field, FieldType, AssignmentCollection
-from pystencils import create_kernel, CreateKernelConfig
+from pystencils import (
+    Assignment, AssignmentCollection, CreateKernelConfig, Field, FieldType, Target, create_kernel)
 
 
 def test_indexed_kernel(target, xp):
+    if target == Target.SYCL:
+        pytest.skip("Complex dtypes with different types are not supported by dpctl")
     arr = xp.zeros((3, 4))
     dtype = np.dtype([('x', int), ('y', int), ('value', arr.dtype)], align=True)
     
@@ -13,8 +16,8 @@ def test_indexed_kernel(target, xp):
     cpu_index_arr[1] = (1, 3, 42.0)
     cpu_index_arr[2] = (2, 1, 5.0)
 
-    if target.is_gpu():
-        gpu_index_arr = xp.empty(cpu_index_arr.shape, cpu_index_arr.dtype)
+    if target.is_gpu() or target == Target.SYCL:
+        gpu_index_arr = xp.empty(cpu_index_arr.shape, dtype=cpu_index_arr.dtype)
         gpu_index_arr.set(cpu_index_arr)
         index_arr = gpu_index_arr
     else:
@@ -32,7 +35,7 @@ def test_indexed_kernel(target, xp):
 
     kernel(f=arr, index=index_arr)
 
-    if target.is_gpu():
+    if target.is_gpu() or target == Target.SYCL:
         arr = xp.asnumpy(arr)
 
     for i in range(cpu_index_arr.shape[0]):

@@ -92,6 +92,7 @@ pystencils = [
     "include/**/*.hpp",
     "include/**/*.cuh",
     "jit/cpu/*.tmpl.cpp",
+    "jit/sycl/*.tmpl.cpp",
     "boundaries/createindexlistcython.pyx",
 ]
 

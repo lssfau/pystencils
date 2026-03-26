@@ -186,7 +186,7 @@ def test_unary_functions(gen_config, xp, function_name, dtype, function_domain):
 
     reference = xp_func(inp)
 
-    inp_field = Field.create_from_numpy_array("inp", inp)
+    inp_field = Field.create_from_numpy_array("inp", xp.asarray(inp))
     outp_field = inp_field.new_field_with_different_name("outp")
 
     asms = [Assignment(outp_field.center(), sp_func(inp_field.center()))]
@@ -215,8 +215,8 @@ def test_binary_functions(gen_config, xp, function_name, dtype, function_domain)
 
     reference = xp_func(inp, inp2)
 
-    inp_field = Field.create_from_numpy_array("inp", inp)
-    inp2_field = Field.create_from_numpy_array("inp2", inp)
+    inp_field = Field.create_from_numpy_array("inp", xp.asarray(inp))
+    inp2_field = Field.create_from_numpy_array("inp2", xp.asarray(inp2))
     outp_field = inp_field.new_field_with_different_name("outp")
 
     asms = [
@@ -254,7 +254,7 @@ def test_integer_abs(gen_config, xp, dtype):
     outp = xp.zeros_like(inp)
     reference = xp_func(inp)
 
-    inp_field = Field.create_from_numpy_array("inp", inp)
+    inp_field = Field.create_from_numpy_array("inp", xp.asarray(inp))
     outp_field = inp_field.new_field_with_different_name("outp")
 
     asms = [Assignment(outp_field.center(), sp_func(inp_field.center()))]
@@ -300,8 +300,8 @@ def test_integer_binary_functions(gen_config, xp, function_name, dtype):
     outp = xp.zeros_like(inp1)
     reference = xp_func(inp1, inp2)
 
-    inp_field = Field.create_from_numpy_array("inp1", inp1)
-    inp2_field = Field.create_from_numpy_array("inp2", inp2)
+    inp_field = Field.create_from_numpy_array("inp1", xp.asarray(inp1))
+    inp2_field = Field.create_from_numpy_array("inp2", xp.asarray(inp2))
     outp_field = inp_field.new_field_with_different_name("outp")
 
     asms = [
@@ -333,7 +333,7 @@ def test_constants(c_name, dtype, gen_config, xp):
     reference = xp.zeros_like(outp)
     reference[:] = c_np
 
-    outp_field = Field.create_from_numpy_array("outp", outp)
+    outp_field = Field.create_from_numpy_array("outp", xp.asarray(outp))
     asm = Assignment(outp_field(0), c_sp)
 
     gen_config = replace(gen_config, default_dtype=dtype)

@@ -79,7 +79,7 @@ def test_filter_kernel(gen_config, xp, dtype):
     kfunc(src=src_arr, dst=dst_arr, weight=2.0)
 
     expected = xp.zeros_like(src_arr)
-    expected[1:-1, 1:-1].fill(18.0)
+    expected[1:-1, 1:-1] = 18.0
 
     xp.testing.assert_allclose(dst_arr, expected)
 
@@ -92,8 +92,8 @@ def test_filter_kernel_fixedsize(gen_config, xp, dtype):
     src_arr = xp.ones((42, 31), dtype=dtype)
     dst_arr = xp.zeros_like(src_arr)
 
-    src = Field.create_from_numpy_array("src", src_arr)
-    dst = Field.create_from_numpy_array("dst", dst_arr)
+    src = Field.create_from_numpy_array("src", xp.asarray(src_arr))
+    dst = Field.create_from_numpy_array("dst", xp.asarray(dst_arr))
 
     asm = assignment_from_stencil(stencil, src, dst, normalization_factor=weight)
     asms = AssignmentCollection([asm])
@@ -122,7 +122,7 @@ def test_filter_kernel_fixedsize(gen_config, xp, dtype):
     kfunc(src=src_arr, dst=dst_arr, weight=2.0)
 
     expected = xp.zeros_like(src_arr)
-    expected[1:-1, 1:-1].fill(18.0)
+    expected[1:-1, 1:-1] = 18.0
 
     xp.testing.assert_allclose(dst_arr, expected)
 

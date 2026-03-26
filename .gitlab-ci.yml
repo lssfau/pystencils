@@ -64,7 +64,17 @@ typecheck:
     - docker
     - AVX
 
-  
+"testsuite-dpctl-py3.12":
+  extends: .testsuite-base
+  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/nox:ubuntu24.04-cuda12.6-oapi
+  script:
+    - nox --session "testsuite-3.12(dpctl)"
+  tags:
+    - docker
+    - cuda
+    - AVX
+
+
 "testsuite-macOS-arm64-py3.11":
   extends: .testsuite-base
   before_script:
@@ -118,7 +128,7 @@ coverage-report:
 
 
 build-documentation:
-  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/nox:ubuntu24.04-cuda12.6
+  image: i10git.cs.fau.de:5005/pycodegen/pycodegen/nox:ubuntu24.04-cuda12.6-oapi
   stage: docs
   needs: []
   script:

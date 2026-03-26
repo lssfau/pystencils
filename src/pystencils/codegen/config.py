@@ -381,7 +381,7 @@ class GpuOptions(ConfigBase):
         match target:
             case Target.CUDA:
                 return 32
-            case Target.HIP:
+            case Target.HIP | Target.SYCL:
                 return None
             case _:
                 raise NotImplementedError(
@@ -608,9 +608,14 @@ class CreateKernelConfig(ConfigBase):
                     return no_jit
 
             elif target == Target.SYCL:
-                from ..jit import no_jit
+                try:
+                    from ..jit import SYCLJit
 
-                return no_jit
+                    return SYCLJit()
+                except ImportError:
+                    from ..jit import no_jit
+
+                    return no_jit
             else:
                 raise NotImplementedError(
                     f"No default JIT compiler implemented yet for target {self.target}"

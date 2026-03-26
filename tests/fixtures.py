@@ -12,13 +12,15 @@ by your tests:
 
 """
 
-import pytest
-
 from types import ModuleType
 
+import pytest
+
 import pystencils as ps
-from pystencils.jit import CpuJit
+from pystencils.jit import CpuJit, NoJit, JitBase
 from pystencils.jit.cpu import CompilerInfo
+from pystencils.jit.error import JitError
+from pystencils.jit.sycl import SYCLIcpxInfo, SYCLJit
 
 AVAILABLE_TARGETS = ps.Target.available_targets()
 TARGET_IDS = [t.name for t in AVAILABLE_TARGETS]
@@ -41,7 +43,47 @@ def cpujit(compiler_info, tmp_path) -> CpuJit:
 
 
 @pytest.fixture
-def gen_config(request: pytest.FixtureRequest, target: ps.Target, cpujit: CpuJit):
+def sycl_jit(tmp_path) -> SYCLJit | NoJit:
+    cinfo = SYCLIcpxInfo(optlevel="3")
+    cinfo.extra_cxxflags = ["-Wall", "-Wconversion", "-Werror", "-fp-model=precise"]
+    try:
+        return SYCLJit(compiler_info=cinfo, objcache=tmp_path, emit_warnings=True)
+    except JitError:
+        return NoJit()
+
+
+@pytest.fixture
+def jit(target: ps.Target, tmp_path) -> JitBase:
+    if target.is_cpu():
+        #   Set target in compiler info such that `-march` is set accordingly
+        cinfo = CompilerInfo.get_default(target=target)
+
+        return CpuJit(
+            compiler_info=cinfo,
+            objcache=tmp_path,
+            emit_warnings=True
+        )
+
+    elif target == ps.Target.SYCL:
+        cinfo = SYCLIcpxInfo(optlevel="3")
+        cinfo.extra_cxxflags = [
+            "-Wall",
+            "-Wconversion",
+            "-Werror",
+            "-fp-model=precise"
+        ]
+        try:
+            return SYCLJit(compiler_info=cinfo,
+                           objcache=tmp_path,
+                           emit_warnings=True)
+        except JitError:
+            return NoJit()
+    else:
+        return NoJit()
+
+
+@pytest.fixture
+def gen_config(request: pytest.FixtureRequest, target: ps.Target, jit: JitBase):
     """Default codegen configuration for the current target.
 
     For GPU targets, set default indexing options.
@@ -50,8 +92,8 @@ def gen_config(request: pytest.FixtureRequest, target: ps.Target, cpujit: CpuJit
 
     gen_config = ps.CreateKernelConfig(target=target)
 
-    if target.is_cpu():
-        gen_config.jit = cpujit
+    if target.is_cpu() or target == ps.Target.SYCL:
+        gen_config.jit = jit
 
     if target.is_vector_cpu():
         gen_config.cpu.vectorize.enable = True
@@ -74,6 +116,10 @@ def xp(target: ps.Target) -> ModuleType:
         import cupy as xp
 
         return xp
+    elif target == ps.Target.SYCL:
+        import tests.dpctl_compat as dpt
+
+        return dpt
     else:
         import numpy as np
 

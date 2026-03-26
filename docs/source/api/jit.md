@@ -87,3 +87,20 @@ a custom compiler info object to `CpuJit`.
   CupyKernelWrapper
   LaunchGrid
 ```
+
+## dpctl-based SYCL JIT
+
+```{eval-rst}
+.. module:: pystencils.jit.sycl
+
+.. autosummary::
+  :toctree: generated
+  :nosignatures:
+  :template: autosummary/entire_class.rst
+
+  SYCLJit
+  SYCLClangInfo
+  SYCLIcpxInfo
+  sycl_module_builder.SyclExtensionModuleBuilder
+  sycl_module_builder.SyclKernelWrapper
+```

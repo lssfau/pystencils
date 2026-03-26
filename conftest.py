@@ -51,6 +51,7 @@ collect_ignore = []
 
 ignore_file("noxfile.py")
 ignore_file("docs/source/conf.py")
+ignore_file(("tests/dpctl_compat.py"))
 add_path_to_ignore("docs/build")
 add_path_to_ignore("tests/benchmark")
 add_path_to_ignore("_local_tmp")
@@ -108,6 +109,15 @@ except ImportError:
     ]
 
 collect_ignore += [os.path.join(SCRIPT_FOLDER, "setup.py")]
+
+try:
+    import dpctl
+except ImportError:
+    collect_ignore += [
+        os.path.join(SCRIPT_FOLDER, "src/pystencils/jit/sycl/sycljit.py"),
+        os.path.join(SCRIPT_FOLDER, "src/pystencils/jit/sycl/sycl_module_builder.py"),
+        os.path.join(SCRIPT_FOLDER, "src/pystencils/backend/platforms/sycl.py"),
+    ]
 
 for root, sub_dirs, files in os.walk("."):
     for f in files:
