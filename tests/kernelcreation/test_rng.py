@@ -44,7 +44,7 @@ def test_philox(dtype, gen_config, xp, offsets, c_value):
 
     shape = (12, 12)
     f_arr = xp.zeros(shape + (q,), dtype=dtype)
-    g_arr = xp.zeros_like(f_arr)
+    g_arr = xp.zeros_like(f_arr, dtype=dtype)
 
     if isinstance(offsets[0], ps.TypedSymbol):
         offset_args = {"o0": 15, "o1": -3}
@@ -99,11 +99,11 @@ def test_philox(dtype, gen_config, xp, offsets, c_value):
         f_arr = f_arr.get()
         g_arr = g_arr.get()
 
-    f_reference = get_reference(0)
-    g_reference = get_reference(1)
+    f_reference = xp.array(get_reference(0))
+    g_reference = xp.array(get_reference(1))
 
-    np.testing.assert_allclose(f_arr, f_reference, rtol=0, atol=eps)
-    np.testing.assert_allclose(g_arr, g_reference, rtol=0, atol=eps)
+    xp.testing.assert_allclose(f_arr, f_reference, rtol=0, atol=eps)
+    xp.testing.assert_allclose(g_arr, g_reference, rtol=0, atol=eps)
 
 
 def test_compare_and_pickle():

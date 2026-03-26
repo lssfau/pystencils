@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from enum import Flag, auto
-from warnings import warn
 from functools import cache
+from warnings import warn
 
 from ..types import PsScalarType
 from .errors import CodegenError
@@ -188,6 +188,11 @@ class Target(Flag):
             import cupy  # noqa: F401
 
             targets.append(Target.auto_gpu())
+        except ImportError:
+            pass
+        try:
+            import dpctl  # noqa: F401
+            targets.append(Target.SYCL)
         except ImportError:
             pass
 

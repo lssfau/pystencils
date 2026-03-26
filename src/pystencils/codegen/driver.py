@@ -1,70 +1,52 @@
 from __future__ import annotations
-from typing import cast, Sequence, Callable, TYPE_CHECKING, Protocol
+
 from dataclasses import replace
+from abc import abstractmethod
+from typing import TYPE_CHECKING, Callable, Protocol, Sequence, cast
 from warnings import warn
 
-from .target import Target
-from .config import (
-    CreateKernelConfig,
-    AUTO,
-    _AUTO_TYPE,
-    GhostLayerSpec,
-    IterationSliceSpec,
-    GpuIndexingScheme,
-    GpuOptions,
-)
-from .kernel import Kernel, GpuKernel
-from .properties import PsSymbolProperty, FieldBasePtr
-from .parameters import Parameter
-from .functions import Lambda
-from .gpu_indexing import GpuIndexing, GpuIndexMappingStrategy, GpuLaunchConfiguration
-from .cpu_loop_strategies import DefaultCpuLoopStrategies
+from sympy.codegen.ast import AssignmentBase
 
-from ..field import Field
-from ..types import PsIntegerType, PsScalarType
-
-from ..backend.memory import PsSymbol
 from ..backend.ast import PsAstNode
+from ..backend.ast.analysis import collect_required_headers, collect_undefined_symbols
 from ..backend.ast.expressions import PsExpression
 from ..backend.ast.structural import PsBlock
-from ..backend.ast.analysis import collect_undefined_symbols, collect_required_headers
 from ..backend.kernelcreation import (
-    KernelCreationContext,
-    KernelAnalysis,
-    FreezeExpressions,
-    Typifier,
-    AstFactory,
-)
+    AstFactory, FreezeExpressions, KernelAnalysis, KernelCreationContext, Typifier)
 from ..backend.kernelcreation.iteration_space import (
-    create_sparse_iteration_space,
-    create_full_iteration_space,
-    IterationSpace,
-)
-from ..backend.platforms import (
-    Platform,
-    GenericCpu,
-    GenericVectorCpu,
-    GenericGpu,
-)
-
+    IterationSpace, create_full_iteration_space, create_sparse_iteration_space)
+from ..backend.memory import PsSymbol
+from ..backend.platforms import GenericCpu, GenericGpu, GenericVectorCpu, Platform
 from ..backend.transformations import (
-    EliminateConstants,
-    LowerToC,
-    SelectFunctions,
-    CanonicalizeSymbols,
-    HoistIterationInvariantDeclarations,
-    MaterializeAxes,
-    ReductionsToMemory,
-)
-
+    CanonicalizeSymbols, EliminateConstants, HoistIterationInvariantDeclarations, LowerToC,
+    MaterializeAxes, ReductionsToMemory, SelectFunctions)
+from ..field import Field
 from ..simp import AssignmentCollection
-from sympy.codegen.ast import AssignmentBase
+from ..types import PsIntegerType, PsScalarType
+from .config import (
+    _AUTO_TYPE, AUTO, CreateKernelConfig, GhostLayerSpec, GpuIndexingScheme, GpuOptions,
+    IterationSliceSpec)
+from .cpu_loop_strategies import DefaultCpuLoopStrategies
+from .functions import Lambda
+from .gpu_indexing import GpuIndexing, GpuIndexMappingStrategy, GpuLaunchConfiguration
+from .kernel import GpuKernel, Kernel
+from .parameters import Parameter
+from .properties import FieldBasePtr, PsSymbolProperty
+from .sycl_indexing import SyclIndexing
+from .target import Target
 
 if TYPE_CHECKING:
     from ..jit import JitBase
 
 
 __all__ = ["create_kernel"]
+
+
+class ProvidesLaunchConfigFactory(Protocol):
+
+    @abstractmethod
+    def get_launch_config_factory(self) -> Callable[[], GpuLaunchConfiguration]:
+        ...
 
 
 def create_kernel(
@@ -150,7 +132,7 @@ class DefaultKernelCreationDriver:
         )
 
         self._target = cfg.get_target()
-        self._gpu_indexing: GpuIndexing | None = self._get_gpu_indexing()
+        self._gpu_indexing: ProvidesLaunchConfigFactory | None = self._get_gpu_indexing()
         self._platform = self._get_platform()
         self._factory = AstFactory(self._ctx)
 
@@ -158,6 +140,7 @@ class DefaultKernelCreationDriver:
         self,
         assignments: AssignmentCollection | Sequence[AssignmentBase] | AssignmentBase,
     ) -> Kernel:
+
         kernel_body = self.parse_kernel_body(assignments)
         kernel_ast = self._materialize_iteration_space(kernel_body)
         kernel_ast = self._general_optimize(kernel_ast)
@@ -271,7 +254,10 @@ class DefaultKernelCreationDriver:
 
         kernel_factory = KernelFactory(self._ctx)
 
-        if self._target.is_cpu() or self._target == Target.SYCL:
+        range_kernel = self._target == Target.SYCL and self._cfg.sycl.get_option("automatic_block_size")
+        nd_range_kernel = self._target == Target.SYCL and not self._cfg.sycl.get_option("automatic_block_size")
+
+        if self._target.is_cpu() or range_kernel:
             return kernel_factory.create_generic_kernel(
                 self._platform,
                 kernel_ast,
@@ -279,7 +265,7 @@ class DefaultKernelCreationDriver:
                 self._target,
                 self._cfg.get_jit(),
             )
-        elif self._target.is_gpu():
+        elif self._target.is_gpu() or nd_range_kernel:
             assert self._gpu_indexing is not None
 
             return kernel_factory.create_gpu_kernel(
@@ -293,8 +279,9 @@ class DefaultKernelCreationDriver:
         else:
             assert False, "unexpected target"
 
-    def _get_gpu_indexing(self) -> GpuIndexing | None:
-        if not self._target.is_gpu():
+    def _get_gpu_indexing(self) -> ProvidesLaunchConfigFactory | None:
+        nd_range_kernel = self._target == Target.SYCL and not self._cfg.sycl.get_option("automatic_block_size")
+        if not self._target.is_gpu() and not nd_range_kernel:
             return None
 
         idx_scheme: GpuIndexingScheme = self._cfg.gpu.get_option("indexing_scheme")
@@ -311,6 +298,13 @@ class DefaultKernelCreationDriver:
             warn(
                 "GPU warp size is unknown - ignoring assumption `assume_warp_aligned_block_size`."
             )
+
+        if nd_range_kernel:
+            return SyclIndexing(self._ctx,
+                                idx_scheme,
+                                warp_size,
+                                manual_launch_grid,
+                                assume_warp_aligned_block_size,)
 
         return GpuIndexing(
             self._ctx,
@@ -455,7 +449,7 @@ class KernelFactory:
         return kfunc
 
     def _symbol_to_param(self, symbol: PsSymbol):
-        from pystencils.backend.memory import BufferBasePtr, BackendPrivateProperty
+        from pystencils.backend.memory import BackendPrivateProperty, BufferBasePtr
 
         props: set[PsSymbolProperty] = set()
         for prop in symbol.properties:

@@ -49,6 +49,8 @@ intersphinx_mapping = {
     "matplotlib": ("https://matplotlib.org/", None),
     "sympy": ("https://docs.sympy.org/latest/", None),
     "cupy": ("https://docs.cupy.dev/en/stable/", None),
+    "dpctl": ("https://intelpython.github.io/dpctl/latest/", None),
+    "sycl": ("https://github.khronos.org/SYCL_Reference/", None),
 }
 
 # -- Options for inheritance diagrams-----------------------------------------

@@ -37,5 +37,23 @@ class FieldBasePtr(UniqueSymbolProperty):
     field: Field
 
 
+@dataclass(frozen=True)
+class SYCLItem(UniqueSymbolProperty):
+    """Symbol acts as a sycl item."""
+    rank: int
+
+
+@dataclass(frozen=True)
+class SYCLNDItem(UniqueSymbolProperty):
+    """Symbol acts as a sycl nditem."""
+    rank: int
+
+
+@dataclass(frozen=True)
+class SYCLId(UniqueSymbolProperty):
+    """Symbol acts as a sycl id."""
+    rank: int
+
+
 FieldProperty = FieldShape | FieldStride | FieldBasePtr
 _FieldProperty = (FieldShape, FieldStride, FieldBasePtr)

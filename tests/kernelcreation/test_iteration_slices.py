@@ -87,7 +87,7 @@ def test_numerical_slices(gen_config: CreateKernelConfig, xp, islice):
     expected = xp.zeros_like(f_arr)
     expected[islice] = 1.0
 
-    f = Field.create_from_numpy_array("f", f_arr)
+    f = Field.create_from_numpy_array("f", xp.asarray(f_arr))
 
     update = Assignment(f.center(), 1)
     gen_config = replace(gen_config, iteration_slice=islice)
@@ -108,7 +108,7 @@ def test_symbolic_slice(gen_config: CreateKernelConfig, xp):
 
     f_arr = xp.zeros(shape)
 
-    f = Field.create_from_numpy_array("f", f_arr)
+    f = Field.create_from_numpy_array("f", xp.asarray(f_arr))
 
     update = Assignment(f.center(), 1)
     islice = make_slice[sy:ey, sx:ex]
@@ -138,7 +138,7 @@ def test_triangle_pattern(gen_config: CreateKernelConfig, xp):
     shape = (16, 16)
 
     f_arr = xp.zeros(shape)
-    f = Field.create_from_numpy_array("f", f_arr)
+    f = Field.create_from_numpy_array("f", xp.asarray(f_arr))
 
     expected = xp.zeros_like(f_arr)
     for r in range(shape[0]):
@@ -185,7 +185,7 @@ def test_red_black_pattern(gen_config: CreateKernelConfig, xp):
     shape = (16, 16)
 
     f_arr = xp.zeros(shape)
-    f = Field.create_from_numpy_array("f", f_arr)
+    f = Field.create_from_numpy_array("f", xp.asarray(f_arr))
 
     expected = xp.zeros_like(f_arr)
     for r in range(shape[0]):

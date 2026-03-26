@@ -2,35 +2,24 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import cast, Any, Callable
 from itertools import chain
+from math import prod
+from typing import Any, Callable, cast
 from warnings import warn
 
+from ..backend.ast.axes import PsAxesCube
+from ..backend.ast.expressions import PsExpression, PsIntDiv
+from ..backend.ast.structural import PsBlock
+from ..backend.kernelcreation import (
+    AstFactory, FullIterationSpace, IterationSpace, KernelCreationContext, SparseIterationSpace)
+from ..backend.transformations import CanonicalizeSymbols
+from ..backend.transformations.axis_expansion import AxisExpansion, AxisExpansionStrategy
+from ..utils import ceil_to_multiple
+from .config import GpuIndexingScheme, GpuOptions
+from .errors import CodegenError
 from .functions import Lambda
 from .parameters import Parameter
-from .errors import CodegenError
-from .config import GpuIndexingScheme, GpuOptions
 from .target import Target
-
-from ..backend.kernelcreation import (
-    KernelCreationContext,
-    IterationSpace,
-    FullIterationSpace,
-    SparseIterationSpace,
-    AstFactory,
-)
-from ..backend.ast.structural import PsBlock
-from ..backend.ast.axes import PsAxesCube
-from ..backend.transformations import CanonicalizeSymbols
-from ..backend.transformations.axis_expansion import (
-    AxisExpansion,
-    AxisExpansionStrategy,
-)
-
-from ..backend.ast.expressions import PsExpression, PsIntDiv
-from math import prod
-
-from ..utils import ceil_to_multiple
 
 dim3 = tuple[int, int, int]
 _Dim3Lambda = tuple[Lambda, Lambda, Lambda]
@@ -63,6 +52,9 @@ class GpuLaunchConfiguration(ABC):
         config_parameters: Set containing all parameters to the given lambdas that are not also
             parameters to the associated kernel
     """
+
+    def __init__(self, hw_props: HardwareProperties | None) -> None:
+        self._hw_props = hw_props
 
     @property
     @abstractmethod
@@ -116,6 +108,16 @@ class GpuLaunchConfiguration(ABC):
             f"Final block size was too large: {block_size}."
         )
 
+    @property
+    def hardware_properties(self) -> HardwareProperties:
+        if self._hw_props is None:
+            raise AttributeError("Hardware properties were not set")
+        return self._hw_props
+
+    @hardware_properties.setter
+    def hardware_properties(self, val: HardwareProperties):
+        self._hw_props = val
+
 
 class AutomaticLaunchConfiguration(GpuLaunchConfiguration):
     """Launch configuration that is dynamically computed from kernel parameters.
@@ -127,12 +129,12 @@ class AutomaticLaunchConfiguration(GpuLaunchConfiguration):
         self,
         block_size: _Dim3Lambda,
         grid_size: _Dim3Lambda,
-        hw_props: HardwareProperties,
+        hw_props: HardwareProperties | None,
         assume_warp_aligned_block_size: bool,
     ) -> None:
+        super().__init__(hw_props)
         self._block_size = block_size
         self._grid_size = grid_size
-        self._hw_props = hw_props
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
 
         self._params: frozenset[Parameter] = frozenset().union(
@@ -157,7 +159,7 @@ class AutomaticLaunchConfiguration(GpuLaunchConfiguration):
     def evaluate(self, **kwargs) -> tuple[dim3, dim3]:
         block_size = tuple(int(bs(**kwargs)) for bs in self._block_size)
 
-        if self._hw_props.block_size_exceeds_hw_limits(block_size):
+        if self.hardware_properties.block_size_exceeds_hw_limits(block_size):
             raise CodegenError(f"Block size {block_size} exceeds hardware limits.")
 
         grid_size = tuple(int(gs(**kwargs)) for gs in self._grid_size)
@@ -174,11 +176,12 @@ class ManualLaunchConfiguration(GpuLaunchConfiguration):
     """
 
     def __init__(
-        self, hw_props: HardwareProperties, assume_warp_aligned_block_size: bool = False
+        self,
+        hw_props: HardwareProperties | None,
+        assume_warp_aligned_block_size: bool = False
     ) -> None:
+        super().__init__(hw_props)
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
-
-        self._hw_props = hw_props
 
         self._block_size: dim3 | None = None
         self._grid_size: dim3 | None = None
@@ -212,15 +215,15 @@ class ManualLaunchConfiguration(GpuLaunchConfiguration):
 
         if (
             self._assume_warp_aligned_block_size
-            and self._hw_props.warp_size is not None
-            and prod(self._block_size) % self._hw_props.warp_size != 0
+            and self.hardware_properties.warp_size is not None
+            and prod(self._block_size) % self.hardware_properties.warp_size != 0
         ):
             raise CodegenError(
                 "Specified block sizes must align with warp size with "
                 "`assume_warp_aligned_block_size` enabled."
             )
 
-        if self._hw_props.block_size_exceeds_hw_limits(self._block_size):
+        if self.hardware_properties.block_size_exceeds_hw_limits(self._block_size):
             raise CodegenError(self._excessive_block_size_error_msg(self._block_size))
 
         return self._block_size, self._grid_size
@@ -270,12 +273,11 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
         self,
         rank: int,
         num_work_items: _Dim3Lambda,
-        hw_props: HardwareProperties,
+        hw_props: HardwareProperties | None,
         assume_warp_aligned_block_size: bool,
     ) -> None:
+        super().__init__(hw_props)
         self._num_work_items = num_work_items
-
-        self._hw_props = hw_props
 
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
 
@@ -466,7 +468,7 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
         if self._compute_block_size:
             try:
                 computed_bs = self._compute_block_size(
-                    num_work_items, self._init_block_size, self._hw_props
+                    num_work_items, self._init_block_size, self.hardware_properties
                 )
 
                 block_size = cast(dim3, computed_bs)
@@ -603,73 +605,28 @@ class GpuIndexMappingStrategy:
                 raise ValueError(f"Unknown indexing scheme: {self._scheme}")
 
 
-class GpuIndexing:
-    """Factory for GPU indexing objects required during code generation.
-
-    This class acts as a helper class for the code generation driver.
-    It provides the factories for the launch configuration required later by the runtime system.
-
-    Args:
-        ctx: The kernel creation context
-        scheme: The desired GPU indexing scheme
-        block_size: A user-defined default block size, required only if the indexing scheme permits
-            modification of the block size
-        manual_launch_grid: If `True`, always emit a `ManualLaunchConfiguration` to force the runtime system
-            to set the launch configuration explicitly
-    """
-
+class BaseIndexing:
     def __init__(
         self,
         ctx: KernelCreationContext,
-        target: Target,
         scheme: GpuIndexingScheme,
         warp_size: int | None,
         manual_launch_grid: bool = False,
         assume_warp_aligned_block_size: bool = False,
+        hardware_properties: HardwareProperties | None = None,
     ) -> None:
         self._ctx = ctx
-        self._target = target
         self._scheme = scheme
+        self._warp_size = warp_size
         self._manual_launch_grid = manual_launch_grid
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
-
-        self._hw_props = self.get_hardware_properties(target, warp_size)
+        self._hw_props = hardware_properties
 
         from ..backend.kernelcreation import AstFactory
         from .driver import KernelFactory
 
         self._ast_factory = AstFactory(self._ctx)
         self._kernel_factory = KernelFactory(self._ctx)
-
-    @staticmethod
-    def get_max_block_sizes(target: Target):
-        match target:
-            case Target.CUDA:
-                return (1024, 1024, 64)
-            case Target.HIP:
-                return (1024, 1024, 1024)
-            case _:
-                raise CodegenError(
-                    f"Cannot determine max GPU block sizes for target {target}"
-                )
-
-    @staticmethod
-    def get_max_threads_per_block(target: Target):
-        match target:
-            case Target.CUDA | Target.HIP:
-                return 1024
-            case _:
-                raise CodegenError(
-                    f"Cannot determine max GPU threads per block for target {target}"
-                )
-
-    @staticmethod
-    def get_hardware_properties(target: Target, warp_size: int | None = None):
-        return HardwareProperties(
-            warp_size,
-            GpuIndexing.get_max_threads_per_block(target),
-            GpuIndexing.get_max_block_sizes(target),
-        )
 
     def get_launch_config_factory(self) -> Callable[[], GpuLaunchConfiguration]:
         """Retrieve a factory for the launch configuration for later consumption by the runtime system"""
@@ -733,9 +690,9 @@ class GpuIndexing:
         rounded_block_size: PsExpression
         if (
             self._assume_warp_aligned_block_size
-            and self._hw_props.warp_size is not None
+            and self._warp_size is not None
         ):
-            warp_size = self._ast_factory.parse_index(self._hw_props.warp_size)
+            warp_size = self._ast_factory.parse_index(self._warp_size)
             rounded_block_size = self._ast_factory.parse_index(
                 PsIntDiv(
                     work_items[0].clone()
@@ -770,6 +727,71 @@ class GpuIndexing:
             )
 
         return factory
+
+    @abstractmethod
+    def _get_work_items(self) -> tuple[PsExpression, ...]:
+        """Return a tuple of expressions representing the number of work items
+        in each dimension of the kernel's iteration space
+        """
+
+
+class GpuIndexing(BaseIndexing):
+    """Factory for GPU indexing objects required during code generation.
+
+    This class acts as a helper class for the code generation driver.
+    It provides the factories for the launch configuration required later by the runtime system.
+
+    Args:
+        ctx: The kernel creation context
+        scheme: The desired GPU indexing scheme
+        block_size: A user-defined default block size, required only if the indexing scheme permits
+            modification of the block size
+        manual_launch_grid: If `True`, always emit a `ManualLaunchConfiguration` to force the runtime system
+            to set the launch configuration explicitly
+    """
+
+    def __init__(
+        self,
+        ctx: KernelCreationContext,
+        target: Target,
+        scheme: GpuIndexingScheme,
+        warp_size: int | None,
+        manual_launch_grid: bool = False,
+        assume_warp_aligned_block_size: bool = False,
+    ) -> None:
+
+        hw_props = self.get_hardware_properties(target, warp_size)
+        super().__init__(ctx, scheme, warp_size, manual_launch_grid, assume_warp_aligned_block_size, hw_props)
+
+    @staticmethod
+    def get_max_block_sizes(target: Target):
+        match target:
+            case Target.CUDA:
+                return (1024, 1024, 64)
+            case Target.HIP:
+                return (1024, 1024, 1024)
+            case _:
+                raise CodegenError(
+                    f"Cannot determine max GPU block sizes for target {target}"
+                )
+
+    @staticmethod
+    def get_max_threads_per_block(target: Target):
+        match target:
+            case Target.CUDA | Target.HIP:
+                return 1024
+            case _:
+                raise CodegenError(
+                    f"Cannot determine max GPU threads per block for target {target}"
+                )
+
+    @staticmethod
+    def get_hardware_properties(target: Target, warp_size: int | None = None):
+        return HardwareProperties(
+            warp_size,
+            GpuIndexing.get_max_threads_per_block(target),
+            GpuIndexing.get_max_block_sizes(target),
+        )
 
     def _get_work_items(self) -> tuple[PsExpression, ...]:
         """Return a tuple of expressions representing the number of work items

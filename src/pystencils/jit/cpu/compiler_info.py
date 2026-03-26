@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import Sequence
+
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-import subprocess
+from typing import Sequence
 
 from ...codegen.target import Target
 
@@ -23,7 +24,7 @@ class CompilerInfo(ABC):
 
     target: Target = Target.CurrentCPU
     """Hardware target to compile for.
-    
+
     The value of ``target`` is used to set the ``-march`` compiler
     option (or equivalent).
     `Target.CurrentCPU` translates to ``-march=native``.

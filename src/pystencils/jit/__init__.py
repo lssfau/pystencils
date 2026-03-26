@@ -25,6 +25,7 @@ It is due to be replaced in the near future.
 from .jit import JitBase, NoJit, KernelWrapper
 from .cpu import CpuJit
 from .gpu_cupy import CupyJit, CupyKernelWrapper, LaunchGrid
+from .sycl import SYCLJit
 
 no_jit = NoJit()
 """Disables just-in-time compilation for a kernel."""
@@ -33,6 +34,7 @@ __all__ = [
     "JitBase",
     "KernelWrapper",
     "CpuJit",
+    "SYCLJit",
     "NoJit",
     "no_jit",
     "CupyJit",
