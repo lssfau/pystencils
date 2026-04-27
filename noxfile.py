@@ -70,7 +70,8 @@ def get_dpcpp_version(session: nox.Session)  -> None | tuple[int, ...]:
     session.warn("icpx was found, but I am unable to determine the icpx version.")
     return None
 
-def install_dpctl(session: nox.Session):
+
+def install_dpctl(session: nox.Session, skip_if_no_dpcpp: bool = False):
     dpcpp_version = get_dpcpp_version(session)
     dpctl_version = ""
     if dpcpp_version:
@@ -81,6 +82,17 @@ def install_dpctl(session: nox.Session):
             dpcpp_version = (2025, 2, 0)
             dpctl_version = "0.20.2"
         session.install(f"intel-sycl-rt=={dpcpp_version[0]}.{dpcpp_version[1]}.{dpcpp_version[2]}")
+    else:
+        if skip_if_no_dpcpp:
+            session.skip(
+                "No compatible installation of Data-Parallel C++ found."
+            )
+        else:
+            session.warn(
+                "Running without dpctl: no installation of dpcpp found."
+            )
+            return
+
     if dpctl_version:
         session.install(f"dpctl=={dpctl_version}")
     else:
@@ -145,7 +157,7 @@ def testsuite(session: nox.Session, device_interface: str):
         install_cupy(session, cupy_version, skip_if_no_cuda=True)
 
     if device_interface == "dpctl":
-        install_dpctl(session)
+        install_dpctl(session, skip_if_no_dpcpp=True)
         num_cores = 1
         session.run("python", "-c", "import dpctl; print(dpctl.get_devices())")
     else:

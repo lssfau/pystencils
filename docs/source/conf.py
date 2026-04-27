@@ -49,7 +49,7 @@ intersphinx_mapping = {
     "matplotlib": ("https://matplotlib.org/", None),
     "sympy": ("https://docs.sympy.org/latest/", None),
     "cupy": ("https://docs.cupy.dev/en/stable/", None),
-    "dpctl": ("https://intelpython.github.io/dpctl/latest/", None),
+    "dpctl": ("https://intelpython.github.io/dpctl/0.21.1/", None),
     "sycl": ("https://github.khronos.org/SYCL_Reference/", None),
 }
 
