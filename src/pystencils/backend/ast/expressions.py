@@ -56,7 +56,7 @@ class PsExpression(PsAstNode, ABC):
 
     def get_dtype(self) -> PsType:
         """Retrieve the data type assigned to this expression.
-        
+
         Raises:
             PsInternalCompilerError: If this expression has no data type assigned
         """
@@ -176,7 +176,9 @@ class PsConstantExpr(PsLeafMixIn, PsExpression):
     __match_args__ = ("constant",)
 
     def __init__(self, constant: PsConstant):
-        super().__init__(deconstify(constant.dtype) if constant.dtype is not None else None)
+        super().__init__(
+            deconstify(constant.dtype) if constant.dtype is not None else None
+        )
         self._constant = constant
 
     @property
@@ -204,7 +206,9 @@ class PsLiteralExpr(PsLeafMixIn, PsExpression):
     __match_args__ = ("literal",)
 
     def __init__(self, literal: PsLiteral):
-        super().__init__(deconstify(literal.dtype) if literal.dtype is not None else None)
+        super().__init__(
+            deconstify(literal.dtype) if literal.dtype is not None else None
+        )
         self._literal = literal
 
     @property
@@ -587,7 +591,7 @@ class PsAddressOf(PsUnOp):
 
 class PsCast(PsUnOp):
     """C-style type cast.
-    
+
     Convert values to another type according to C casting rules.
     The target type may be `None`, in which case it will be inferred by the `Typifier`
     according to the surrounding type context.

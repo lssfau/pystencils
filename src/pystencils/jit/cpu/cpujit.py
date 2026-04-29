@@ -24,7 +24,7 @@ class CpuJit(JitBase):
     **Implementation Details**
 
     The `CpuJit` class acts as an orchestrator between two components:
-    
+
     - The *extension module builder* produces the code of the dynamically built extension module
       that contains the kernel and its invocation wrappers;
     - The *compiler info* describes the host compiler used to compile and link that extension module.
@@ -46,7 +46,7 @@ class CpuJit(JitBase):
         objcache: str | Path | _AUTO_TYPE | None = AUTO,
         *,
         module_builder: ExtensionModuleBuilderBase | None = None,
-        emit_warnings: bool = False
+        emit_warnings: bool = False,
     ):
         if objcache is AUTO:
             from appdirs import AppDirs
@@ -62,6 +62,7 @@ class CpuJit(JitBase):
 
         if module_builder is None:
             from .default_module_builder import DefaultExtensionModuleBuilder
+
             module_builder = DefaultExtensionModuleBuilder(compiler_info)
 
         self._compiler_info = copy(compiler_info)
@@ -90,10 +91,10 @@ class CpuJit(JitBase):
 
     def compile(self, kernel: Kernel) -> KernelWrapper:
         """Compile the given kernel to an executable function.
-        
+
         Args:
             kernel: The kernel object to be compiled.
-        
+
         Returns:
             Wrapper object around the compiled function
         """
@@ -110,7 +111,9 @@ class CpuJit(JitBase):
 
         #   Compute Code Hash
         code_utf8: bytes = cpp_code.encode("utf-8")
-        compiler_utf8: bytes = (" ".join([self._cxx] + self._cxx_fixed_flags)).encode("utf-8")
+        compiler_utf8: bytes = (" ".join([self._cxx] + self._cxx_fixed_flags)).encode(
+            "utf-8"
+        )
         import hashlib
 
         module_hash = hashlib.sha256(code_utf8 + compiler_utf8)
@@ -146,11 +149,7 @@ class CpuJit(JitBase):
         return self._ext_module_builder.get_wrapper(kernel, module)
 
     def _compile_extension_module(self, src_file: Path, libfile: Path):
-        args = (
-            [self._cxx]
-            + self._cxx_fixed_flags
-            + ["-o", str(libfile), str(src_file)]
-        )
+        args = [self._cxx] + self._cxx_fixed_flags + ["-o", str(libfile), str(src_file)]
 
         result = subprocess.run(args, capture_output=True)
         if result.returncode != 0:
@@ -165,9 +164,9 @@ class CpuJit(JitBase):
                 warnings.warn(
                     "Warnings occured while compiling the kernel:\n"
                     + result.stderr.decode(),
-                    RuntimeWarning
+                    RuntimeWarning,
                 )
-                
+
     def _load_extension_module(self, module_name: str, module_loc: Path) -> ModuleType:
         from importlib import util as iutil
 
@@ -189,7 +188,7 @@ class ExtensionModuleBuilderBase(ABC):
     def include_dirs() -> list[str]:
         """List of directories that must be on the include path when compiling
         generated extension modules.
-        
+
         The Python runtime include directory and the pystencils include directory
         need not be listed here.
         """

@@ -444,7 +444,7 @@ class BoundaryOffsetInfo:
 
     def _offset_symbols(self, dim, dtype: PsIntegerType = SInt(32)):
         return [TypedSymbol(f"c{d}", Arr(dtype, len(self._stencil))) for d in ['x', 'y', 'z'][:dim]]
-    
+
     @staticmethod
     def _untyped_offset_symbols(dim):
         return [sp.Symbol(f"c{d}") for d in ['x', 'y', 'z'][:dim]]
@@ -469,5 +469,5 @@ def create_boundary_kernel(field, index_field, stencil, boundary_functor, cfg: C
     dir_symbol = TypedSymbol("dir", config.index_dtype)
     elements += [Assignment(dir_symbol, index_field[0]('dir'))]
     elements += boundary_functor(field, direction_symbol=dir_symbol, index_field=index_field)
-    
+
     return create_kernel(elements, config=config)

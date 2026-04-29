@@ -29,7 +29,7 @@ method `__args__`. This method, when called on a type object, must return a hash
 -- not including the const-qualifier --
 that can be used to recreate that exact type. It is used internally to compute hashes and compare equality
 of types, as well as for const-conversion.
-    
+
 .. autofunction:: pystencils.types.PsType.__args__
 
 """

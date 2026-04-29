@@ -84,7 +84,7 @@ class CupyKernelWrapper(KernelWrapper):
 
         def add_arg(param: Parameter, arg: Any) -> np.generic:
             """Add an argument value for the given parameter to the valuation.
-            
+
             The value is first cast to the correct NumPy type.
             The function returns the correctly typed value.
             """

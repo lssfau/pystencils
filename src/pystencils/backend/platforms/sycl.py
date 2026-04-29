@@ -3,19 +3,44 @@ from __future__ import annotations
 import numpy as np
 
 from ...codegen.properties import SYCLItem, SYCLNDItem
-from ...types import PsCustomType, PsIeeeFloatType, PsIntegerType, PsUnsignedIntegerType, constify
+from ...types import (
+    PsCustomType,
+    PsIeeeFloatType,
+    PsIntegerType,
+    PsUnsignedIntegerType,
+    constify,
+)
 from ..ast.expressions import (
-    PsAnd, PsBufferAcc, PsCall, PsCast, PsExpression, PsLookup, PsLt, PsSubscript, PsSymbolExpr)
+    PsAnd,
+    PsBufferAcc,
+    PsCall,
+    PsCast,
+    PsExpression,
+    PsLookup,
+    PsLt,
+    PsSubscript,
+    PsSymbolExpr,
+)
 from ..ast.structural import PsBlock, PsConditional, PsDeclaration
 from ..constants import PsConstant
 from ..exceptions import MaterializationError
 from ..extensions.cpp import CppMethodCall
 from ..functions import (
-    CFunction, ConstantFunctions, MathFunctions, PsConstantFunction, PsIrFunction, PsMathFunction,
-    PsRngEngineFunction, RngSpec)
+    CFunction,
+    ConstantFunctions,
+    MathFunctions,
+    PsConstantFunction,
+    PsIrFunction,
+    PsMathFunction,
+    PsRngEngineFunction,
+    RngSpec,
+)
 from ..kernelcreation import AstFactory, KernelCreationContext, Typifier
 from ..kernelcreation.iteration_space import (
-    FullIterationSpace, IterationSpace, SparseIterationSpace)
+    FullIterationSpace,
+    IterationSpace,
+    SparseIterationSpace,
+)
 from .platform import Platform
 
 
@@ -44,9 +69,7 @@ class SyclPlatform(Platform):
         else:
             raise MaterializationError(f"Unknown type of iteration space: {ispace}")
 
-    def select_function(
-        self, call: PsCall
-    ) -> PsExpression:
+    def select_function(self, call: PsCall) -> PsExpression:
         assert isinstance(call.function, PsIrFunction)
 
         dtype = call.get_dtype()
@@ -76,11 +99,15 @@ class SyclPlatform(Platform):
                         | MathFunctions.Floor
                         | MathFunctions.Ceil
                     ):
-                        call.function = CFunction(f"sycl::{func.function_name}", arg_types, dtype)
+                        call.function = CFunction(
+                            f"sycl::{func.function_name}", arg_types, dtype
+                        )
                         expr = call
 
                     case MathFunctions.Abs | MathFunctions.Min | MathFunctions.Max:
-                        call.function = CFunction(f"sycl::f{func.function_name}", arg_types, dtype)
+                        call.function = CFunction(
+                            f"sycl::f{func.function_name}", arg_types, dtype
+                        )
                         expr = call
 
                 match func:
@@ -112,7 +139,7 @@ class SyclPlatform(Platform):
 
         elif isinstance(call.function, PsRngEngineFunction):
             # raise NotImplementedError("Random Functions are currently not Implemented in Sycl backend")
-            
+
             spec = call.function.rng_spec
             atypes = (spec.int_arg_type,) * call.function.arg_count
 
@@ -165,7 +192,10 @@ class SyclPlatform(Platform):
 
             ctr = PsExpression.make(dim.counter)
             indexing_decls.append(
-                PsDeclaration(ctr, dim.start + PsCast(self._ctx.index_dtype, work_item_idx) * dim.step)
+                PsDeclaration(
+                    ctr,
+                    dim.start + PsCast(self._ctx.index_dtype, work_item_idx) * dim.step,
+                )
             )
             conds.append(PsLt(ctr, dim.stop))
 
@@ -227,7 +257,7 @@ class SyclPlatform(Platform):
 
     def _id_declaration(self, rank: int, id: PsSymbolExpr) -> PsDeclaration:
         item_type = self._item_type(rank)
-         
+
         item_symbol = self._ctx.get_symbol("sycl_item", item_type)
         if self._automatic_block_size:
             item_symbol.add_property(SYCLItem(rank))

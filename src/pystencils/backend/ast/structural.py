@@ -37,7 +37,7 @@ class PsStructuralNode(PsAstNode, ABC):
 
 class PsDeclaresSymbolTrait:
     """Mix-in for structural AST classes that declare a symbol.
-    
+
     Depending on the node's semantics, declared symbols will be visible in
     subsequent siblings, children, or both.
     """
@@ -329,7 +329,11 @@ class PsConditional(PsStructuralNode):
         return PsConditional(
             self._condition.clone(),
             self._branch_true._clone_structural(),
-            self._branch_false._clone_structural() if self._branch_false is not None else None,
+            (
+                self._branch_false._clone_structural()
+                if self._branch_false is not None
+                else None
+            ),
         )
 
     def get_children(self) -> tuple[PsAstNode, ...]:

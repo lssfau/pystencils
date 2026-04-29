@@ -39,7 +39,7 @@ class PsCustomType(PsType):
 
     def __repr__(self) -> str:
         return f"CustomType( {self.name}, const={self.const} )"
-    
+
 
 class PsVoidType(PsType):
     """C++ void type."""
@@ -174,7 +174,7 @@ class PsArrayType(PsDereferencableType):
 
 class PsNamedArrayType(PsArrayType):
     """Named multidimensional fixed-size array type.
-    
+
     Extends `PsArrayType` with a custom name to model
     C++ containers with an nd-array interface.
     Only through named array-types can arrays be treated fully as first-class
@@ -458,7 +458,7 @@ class PsVectorType(PsNumericType):
                 raise PsTypeError(
                     f"Cannot create constant of vector type {self} from array of shape {value.shape}"
                 )
-            
+
             return np.array([self._scalar_type.create_constant(v) for v in value])
 
         element = self._scalar_type.create_constant(value)

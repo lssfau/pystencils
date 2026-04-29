@@ -26,14 +26,14 @@ class PsAstNode(ABC):
     @abstractmethod
     def get_children(self) -> tuple[PsAstNode, ...]:
         """Retrieve child nodes of this AST node
-        
+
         This operation must be implemented by subclasses.
         """
 
     @abstractmethod
     def set_child(self, idx: int, c: PsAstNode):
         """Update a child node of this AST node.
-        
+
         This operation must be implemented by subclasses.
         """
 
@@ -56,11 +56,12 @@ class PsAstNode(ABC):
                 for c1, c2 in zip(self.children, other.children)
             )
         )
-    
+
     def __str__(self) -> str:
         from ..emission import emit_ir
+
         return emit_ir(self)
-    
+
     def __repr__(self) -> str:
         children = ", ".join(repr(c) for c in self.children)
         return f"{type(self).__name__}({children})"
@@ -69,7 +70,7 @@ class PsAstNode(ABC):
 class PsAstNodeChildrenMixin:
     """Mix in with `PsAstNode` to use default implementations of
     `get_children <PsAstNode.get_children>` and `set_child <PsAstNode.set_child>`.
-    
+
     Subclasses must define the ``_ast_children`` class variable,
     listing name and data type of each child node.
     """
@@ -78,7 +79,7 @@ class PsAstNodeChildrenMixin:
 
     def get_children(self) -> tuple[PsAstNode, ...]:
         return tuple(getattr(self, cname) for cname, _ in self._ast_children)
-    
+
     def set_child(self, idx: int, c: PsAstNode):
         cname, ctype = self._ast_children[idx]
         setattr(self, cname, failing_cast(ctype, c))
