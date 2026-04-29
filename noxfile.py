@@ -73,7 +73,8 @@ def get_dpcpp_version(session: nox.Session)  -> None | tuple[int, ...]:
 
 def install_dpctl(session: nox.Session, skip_if_no_dpcpp: bool = False):
     dpcpp_version = get_dpcpp_version(session)
-    dpctl_version = ""
+    # TODO: Fixing to this version since afterwards dpctl.tensor was moved to dpnp remove once migration to dpnp is completed
+    dpctl_version = "0.21.1"
     if dpcpp_version:
         session.log(f"Found dpctl version: {dpcpp_version}")
         # session.install(f"intel-sycl-rt=={dpcpp_version[0]}.{dpcpp_version[1]}.{dpcpp_version[2]}")
