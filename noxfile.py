@@ -158,10 +158,10 @@ def testsuite(session: nox.Session, device_interface: str):
 
     if device_interface == "dpctl":
         install_dpctl(session, skip_if_no_dpcpp=True)
-        num_cores = 1
+        # num_cores = 1
         session.run("python", "-c", "import dpctl; print(dpctl.get_devices())")
-    else:
-        num_cores = os.cpu_count()
+    # else:
+    num_cores = os.cpu_count()
 
     #   FIXME remove once https://github.com/bashtage/randomgen/issues/426 is resolved
     session.install("numpy<2.4")
