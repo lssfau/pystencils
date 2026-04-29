@@ -43,15 +43,15 @@ class Target(Flag):
 
     CurrentCPU = _CPU | _AUTOMATIC
     """
-    Auto-best CPU target. 
-    
+    Auto-best CPU target.
+
     `CurrentCPU` causes the code generator to automatically select a CPU target according to CPUs found
     on the current machine and runtime environment.
     """
 
     GenericCPU = _CPU
     """Generic CPU target.
-    
+
     Generate the kernel for a generic multicore CPU architecture. This opens up all architecture-independent
     optimizations including OpenMP, but no vectorization.
     """
@@ -95,7 +95,7 @@ class Target(Flag):
 
     HIP = _GPU | _HIP
     """Generic HIP GPU target.
-    
+
     Generate a HIP kernel for generic AMD or NVidia GPUs.
     """
 
@@ -104,7 +104,7 @@ class Target(Flag):
 
     SYCL = _SYCL
     """SYCL kernel target.
-    
+
     Generate a function to be called within a SYCL parallel command.
 
     ..  note::
@@ -192,6 +192,7 @@ class Target(Flag):
             pass
         try:
             import dpctl  # noqa: F401
+
             targets.append(Target.SYCL)
         except ImportError:
             pass

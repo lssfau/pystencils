@@ -251,7 +251,7 @@ class VectorizationOptions(ConfigBase):
     """Number of SIMD lanes to be used in vectorization.
 
     If set to `None` (the default), the vector register width will be automatically set to the broadest possible.
-    
+
     If the CPU architecture specified in `target <CreateKernelConfig.target>` does not support some
     operation contained in the kernel with the given number of lanes, an error will be raised.
     """
@@ -260,7 +260,7 @@ class VectorizationOptions(ConfigBase):
         False
     )
     """Enable nontemporal (streaming) stores.
-    
+
     If set to `True` and the selected CPU supports streaming stores, the vectorizer will generate
     nontemporal store instructions for all stores.
 
@@ -270,14 +270,14 @@ class VectorizationOptions(ConfigBase):
 
     assume_aligned: BasicOption[bool] = BasicOption(False)
     """Assume field pointer alignment.
-    
+
     If set to `True`, the vectorizer will assume that the address of the first inner entry
     (after ghost layers) of each field is aligned at the necessary byte boundary.
     """
 
     assume_inner_stride_one: BasicOption[bool] = BasicOption(False)
     """Assume stride associated with the innermost spatial coordinate of all fields is one.
-    
+
     If set to `True`, the vectorizer will replace the stride of the innermost spatial coordinate
     with unity, thus enabling vectorization. If any fields already have a fixed innermost stride
     that is not equal to one, an error will be raised.
@@ -298,13 +298,13 @@ class CpuOptions(ConfigBase):
 
     loop_blocking: BasicOption[tuple[int | sp.Expr | None, ...]] = BasicOption()
     """Block sizes for loop blocking.
-    
+
     If set, the kernel's loops will be tiled according to the given block sizes.
     """
 
     use_cacheline_zeroing: BasicOption[bool] = BasicOption(False)
     """Enable cache-line zeroing.
-    
+
     If set to `True` and the selected CPU supports cacheline zeroing, the CPU optimizer will attempt
     to produce cacheline zeroing instructions where possible.
     """
@@ -323,9 +323,9 @@ class GpuIndexingScheme(Enum):
     """
 
     GridstridedLinear3D = auto()
-    """Extension to `GpuIndexingScheme.Linear3D` scheme which introduces additional loops with strides over 
-    the execution configuration's grid size. 
-    
+    """Extension to `GpuIndexingScheme.Linear3D` scheme which introduces additional loops with strides over
+    the execution configuration's grid size.
+
     This increases the workload per thread as it now performs multiple iterations and thus opens up the possibility
     to handle iteration spaces that are larger than the span of the execution configuration.
     """
@@ -356,7 +356,7 @@ class GpuOptions(ConfigBase):
 
     manual_launch_grid: BasicOption[bool] = BasicOption(False)
     """Always require a manually specified launch grid when running this kernel.
-    
+
     If set to `True`, the code generator will not attempt to infer the size of
     the launch grid from the kernel.
     The launch grid will then have to be specified manually at runtime.
@@ -364,14 +364,14 @@ class GpuOptions(ConfigBase):
 
     warp_size: BasicOption[int] = BasicOption()
     """Specifies the size of a warp (CUDA) or wavefront (HIP).
-    
+
     If this option is not set the default value for the given target will be automatically used.
     """
 
     assume_warp_aligned_block_size: BasicOption[bool] = BasicOption(False)
     """Specifies whether block sizes are divisible by the hardware's warp size.
-    
-    If set to `True`, the code generator can employ optimizations that require this assumption, 
+
+    If set to `True`, the code generator can employ optimizations that require this assumption,
     e.g. warp-level reductions.
     The pystencils Cupy runtime also checks if user-provided block sizes fulfill this criterion.
     """
@@ -449,7 +449,7 @@ class CreateKernelConfig(ConfigBase):
 
     jit: BasicOption[JitBase] = BasicOption()
     """Just-in-time compiler used to compile and load the kernel for invocation from the current Python environment.
-    
+
     If left at `None`, a default just-in-time compiler will be inferred from the `target` parameter.
     To explicitly disable JIT compilation, pass `pystencils.no_jit <pystencils.jit.no_jit>`.
     """
@@ -459,7 +459,7 @@ class CreateKernelConfig(ConfigBase):
 
     ghost_layers: BasicOption[GhostLayerSpec] = BasicOption()
     """Specifies the number of ghost layers of the iteration region.
-    
+
     Options:
      - :py:data:`AUTO <pystencils.config.AUTO>`: Required ghost layers are inferred from field accesses
      - `int`:  A uniform number of ghost layers in each spatial coordinate is applied
@@ -489,7 +489,7 @@ class CreateKernelConfig(ConfigBase):
 
     index_field: BasicOption[Field] = BasicOption()
     """Index field for a sparse kernel.
-    
+
     If this option is set, a sparse kernel with the given field as index field will be generated.
 
     .. note::
@@ -503,7 +503,7 @@ class CreateKernelConfig(ConfigBase):
 
     default_dtype: Option[PsScalarType, UserTypeSpec] = Option(DEFAULTS.numeric_dtype)
     """Default numeric data type.
-    
+
     This data type will be applied to all untyped symbols.
     """
 
@@ -643,7 +643,7 @@ class CreateKernelConfig(ConfigBase):
                 "Setting the deprecated `data_type` will override the value of `default_dtype`. "
                 "Set `default_dtype` instead.",
                 UserWarning,
-                stacklevel=3
+                stacklevel=3,
             )
             self.default_dtype = data_type
 
@@ -653,7 +653,7 @@ class CreateKernelConfig(ConfigBase):
                 "Setting the deprecated `cpu_openmp` option will override any options "
                 "passed in the `cpu.openmp` category.",
                 UserWarning,
-                stacklevel=3
+                stacklevel=3,
             )
 
             deprecated_omp = OpenMpOptions()
@@ -702,7 +702,7 @@ class CreateKernelConfig(ConfigBase):
                     "will override the `target` option. "
                     f"Set `target` to {vec_target} instead.",
                     UserWarning,
-                    stacklevel=3
+                    stacklevel=3,
                 )
 
                 self.target = vec_target
@@ -711,7 +711,7 @@ class CreateKernelConfig(ConfigBase):
                 "Setting the deprecated `cpu_vectorize_info` will override any options "
                 "passed in the `cpu.vectorize` category.",
                 UserWarning,
-                stacklevel=3
+                stacklevel=3,
             )
 
             deprecated_vec_opts = VectorizationOptions(
@@ -730,7 +730,7 @@ class CreateKernelConfig(ConfigBase):
             warn(
                 "Setting the deprecated `gpu_indexing` will override the `gpu.indexing_scheme` option",
                 UserWarning,
-                stacklevel=3
+                stacklevel=3,
             )
             self.gpu.indexing_scheme = gpu_indexing
 
@@ -740,7 +740,7 @@ class CreateKernelConfig(ConfigBase):
                 "Setting the deprecated `gpu_indexing_params` will override any options "
                 "passed in the `gpu` category.",
                 UserWarning,
-                stacklevel=3
+                stacklevel=3,
             )
 
             self.gpu = GpuOptions()
@@ -753,5 +753,5 @@ def _deprecated_option(name, instead):  # pragma: no cover
         f"The `{name}` option of CreateKernelConfig is deprecated and will be removed in pystencils 2.1. "
         f"Use `{instead}` instead.",
         FutureWarning,
-        stacklevel=4
+        stacklevel=4,
     )

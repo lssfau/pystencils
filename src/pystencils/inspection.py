@@ -10,11 +10,12 @@ def inspect(obj: PsAstNode | Kernel | KernelWrapper, *, show_cpp: bool = False):
 
     try:
         from IPython.display import display, Code
-        
+
         def do_print(code):
             display(Code(code, language="C++"))
 
     except ImportError:
+
         def do_print(code):
             print(code)
 

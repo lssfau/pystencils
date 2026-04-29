@@ -109,7 +109,7 @@ class Kernel:
     def compile(self) -> KernelWrapper:
         """Invoke the underlying just-in-time compiler to obtain the kernel as an executable Python function."""
         return self._jit.compile(self)
-    
+
     def __str__(self) -> str:
         params = ", ".join(f"{p.name} : {p.dtype}" for p in self._params)
         return f"{self._name}({params})"
@@ -143,5 +143,5 @@ def _deprecated_member(name, instead):
         f"Member {name} of `Kernel` is deprecated and will be removed in pystencils 2.1. "
         f"Use {instead} instead.",
         DeprecationWarning,
-        stacklevel=3
+        stacklevel=3,
     )

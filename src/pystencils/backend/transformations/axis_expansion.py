@@ -275,9 +275,7 @@ class AxisExpansion:
                 block_size_expr = block_size
 
             blocked_ctr_symb = self._ctx.duplicate_symbol(my_range.counter.symbol)
-            blocked_step = self._type_fold(
-                my_range.step.clone() * block_size_expr
-            )
+            blocked_step = self._type_fold(my_range.step.clone() * block_size_expr)
             blocked_range = PsAxisRange(
                 PsExpression.make(blocked_ctr_symb),
                 my_range.start,
@@ -286,9 +284,10 @@ class AxisExpansion:
             )
 
             my_range.start = PsExpression.make(blocked_ctr_symb)
-            block_stop = PsExpression.make(
-                blocked_ctr_symb
-            ) + my_range.step.clone() * block_size_expr.clone()
+            block_stop = (
+                PsExpression.make(blocked_ctr_symb)
+                + my_range.step.clone() * block_size_expr.clone()
+            )
 
             if assume_divisible:
                 my_range.stop = self._type_fold(block_stop)

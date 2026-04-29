@@ -29,14 +29,14 @@ Simplifying Transformations
 .. autoclass:: EliminateBranches
     :members: __call__
 
-    
+
 Code Rewriting
 --------------
 
 .. autofunction:: substitute_symbols
 
 .. autofunction:: collapse_blocks
-    
+
 Code Motion
 -----------
 
@@ -72,7 +72,7 @@ Vectorization
 
 .. autoclass:: AstVectorizer
     :members:
-    
+
 Code Lowering and Materialization
 ---------------------------------
 

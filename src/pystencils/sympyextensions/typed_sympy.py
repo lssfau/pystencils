@@ -4,12 +4,7 @@ from typing import cast
 import sympy as sp
 from enum import Enum, auto
 
-from ..types import (
-    PsType,
-    PsNumericType,
-    create_type,
-    UserTypeSpec
-)
+from ..types import PsType, PsNumericType, create_type, UserTypeSpec
 
 from sympy.logic.boolalg import Boolean
 
@@ -33,7 +28,7 @@ class DynamicType(Enum):
 
     INDEX_TYPE = auto()
     """Use the default index type set for the kernel.
-    
+
     This is guaranteed to be an interger type.
     """
 
@@ -56,10 +51,10 @@ class TypeAtom(sp.Atom):
 
     def _hashable_content(self):
         return (self._dtype,)
-    
+
     def __getnewargs__(self):
         return (self._dtype,)
-    
+
 
 def assumptions_from_dtype(dtype: PsType | DynamicType):
     """Derives SymPy assumptions from :class:`PsAbstractType`
@@ -151,7 +146,7 @@ class TypeCast(sp.Function):
     @staticmethod
     def as_index(expr):
         return TypeCast(expr, DynamicType.INDEX_TYPE)
-    
+
     @property
     def expr(self) -> sp.Basic:
         return self.args[0]
@@ -159,7 +154,7 @@ class TypeCast(sp.Function):
     @property
     def dtype(self) -> PsType | DynamicType:
         return cast(TypeAtom, self._args[1]).get()
-    
+
     def __new__(cls, expr: sp.Basic, dtype: UserTypeSpec | DynamicType | TypeAtom):
         tatom: TypeAtom
         match dtype:
@@ -169,29 +164,31 @@ class TypeCast(sp.Function):
                 tatom = TypeAtom(dtype)
             case _:
                 tatom = TypeAtom(create_type(dtype))
-        
+
         return super().__new__(cls, expr, tatom)
-    
+
     @classmethod
     def eval(cls, expr: sp.Basic, tatom: TypeAtom) -> TypeCast | None:
         dtype = tatom.get()
         if cls is not BoolCast and isinstance(dtype, PsNumericType) and dtype.is_bool():
             return BoolCast(expr, tatom)
-        
+
         return None
-    
+
     def _eval_is_integer(self):
         if self.dtype == DynamicType.INDEX_TYPE:
             return True
         if isinstance(self.dtype, PsNumericType) and self.dtype.is_int():
             return True
-        
+
     def _eval_is_real(self):
         if isinstance(self.dtype, DynamicType):
             return True
-        if isinstance(self.dtype, PsNumericType) and (self.dtype.is_float() or self.dtype.is_int()):
+        if isinstance(self.dtype, PsNumericType) and (
+            self.dtype.is_float() or self.dtype.is_int()
+        ):
             return True
-        
+
     def _eval_is_nonnegative(self):
         if isinstance(self.dtype, PsNumericType) and self.dtype.is_uint():
             return True
@@ -209,6 +206,6 @@ class CastFunc(TypeCast):
         warn(
             "CastFunc is deprecated and will be removed in pystencils 2.1. "
             "Use `pystencils.tcast` instead.",
-            FutureWarning
+            FutureWarning,
         )
         return TypeCast.__new__(cls, *args, **kwargs)

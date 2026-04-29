@@ -91,7 +91,7 @@ def interpret_python_type(t: type) -> PsType:
         return PsIeeeFloatType(32)
     if t is np.float64:
         return PsIeeeFloatType(64)
-    
+
     if t is np.bool_:
         return PsBoolType()
 
@@ -102,7 +102,9 @@ def interpret_numpy_dtype(t: np.dtype) -> PsType:
     if t.fields is not None:
         #   it's a struct
         if not t.isalignedstruct:
-            raise ValueError("pystencils currently only accepts aligned structured data types.")
+            raise ValueError(
+                "pystencils currently only accepts aligned structured data types."
+            )
 
         members = []
         for fname, fspec in t.fields.items():
@@ -151,7 +153,7 @@ def parse_type_name(typename: str, const: bool):
     match typename:
         case "bool":
             return PsBoolType(const=const)
-        
+
         case "int" | "int64" | "int64_t":
             return PsSignedIntegerType(64, const=const)
         case "int32" | "int32_t":

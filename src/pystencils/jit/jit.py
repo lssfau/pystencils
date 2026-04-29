@@ -23,15 +23,15 @@ class KernelWrapper(ABC):
     @property
     def kernel(self) -> Kernel:
         return self._kernel
-    
+
     @property
     def ast(self) -> Kernel:
         return self._kernel
-    
+
     @property
     def target(self) -> Target:
         return self._kernel.target
-    
+
     @property
     def parameters(self) -> Sequence[Parameter]:
         return self._kernel.parameters

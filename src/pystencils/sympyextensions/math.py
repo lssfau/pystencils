@@ -3,7 +3,17 @@ import operator
 import warnings
 from collections import Counter, defaultdict
 from functools import partial, reduce
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import (
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import sympy as sp
 from sympy import PolynomialError
@@ -14,7 +24,7 @@ from ..assignment import Assignment
 from .typed_sympy import TypeCast
 from ..types import PsPointerType, PsVectorType
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def prod(seq: Iterable[T]) -> T:
@@ -59,7 +69,7 @@ def kronecker_delta(*args):
     return 1
 
 
-def tanh_step_function_approximation(x, step_location, kind='right', steepness=0.0001):
+def tanh_step_function_approximation(x, step_location, kind="right", steepness=0.0001):
     """Approximation of step function by a tanh function
 
     >>> tanh_step_function_approximation(1.2, step_location=1.0, kind='right')
@@ -73,14 +83,16 @@ def tanh_step_function_approximation(x, step_location, kind='right', steepness=0
     >>> tanh_step_function_approximation(0.5, step_location=(0, 1), kind='middle')
     1
     """
-    if kind == 'left':
+    if kind == "left":
         return (1 - sp.tanh((x - step_location) / steepness)) / 2
-    elif kind == 'right':
+    elif kind == "right":
         return (1 + sp.tanh((x - step_location) / steepness)) / 2
-    elif kind == 'middle':
+    elif kind == "middle":
         x1, x2 = step_location
-        return 1 - (tanh_step_function_approximation(x, x1, 'left', steepness)
-                    + tanh_step_function_approximation(x, x2, 'right', steepness))
+        return 1 - (
+            tanh_step_function_approximation(x, x1, "left", steepness)
+            + tanh_step_function_approximation(x, x2, "right", steepness)
+        )
 
 
 def multidimensional_sum(i, dim):
@@ -104,6 +116,7 @@ def normalize_product(product: sp.Expr) -> List[sp.Expr]:
         * for a Pow node with positive integer exponent a list of factors
         * for other node types [product] is returned
     """
+
     def handle_pow(power):
         if power.exp.is_integer and power.exp.is_number and power.exp > 0:
             return [power.base] * power.exp
@@ -137,15 +150,18 @@ def symmetric_product(*args, with_diagonal: bool = True) -> Iterable:
     for idx in itertools.product(*ranges):
         valid_index = True
         for t in range(1, len(idx)):
-            if (with_diagonal and idx[t - 1] > idx[t]) or (not with_diagonal and idx[t - 1] >= idx[t]):
+            if (with_diagonal and idx[t - 1] > idx[t]) or (
+                not with_diagonal and idx[t - 1] >= idx[t]
+            ):
                 valid_index = False
                 break
         if valid_index:
             yield tuple(a[i] for a, i in zip(args, idx))
 
 
-def fast_subs(expression: T, substitutions: Dict,
-              skip: Optional[Callable[[sp.Expr], bool]] = None) -> T:
+def fast_subs(
+    expression: T, substitutions: Dict, skip: Optional[Callable[[sp.Expr], bool]] = None
+) -> T:
     """Similar to sympy subs function.
 
     Args:
@@ -157,7 +173,9 @@ def fast_subs(expression: T, substitutions: Dict,
     This version is much faster for big substitution dictionaries than sympy version
     """
     if type(expression) is sp.Matrix:
-        return expression.copy().applyfunc(partial(fast_subs, substitutions=substitutions))
+        return expression.copy().applyfunc(
+            partial(fast_subs, substitutions=substitutions)
+        )
 
     def visit(expr, evaluate=True):
         if skip and skip(expr):
@@ -166,7 +184,7 @@ def fast_subs(expression: T, substitutions: Dict,
             return expr.fast_subs(substitutions, skip)
         elif expr in substitutions:
             return substitutions[expr]
-        elif not hasattr(expr, 'args'):
+        elif not hasattr(expr, "args"):
             return expr
         elif isinstance(expr, sp.UnevaluatedExpr):
             args = [visit(a, False) for a in expr.args]
@@ -174,7 +192,11 @@ def fast_subs(expression: T, substitutions: Dict,
         else:
             param_list = [visit(a, evaluate) for a in expr.args]
             if isinstance(expr, (sp.Mul, sp.Add)):
-                return expr if not param_list else expr.func(*param_list, evaluate=evaluate)
+                return (
+                    expr
+                    if not param_list
+                    else expr.func(*param_list, evaluate=evaluate)
+                )
             return expr if not param_list else expr.func(*param_list)
 
     if len(substitutions) == 0:
@@ -191,9 +213,13 @@ def is_constant(expr):
     return len(expr.free_symbols) == 0
 
 
-def subs_additive(expr: sp.Expr, replacement: sp.Expr, subexpression: sp.Expr,
-                  required_match_replacement: Optional[Union[int, float]] = 0.5,
-                  required_match_original: Optional[Union[int, float]] = None) -> sp.Expr:
+def subs_additive(
+    expr: sp.Expr,
+    replacement: sp.Expr,
+    subexpression: sp.Expr,
+    required_match_replacement: Optional[Union[int, float]] = 0.5,
+    required_match_original: Optional[Union[int, float]] = None,
+) -> sp.Expr:
     """Transformation for replacing a given subexpression inside a sum.
 
     Examples:
@@ -228,6 +254,7 @@ def subs_additive(expr: sp.Expr, replacement: sp.Expr, subexpression: sp.Expr,
     Returns:
         new expression with replacement
     """
+
     def normalize_match_parameter(match_parameter, expression_length):
         if match_parameter is None:
             return 1
@@ -240,7 +267,9 @@ def subs_additive(expr: sp.Expr, replacement: sp.Expr, subexpression: sp.Expr,
             return match_parameter
         raise ValueError("Invalid parameter")
 
-    normalized_replacement_match = normalize_match_parameter(required_match_replacement, len(subexpression.args))
+    normalized_replacement_match = normalize_match_parameter(
+        required_match_replacement, len(subexpression.args)
+    )
 
     if isinstance(subexpression, sp.Number):
         return expr.subs({replacement: subexpression})
@@ -248,11 +277,17 @@ def subs_additive(expr: sp.Expr, replacement: sp.Expr, subexpression: sp.Expr,
     def visit(current_expr):
         if current_expr.is_Add:
             expr_max_length = max(len(current_expr.args), len(subexpression.args))
-            normalized_current_expr_match = normalize_match_parameter(required_match_original, expr_max_length)
+            normalized_current_expr_match = normalize_match_parameter(
+                required_match_original, expr_max_length
+            )
             expr_coefficients = current_expr.as_coefficients_dict()
             subexpression_coefficient_dict = subexpression.as_coefficients_dict()
-            intersection = set(subexpression_coefficient_dict.keys()).intersection(set(expr_coefficients))
-            if len(intersection) >= max(normalized_replacement_match, normalized_current_expr_match):
+            intersection = set(subexpression_coefficient_dict.keys()).intersection(
+                set(expr_coefficients)
+            )
+            if len(intersection) >= max(
+                normalized_replacement_match, normalized_current_expr_match
+            ):
                 # find common factor
                 factors = defaultdict(int)
                 skips = 0
@@ -260,12 +295,21 @@ def subs_additive(expr: sp.Expr, replacement: sp.Expr, subexpression: sp.Expr,
                     if common_symbol not in expr_coefficients:
                         skips += 1
                         continue
-                    factor = expr_coefficients[common_symbol] / subexpression_coefficient_dict[common_symbol]
+                    factor = (
+                        expr_coefficients[common_symbol]
+                        / subexpression_coefficient_dict[common_symbol]
+                    )
                     factors[sp.simplify(factor)] += 1
 
                 common_factor = max(factors.items(), key=operator.itemgetter(1))[0]
-                if factors[common_factor] >= max(normalized_current_expr_match, normalized_replacement_match):
-                    return current_expr - common_factor * subexpression + common_factor * replacement
+                if factors[common_factor] >= max(
+                    normalized_current_expr_match, normalized_replacement_match
+                ):
+                    return (
+                        current_expr
+                        - common_factor * subexpression
+                        + common_factor * replacement
+                    )
 
         # if no subexpression was found
         param_list = [visit(a) for a in current_expr.args]
@@ -280,9 +324,12 @@ def subs_additive(expr: sp.Expr, replacement: sp.Expr, subexpression: sp.Expr,
     return visit(expr)
 
 
-def replace_second_order_products(expr: sp.Expr, search_symbols: Iterable[sp.Symbol],
-                                  positive: Optional[bool] = None,
-                                  replace_mixed: Optional[List[Assignment]] = None) -> sp.Expr:
+def replace_second_order_products(
+    expr: sp.Expr,
+    search_symbols: Iterable[sp.Symbol],
+    positive: Optional[bool] = None,
+    replace_mixed: Optional[List[Assignment]] = None,
+) -> sp.Expr:
     """Replaces second order mixed terms like 4*x*y by 2*( (x+y)**2 - x**2 - y**2 ).
 
     This makes the term longer - simplify usually is undoing these - however this
@@ -299,7 +346,9 @@ def replace_second_order_products(expr: sp.Expr, search_symbols: Iterable[sp.Sym
         replace_mixed: if a list is passed here, the expr x+y or x-y is replaced by a special new symbol
                        and the replacement equation is added to the list
     """
-    mixed_symbols_replaced = set([e.lhs for e in replace_mixed]) if replace_mixed is not None else set()
+    mixed_symbols_replaced = (
+        set([e.lhs for e in replace_mixed]) if replace_mixed is not None else set()
+    )
 
     if expr.is_Mul:
         distinct_search_symbols = set()
@@ -316,12 +365,14 @@ def replace_second_order_products(expr: sp.Expr, search_symbols: Iterable[sp.Sym
             if positive is None:
                 other_factors_without_symbols = other_factors
                 for s in other_factors.atoms(sp.Symbol):
-                    other_factors_without_symbols = other_factors_without_symbols.subs(s, 1)
+                    other_factors_without_symbols = other_factors_without_symbols.subs(
+                        s, 1
+                    )
                 positive = other_factors_without_symbols.is_positive
                 assert positive is not None
             sign = 1 if positive else -1
             if replace_mixed is not None:
-                new_symbol_str = 'P' if positive else 'M'
+                new_symbol_str = "P" if positive else "M"
                 mixed_symbol_name = u.name + new_symbol_str + v.name
                 mixed_symbol = sp.Symbol(mixed_symbol_name.replace("_", ""))
                 if mixed_symbol not in mixed_symbols_replaced:
@@ -329,14 +380,24 @@ def replace_second_order_products(expr: sp.Expr, search_symbols: Iterable[sp.Sym
                     replace_mixed.append(Assignment(mixed_symbol, u + sign * v))
             else:
                 mixed_symbol = u + sign * v
-            return sp.Rational(1, 2) * sign * other_factors * (mixed_symbol ** 2 - u ** 2 - v ** 2)
+            return (
+                sp.Rational(1, 2)
+                * sign
+                * other_factors
+                * (mixed_symbol**2 - u**2 - v**2)
+            )
 
-    param_list = [replace_second_order_products(a, search_symbols, positive, replace_mixed) for a in expr.args]
+    param_list = [
+        replace_second_order_products(a, search_symbols, positive, replace_mixed)
+        for a in expr.args
+    ]
     result = expr.func(*param_list, evaluate=False) if param_list else expr
     return result
 
 
-def remove_higher_order_terms(expr: sp.Expr, symbols: Sequence[sp.Symbol], order: int = 3) -> sp.Expr:
+def remove_higher_order_terms(
+    expr: sp.Expr, symbols: Sequence[sp.Symbol], order: int = 3
+) -> sp.Expr:
     """Removes all terms that contain more than 'order' factors of given 'symbols'
 
     Example:
@@ -380,8 +441,9 @@ def remove_higher_order_terms(expr: sp.Expr, symbols: Sequence[sp.Symbol], order
     return result
 
 
-def complete_the_square(expr: sp.Expr, symbol_to_complete: sp.Symbol,
-                        new_variable: sp.Symbol) -> Tuple[sp.Expr, Optional[Tuple[sp.Symbol, sp.Expr]]]:
+def complete_the_square(
+    expr: sp.Expr, symbol_to_complete: sp.Symbol, new_variable: sp.Symbol
+) -> Tuple[sp.Expr, Optional[Tuple[sp.Symbol, sp.Expr]]]:
     """Transforms second order polynomial into only squared part.
 
     Examples:
@@ -405,7 +467,9 @@ def complete_the_square(expr: sp.Expr, symbol_to_complete: sp.Symbol,
     return sp.simplify(expr), (new_variable, symbol_to_complete + b / (2 * a))
 
 
-def complete_the_squares_in_exp(expr: sp.Expr, symbols_to_complete: Sequence[sp.Symbol]):
+def complete_the_squares_in_exp(
+    expr: sp.Expr, symbols_to_complete: Sequence[sp.Symbol]
+):
     """Completes squares in arguments of exponential which makes them simpler to integrate.
 
     Very useful for integrating Maxwell-Boltzmann equilibria and its moment generating function
@@ -416,7 +480,9 @@ def complete_the_squares_in_exp(expr: sp.Expr, symbols_to_complete: Sequence[sp.
         if term.func == sp.exp:
             exp_arg = term.args[0]
             for symbol_to_complete, dummy in zip(symbols_to_complete, dummies):
-                exp_arg, substitution = complete_the_square(exp_arg, symbol_to_complete, dummy)
+                exp_arg, substitution = complete_the_square(
+                    exp_arg, symbol_to_complete, dummy
+                )
             return sp.exp(sp.expand(exp_arg))
         else:
             param_list = [visit(a) for a in term.args]
@@ -444,14 +510,14 @@ def extract_most_common_factor(term):
 def recursive_collect(expr, symbols, order_by_occurences=False):
     """Applies sympy.collect recursively for a list of symbols, collecting symbol 2 in the coefficients of symbol 1,
     and so on.
-    
+
     ``expr`` must be rewritable as a polynomial in the given ``symbols``.
     It it is not, ``recursive_collect`` will fail quietly, returning the original expression.
 
     Args:
         expr: A sympy expression.
         symbols: A sequence of symbols
-        order_by_occurences: If True, during recursive descent, always collect the symbol occuring 
+        order_by_occurences: If True, during recursive descent, always collect the symbol occuring
                              most often in the expression.
     """
     if order_by_occurences:
@@ -461,14 +527,17 @@ def recursive_collect(expr, symbols, order_by_occurences=False):
         return expr
     symbol = symbols[0]
     collected = expr.collect(symbol)
-    
+
     try:
         collected_poly = sp.Poly(collected, symbol)
     except PolynomialError:
         return expr
 
     coeffs = collected_poly.all_coeffs()[::-1]
-    rec_sum = sum(symbol**i * recursive_collect(c, symbols[1:], order_by_occurences) for i, c in enumerate(coeffs))
+    rec_sum = sum(
+        symbol**i * recursive_collect(c, symbols[1:], order_by_occurences)
+        for i, c in enumerate(coeffs)
+    )
     return rec_sum
 
 
@@ -478,10 +547,10 @@ def summands(expr):
 
 def simplify_by_equality(expr, a, b, c):
     """
-    Uses the equality a = b + c, where a and b must be symbols, to simplify expr 
+    Uses the equality a = b + c, where a and b must be symbols, to simplify expr
     by attempting to express additive combinations of two quantities by the third.
 
-    This works on expressions that are reducible to the form 
+    This works on expressions that are reducible to the form
     :math:`a * (...) + b * (...) + c * (...)`,
     without any mixed terms of a, b and c.
     """
@@ -535,11 +604,15 @@ def simplify_by_equality(expr, a, b, c):
     c_summands -= {-x for x in a_minus_c_coeffs}
 
     # put it back together
-    return (rest + a * sum(a_summands) + b * sum(b_summands) + c * sum(c_summands)).expand()
+    return (
+        rest + a * sum(a_summands) + b * sum(b_summands) + c * sum(c_summands)
+    ).expand()
 
 
-def count_operations(term: Union[sp.Expr, List[sp.Expr], List[Assignment]],
-                     only_type: Optional[str] = 'real') -> Dict[str, int]:
+def count_operations(
+    term: Union[sp.Expr, List[sp.Expr], List[Assignment]],
+    only_type: Optional[str] = "real",
+) -> Dict[str, int]:
     """Counts the number of additions, multiplications and division.
 
     Args:
@@ -549,10 +622,21 @@ def count_operations(term: Union[sp.Expr, List[sp.Expr], List[Assignment]],
     Returns:
         dict with 'adds', 'muls' and 'divs' keys
     """
-    from pystencils.sympyextensions.fast_approximation import fast_sqrt, fast_inv_sqrt, fast_division
+    from pystencils.sympyextensions.fast_approximation import (
+        fast_sqrt,
+        fast_inv_sqrt,
+        fast_division,
+    )
 
-    result = {'adds': 0, 'muls': 0, 'divs': 0, 'sqrts': 0,
-              'fast_sqrts': 0, 'fast_inv_sqrts': 0, 'fast_div': 0}
+    result = {
+        "adds": 0,
+        "muls": 0,
+        "divs": 0,
+        "sqrts": 0,
+        "fast_sqrts": 0,
+        "fast_inv_sqrts": 0,
+        "fast_div": 0,
+    }
     if isinstance(term, Sequence):
         for element in term:
             r = count_operations(element, only_type)
@@ -574,10 +658,10 @@ def count_operations(term: Union[sp.Expr, List[sp.Expr], List[Assignment]],
         if isinstance(base_type, PsVectorType):
             return False
         if isinstance(base_type, PsPointerType):
-            return only_type == 'int'
-        if only_type == 'int' and (base_type.is_int() or base_type.is_uint()):
+            return only_type == "int"
+        if only_type == "int" and (base_type.is_int() or base_type.is_uint()):
             return True
-        if only_type == 'real' and (base_type.is_float()):
+        if only_type == "real" and (base_type.is_float()):
             return True
         else:
             return base_type == only_type
@@ -586,15 +670,15 @@ def count_operations(term: Union[sp.Expr, List[sp.Expr], List[Assignment]],
         visit_children = True
         if t.func is sp.Add:
             if check_type(t):
-                result['adds'] += len(t.args) - 1
+                result["adds"] += len(t.args) - 1
         elif t.func in [sp.Or, sp.And]:
             pass
         elif t.func is sp.Mul:
             if check_type(t):
-                result['muls'] += len(t.args) - 1
+                result["muls"] += len(t.args) - 1
                 for a in t.args:
                     if a == 1 or a == -1:
-                        result['muls'] -= 1
+                        result["muls"] -= 1
         elif isinstance(t, sp.Float) or isinstance(t, sp.Rational):
             pass
         elif isinstance(t, sp.Symbol):
@@ -607,32 +691,34 @@ def count_operations(term: Union[sp.Expr, List[sp.Expr], List[Assignment]],
             visit_children = False
             visit(t.args[0])
         elif t.func is fast_sqrt:
-            result['fast_sqrts'] += 1
+            result["fast_sqrts"] += 1
         elif t.func is fast_inv_sqrt:
-            result['fast_inv_sqrts'] += 1
+            result["fast_inv_sqrts"] += 1
         elif t.func is fast_division:
-            result['fast_div'] += 1
+            result["fast_div"] += 1
         elif t.func is sp.Pow:
             if check_type(t.args[0]):
                 visit_children = True
                 if t.exp.is_integer and t.exp.is_number:
                     if t.exp >= 0:
-                        result['muls'] += int(t.exp) - 1
+                        result["muls"] += int(t.exp) - 1
                     else:
-                        if result['muls'] > 0:
-                            result['muls'] -= 1
-                        result['divs'] += 1
-                        result['muls'] += (-int(t.exp)) - 1
+                        if result["muls"] > 0:
+                            result["muls"] -= 1
+                        result["divs"] += 1
+                        result["muls"] += (-int(t.exp)) - 1
                 elif sp.nsimplify(t.exp) == sp.Rational(1, 2):
-                    result['sqrts'] += 1
+                    result["sqrts"] += 1
                 elif sp.nsimplify(t.exp) == -sp.Rational(1, 2):
                     result["sqrts"] += 1
                     result["divs"] += 1
                 else:
                     warnings.warn(f"Cannot handle exponent {t.exp} of sp.Pow node")
             else:
-                warnings.warn("Counting operations: only integer exponents are supported in Pow, "
-                              "counting will be inaccurate")
+                warnings.warn(
+                    "Counting operations: only integer exponents are supported in Pow, "
+                    "counting will be inaccurate"
+                )
         elif t.func is sp.Piecewise:
             for child_term, condition in t.args:
                 visit(child_term)
@@ -640,7 +726,9 @@ def count_operations(term: Union[sp.Expr, List[sp.Expr], List[Assignment]],
         elif isinstance(t, (sp.Rel, sp.UnevaluatedExpr)):
             pass
         else:
-            warnings.warn(f"Unknown sympy node of type {str(t.func)} counting will be inaccurate")
+            warnings.warn(
+                f"Unknown sympy node of type {str(t.func)} counting will be inaccurate"
+            )
 
         if visit_children:
             for a in t.args:
@@ -653,6 +741,7 @@ def count_operations(term: Union[sp.Expr, List[sp.Expr], List[Assignment]],
 def count_operations_in_ast(ast) -> Dict[str, int]:
     """Counts number of operations in an abstract syntax tree, see also :func:`count_operations`"""
     from pystencils.sympyextensions.astnodes import SympyAssignment
+
     result = defaultdict(int)
 
     def visit(node):
@@ -663,6 +752,7 @@ def count_operations_in_ast(ast) -> Dict[str, int]:
         else:
             for arg in node.args:
                 visit(arg)
+
     visit(ast)
     return result
 

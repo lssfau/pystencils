@@ -1,17 +1,5 @@
 # pystencils v2.0-dev Documentation
 
-:::{note}
-  You are currently viewing the documentation pages for the development revision |release|
-  of pystencils 2.0.
-  These pages have been generated from the branch 
-  [v2.0-dev](https://i10git.cs.fau.de/pycodegen/pystencils/-/tree/v2.0-dev?ref_type=heads)
-
-  Pystencils 2.0 is currently under development. 
-  It marks a complete re-design of the package's internal structure;
-  furthermore, it will bring a set of new features and API changes.
-  Be aware that many features are still missing or might have brand-new bugs in this version. Likewise, these documentation pages are still incomplete.
-:::
-
 Welcome to the documentation and reference guide of *pystencils*!
 *Pystencils* offers a symbolic language and code generator for the development of high-performing
 numerical kernels for both CPU and GPU targets. 

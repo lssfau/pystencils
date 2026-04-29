@@ -35,7 +35,7 @@ def sharedmethodcache(cache_id: str):
 
     This decorator caches results of instance methods per instantiated object of the surrounding class.
     It allows multiple methods to use the same cache, by passing them the same `cache_id` string.
-    Cached values are stored in a dictionary, which is added as a member `self.<cache_id>` to the 
+    Cached values are stored in a dictionary, which is added as a member `self.<cache_id>` to the
     `self` object instance. Make sure that this doesn't cause any naming conflicts with other members!
     Of course, for this to be useful, said methods must have the same signature (up to additional kwargs)
     and must return the same result when called with the same arguments."""

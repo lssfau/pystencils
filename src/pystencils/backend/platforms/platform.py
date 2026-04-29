@@ -36,10 +36,12 @@ class Platform(ABC):
     ) -> PsBlock:
         """Materialize the given iteration space as an indexing structure and embed the given
         kernel body into that structure.
-        
+
         Deprecated; code generation pipelines should use the `axis expansion system <AxisExpansion>` instead.
         """
-        raise NotImplementedError("`materialize_iteration_space` is not implemented by this platform.")
+        raise NotImplementedError(
+            "`materialize_iteration_space` is not implemented by this platform."
+        )
 
     def resolve_reduction(
         self,
@@ -52,9 +54,7 @@ class Platform(ABC):
         )
 
     @abstractmethod
-    def select_function(
-        self, call: PsCall
-    ) -> PsExpression:
+    def select_function(self, call: PsCall) -> PsExpression:
         """Select an implementation for the given function on the given data type.
 
         If no viable implementation exists, raise a `MaterializationError`.

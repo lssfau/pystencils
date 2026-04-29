@@ -305,7 +305,7 @@ class GpuGridScope(Enum):
 
 class PsGpuIndexingFunction(PsIrFunction):
     """Gpu block, thread, and grid indexing functions.
-    
+
     Calls to IR GPU indexing functions will always typify to the context's index data type.
     Platforms must insert appropriate type casts when materializing.
     """

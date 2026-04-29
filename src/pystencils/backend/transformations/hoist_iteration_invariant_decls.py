@@ -108,7 +108,7 @@ class HoistIterationInvariantDeclarations:
                     return node
                 else:
                     return temp_block
-                
+
             case PsIterationAxis() if not node.can_hoist:
                 node.body = cast(PsBlock, self.visit(node.body))
                 return node

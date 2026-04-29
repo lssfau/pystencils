@@ -78,15 +78,17 @@ class UndefinedSymbolsCollector:
                 undefined_vars = self(start) | self(stop) | self(step) | self(body)
                 undefined_vars.discard(ctr.symbol)
                 return undefined_vars
-            
+
             case PsAxisRange(ctr, start, stop, step):
                 return self.visit(start) | self.visit(stop) | self.visit(step)
-            
+
             case PsAxesCube(ranges, body):
-                undefined_vars = set().union(*(self.visit(r) for r in ranges)) | self.visit(body)
+                undefined_vars = set().union(
+                    *(self.visit(r) for r in ranges)
+                ) | self.visit(body)
                 undefined_vars -= set(r.counter.symbol for r in ranges)
                 return undefined_vars
-            
+
             case PsIterationAxis(range, body):
                 undefined_vars = self.visit(range) | self.visit(body)
                 undefined_vars.discard(range.counter.symbol)
