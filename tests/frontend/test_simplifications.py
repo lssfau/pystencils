@@ -150,6 +150,16 @@ def test_add_subexpressions_for_field_reads():
     assert isinstance(ac3.subexpressions[0].rhs, ps.tcast)
     assert ac3.subexpressions[0].rhs.dtype == create_type("float32")
 
+    # added check for early out of add_subexpressions_for_field_reads is no fields appear on the rhs (See #92)
+    main = [Assignment(s[0, 0](0), 3.0),
+            Assignment(s[0, 0](1), 4.0)]
+
+    ac4 = AssignmentCollection(main, subexpressions)
+    assert len(ac4.subexpressions) == 0
+    ac5 = add_subexpressions_for_field_reads(ac4)
+    assert ac5 is not None
+    assert ac4 is ac5
+
 
 def test_retain_assignment_types():
     r_min = ps.TypedSymbol("r_min", "float64")

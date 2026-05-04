@@ -469,5 +469,6 @@ def create_boundary_kernel(field, index_field, stencil, boundary_functor, cfg: C
     dir_symbol = TypedSymbol("dir", config.index_dtype)
     elements += [Assignment(dir_symbol, index_field[0]('dir'))]
     elements += boundary_functor(field, direction_symbol=dir_symbol, index_field=index_field)
-
+    config = CreateKernelConfig(index_fields=[index_field], target=target, skip_independence_check=True,
+                                **kernel_creation_args)
     return create_kernel(elements, config=config)

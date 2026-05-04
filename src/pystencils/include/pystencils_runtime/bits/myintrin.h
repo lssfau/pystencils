@@ -1,3 +1,34 @@
+/*
+Copyright 2019-2023, Michael Kuron.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+* Redistributions of source code must retain the above copyright
+  notice, this list of conditions, and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright
+  notice, this list of conditions, and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+
+* Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #pragma once
 
 #if defined(__SSE2__) || (defined(_MSC_VER) && !defined(_M_ARM64))
@@ -12,19 +43,6 @@ QUALIFIERS __m128 _my_cvtepu32_ps(const __m128i v)
     __m128 v1f = _mm_cvtepi32_ps(v1);
     return _mm_add_ps(_mm_add_ps(v2f, v2f), v1f);
 #endif
-}
-
-QUALIFIERS void _MY_TRANSPOSE4_EPI32(__m128i & R0, __m128i & R1, __m128i & R2, __m128i & R3)
-{
-    __m128i T0, T1, T2, T3;
-    T0  = _mm_unpacklo_epi32(R0, R1);
-    T1  = _mm_unpacklo_epi32(R2, R3);
-    T2  = _mm_unpackhi_epi32(R0, R1);
-    T3  = _mm_unpackhi_epi32(R2, R3);
-    R0  = _mm_unpacklo_epi64(T0, T1);
-    R1  = _mm_unpackhi_epi64(T0, T1);
-    R2  = _mm_unpacklo_epi64(T2, T3);
-    R3  = _mm_unpackhi_epi64(T2, T3);
 }
 #endif
 
@@ -110,4 +128,3 @@ QUALIFIERS __m512d _my512_set_m256d(__m256d b, __m256d a)
     return _mm512_insertf64x4(_mm512_castpd256_pd512(a), b, 1);
 }
 #endif
-

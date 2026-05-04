@@ -155,5 +155,5 @@ pages:
       - public
   tags:
     - docker
-  only:
-    - master@pycodegen/pystencils
+  rules:
+    - if: $CI_PROJECT_PATH == "pycodegen/pystencils" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
