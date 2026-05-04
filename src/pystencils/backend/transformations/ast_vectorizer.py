@@ -5,12 +5,19 @@ import numpy as np
 
 from dataclasses import dataclass
 
-from ...types import PsType, PsVectorType, PsBoolType, PsScalarType, PsNumericType
+from ...types import (
+    PsType,
+    PsVectorType,
+    PsBoolType,
+    PsScalarType,
+    PsNumericType,
+    PsShortArrayType,
+)
 
 from ..kernelcreation import KernelCreationContext, AstFactory
 from ..memory import PsSymbol
 from ..constants import PsConstant
-from ..functions import PsMathFunction, PsConstantFunction
+from ..functions import PsMathFunction, PsConstantFunction, PsRngEngineFunction
 
 from ..ast import PsAstNode
 from ..ast.structural import (
@@ -145,16 +152,22 @@ class VectorizationContext:
         self._vectorized_symbols[symb] = vec_symb
         return vec_symb
 
-    def vector_type(self, scalar_type: PsType) -> PsVectorType:
+    def vector_type(self, scalar_type: PsType) -> PsVectorType | PsShortArrayType:
         """Vectorize the given scalar data type.
 
         Raises:
             VectorizationError: If the given data type was not a `PsScalarType`.
         """
+        if isinstance(scalar_type, PsShortArrayType):
+            return PsShortArrayType(
+                self.vector_type(scalar_type.base_type), scalar_type.num_elements
+            )
+
         if not isinstance(scalar_type, PsScalarType):
             raise VectorizationError(
                 f"Unable to vectorize type {scalar_type}: was not a scalar numeric type"
             )
+
         return PsVectorType(scalar_type, self._lanes)
 
     def axis_ctr_dependees(self, symbols: set[PsSymbol]) -> set[PsSymbol]:
@@ -440,6 +453,16 @@ class AstVectorizer:
                     [self.visit_expr(arg, vc) for arg in func_args],
                 )
 
+            #   RNG Engines
+            case PsCall(PsRngEngineFunction(spec), func_args):
+                vec_spec = spec.vectorize(vc.lanes)
+                counter_args = func_args[: vec_spec.num_ctrs]
+                key_args = func_args[vec_spec.num_ctrs :]  # noqa: E203
+                vec_expr = PsCall(
+                    PsRngEngineFunction(vec_spec),
+                    tuple(self.visit_expr(arg, vc) for arg in counter_args) + key_args,
+                )
+
             #   Other Functions
             case PsCall(func, _):
                 raise VectorizationError(
@@ -529,6 +552,20 @@ class AstVectorizer:
                 else:
                     #   Buffer access is lane-invariant
                     vec_expr = PsVecBroadcast(vc.lanes, expr.clone())
+
+            case PsSubscript(array, indices) if isinstance(
+                array.dtype, PsShortArrayType
+            ) and not self._is_lane_invariant(array, vc):
+                #   Check that index is lane-invariant
+                idx = indices[0]
+                if not self._is_lane_invariant(idx, vc):
+                    raise ValueError(
+                        "Unable to vectorize short-array access with non lane-invariant index.\n"
+                        f"    at: {expr}"
+                    )
+
+                vec_array = self.visit_expr(array, vc)
+                vec_expr = PsSubscript(vec_array, indices)
 
             case PsSubscript(array, index):
                 # Check that array expression and indices are lane-invariant

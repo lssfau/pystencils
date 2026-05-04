@@ -1,17 +1,20 @@
 from __future__ import annotations
-from typing import Sequence, TYPE_CHECKING
+from typing import Sequence, TYPE_CHECKING, cast
 from abc import ABC
 from enum import Enum, IntEnum
+from dataclasses import dataclass
 
 from ..sympyextensions import ReductionOp
 from ..sympyextensions.random import RngState, Philox
 from ..types import (
     PsType,
+    PsScalarType,
     PsNumericType,
     PsTypeError,
     PsIeeeFloatType,
     PsIntegerType,
-    PsUnsignedIntegerType,
+    PsShortArrayType,
+    PsVectorType,
 )
 from .exceptions import PsInternalCompilerError
 
@@ -340,40 +343,44 @@ class PsGpuIndexingFunction(PsIrFunction):
         return hash(type(self), self._scope, self._dimension)
 
 
-class RngSpec(Enum):
+@dataclass(frozen=True)
+class RngSpec:
     """Random number generator specifications for `PsRngEngineFunction`."""
 
-    PhiloxFp32 = (
-        "philox_fp32",
-        Philox._get_vector_type(PsIeeeFloatType(32)),
-        4,
-        2,
-        PsUnsignedIntegerType(32),
-    )
-    """Philox W=32, N=4 RNG engine returning four float32-values"""
+    rng_name: str
+    short_array_type: PsShortArrayType
+    num_ctrs: int
+    num_keys: int
+    int_arg_type: PsNumericType
 
-    PhiloxFp64 = (
-        "philox_fp64",
-        Philox._get_vector_type(PsIeeeFloatType(64)),
-        4,
-        2,
-        PsUnsignedIntegerType(32),
-    )
-    """Philox W=32, N=4 RNG engine returning two float64-values"""
+    @staticmethod
+    def philox(fptype: PsIeeeFloatType, ctr_type: PsIntegerType) -> RngSpec:
+        """Philox W=32, N=4 RNG engine returning four float32-values"""
+        if fptype.width not in (32, 64):
+            raise ValueError(f"Data type {fptype} not supported in Philox RNG")
 
-    def __init__(
-        self,
-        rng_name: str,
-        dtype: PsType,
-        num_ctrs: int,
-        num_keys: int,
-        int_arg_type: PsIntegerType,
-    ):
-        self.rng_name = rng_name
-        self.dtype = dtype
-        self.num_ctrs = num_ctrs
-        self.num_keys = num_keys
-        self.int_arg_type = int_arg_type
+        return RngSpec(
+            f"philox_{fptype}",
+            Philox._get_short_array_type(fptype),
+            4,
+            2,
+            ctr_type,
+        )
+
+    def vectorize(self, num_lanes: int) -> RngSpec:
+        """Transform this RNG specification to a vectorized version."""
+        return RngSpec(
+            self.rng_name,
+            PsShortArrayType(
+                PsVectorType(
+                    cast(PsScalarType, self.short_array_type.base_type), num_lanes
+                ),
+                self.short_array_type.num_elements,
+            ),
+            self.num_ctrs,
+            self.num_keys,
+            PsVectorType(cast(PsIntegerType, self.int_arg_type), num_lanes),
+        )
 
 
 class PsRngEngineFunction(PsIrFunction):
@@ -384,21 +391,25 @@ class PsRngEngineFunction(PsIrFunction):
     Each symbolic RNG invocation is mapped onto an RNG engine function
     through `get_for_rng`.
 
+    The characteristics of an RNG engine are defined by its `RngSpec`.
     Each engine is a function with the signature
 
     .. code-block::
 
-        engine(ctr_0, ..., ctr_n, key_0, ..., key_m) -> Vec< value_type, K >
+        engine(ctr_0, ..., ctr_n, key_0, ..., key_m) -> ShortArray< value_type, K >
 
-    which takes n+1 *counter* arguments, and m+1 *key* arguments,
-    all of which have the same integer data type (the ``int_arg_type`` parameter of the `RngSpec`).
-    It returns a k-vector of random values of type ``value_type``,
-    modelled using an appropriate `PsNamedArrayType`.
+    which takes n+1 *counter* arguments, and m+1 *key* arguments.
+    For scalar RNGs, all arguments have the same integer data type
+    (the ``int_arg_type`` parameter of the `RngSpec`);
+    for vector RNGs (with ``l`` vector lanes), the ``ctr`` arguments are ``l``-vectors of ``int_arg_type``,
+    while the key arguments remain scalar.
 
-    RNG engine functions must be handled by several transformers, including:
+    The engine function returns a k-array of random values of type ``value_type``
+    as an instance of `PsShortArrayType`.
+    The ``value_type`` may be a scalar (for scalar RNGs) or a SIMD vector type (for vector RNGs).
 
-    - `vectorization <AstVectorizer>` (if applicable)
-    - lowering to target-specific implementations by the `Platform` classes.
+    RNG engine functions must be mapped to platform-specific implementations according to their `RngSpec`.
+    This must happen either in `SelectFunctions` (for scalar RNGs) or `SelectIntrinsics` (for vector RNGs).
 
     Args:
         rng_spec: Specification defining the RNG's properties
@@ -407,19 +418,11 @@ class PsRngEngineFunction(PsIrFunction):
     __match_args__ = ("rng_spec",)
 
     @staticmethod
-    def get_for_rng(state: RngState) -> PsRngEngineFunction:
+    def get_for_rng(state: RngState, ctr_type: PsIntegerType) -> PsRngEngineFunction:
         """Retrieve the function to be invoked for the given symbolic RNG."""
         match state:
             case Philox.PhiloxState():
-                match state.dtype.width:
-                    case 32:
-                        spec = RngSpec.PhiloxFp32
-                    case 64:
-                        spec = RngSpec.PhiloxFp64
-                    case _:
-                        raise ValueError(
-                            f"Data type {state.dtype} not supported in Philox RNG"
-                        )
+                spec = RngSpec.philox(state.dtype, ctr_type)
             case _:
                 raise ValueError(f"Unexpected RNG type: {type(state)}")
 

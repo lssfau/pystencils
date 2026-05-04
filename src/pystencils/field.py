@@ -1290,7 +1290,7 @@ def get_layout_of_array(
 
 
 def create_numpy_array_with_layout(
-    shape, layout, alignment=False, byte_offset=0, **kwargs
+    shape, layout, alignment=False, byte_offset=0, xp=np, **kwargs
 ):
     """Creates numpy array with given memory layout.
 
@@ -1326,7 +1326,7 @@ def create_numpy_array_with_layout(
         shape[a], shape[b] = shape[b], shape[a]
 
     if not alignment:
-        res = np.empty(shape, order="c", **kwargs)
+        res = xp.empty(shape, order="c", **kwargs)
     else:
         res = aligned_empty(shape, alignment, byte_offset=byte_offset, **kwargs)
 

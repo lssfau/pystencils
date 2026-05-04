@@ -710,7 +710,7 @@ class Typifier:
                         tc.apply_dtype(self._ctx.index_dtype, expr)
 
                     case PsRngEngineFunction(rng_spec):
-                        tc.apply_dtype(rng_spec.dtype, expr)
+                        tc.apply_dtype(rng_spec.short_array_type, expr)
 
                         arg_tc = TypeContext(rng_spec.int_arg_type)
                         for arg in expr.args:

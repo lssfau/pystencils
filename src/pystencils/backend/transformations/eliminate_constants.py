@@ -7,7 +7,7 @@ import numpy as np
 from ..kernelcreation import KernelCreationContext, Typifier
 
 from ..ast import PsAstNode
-from ..ast.structural import PsBlock, PsDeclaration, PsStructuralNode
+from ..ast.structural import PsBlock, PsDeclaration, PsAssignment, PsStructuralNode
 from ..ast.expressions import (
     PsExpression,
     PsConstantExpr,
@@ -401,6 +401,10 @@ class TypifyAndFold:
 
     @overload
     def __call__(self, node: PsDeclaration) -> PsDeclaration:
+        pass
+
+    @overload
+    def __call__(self, node: PsAssignment) -> PsAssignment:
         pass
 
     @overload

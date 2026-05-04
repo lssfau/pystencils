@@ -6,8 +6,8 @@ from dataclasses import dataclass
 import sympy as sp
 
 from ..assignment import Assignment
-from .typed_sympy import TypedSymbol, tcast
-from ..types import UserTypeSpec, create_type, PsIeeeFloatType, PsNamedArrayType
+from .typed_sympy import TypedSymbol
+from ..types import UserTypeSpec, create_type, PsIeeeFloatType, PsShortArrayType
 
 
 @dataclass(frozen=True)
@@ -75,11 +75,11 @@ class RngBase(ABC):
 
     @classmethod
     @abstractmethod
-    def _get_vector_type(cls, dtype: PsIeeeFloatType) -> PsNamedArrayType: ...
+    def _get_short_array_type(cls, dtype: PsIeeeFloatType) -> PsShortArrayType: ...
 
     def __init__(self, state: RngState):
         self._state = state
-        self._vector_type = self._get_vector_type(self._state.dtype)
+        self._vector_type = self._get_short_array_type(self._state.dtype)
 
     @property
     def dtype(self) -> PsIeeeFloatType:
@@ -155,7 +155,7 @@ class Philox(RngBase):
             )
 
         def get_keys(self) -> tuple[sp.Expr | int, ...]:
-            return (tcast(self.seed, "uint32"), self.invocation_key)
+            return (self.seed, self.invocation_key)
 
         def get_counters(self, invocation, rank) -> tuple[sp.Expr | int, ...]:
             if Philox.get_invocation_state(invocation) != self:
@@ -163,14 +163,14 @@ class Philox(RngBase):
                     "This RNG state does not belong to the given invocation."
                 )
 
-            counters = [tcast(invocation.args[0], "uint32")]
+            counters = [invocation.args[0]]
 
             offsets = self.offsets + (0,) * (rank - len(self.offsets))
 
             from ..defaults import DEFAULTS
 
             for spatial_ctr, offset in zip(DEFAULTS.spatial_counters[:rank], offsets):
-                counters.append(tcast(spatial_ctr + offset, "uint32"))
+                counters.append(spatial_ctr + offset)
 
             counters += [0 for _ in range(3 - rank)]
 
@@ -191,17 +191,11 @@ class Philox(RngBase):
         super().__init__(state)
 
     @classmethod
-    def _get_vector_type(cls, dtype: PsIeeeFloatType):
-        name_pattern = "pystencils::runtime::Fp{}x{}"
-
+    def _get_short_array_type(cls, dtype: PsIeeeFloatType):
         match dtype.width:
             case 32:
-                return PsNamedArrayType(
-                    name_pattern.format(32, 4), PsIeeeFloatType(32), (4,)
-                )
+                return PsShortArrayType(PsIeeeFloatType(32), (4,))
             case 64:
-                return PsNamedArrayType(
-                    name_pattern.format(64, 2), PsIeeeFloatType(64), (2,)
-                )
+                return PsShortArrayType(PsIeeeFloatType(64), (2,))
 
         raise ValueError(f"Philox RNG not available for type {dtype}")

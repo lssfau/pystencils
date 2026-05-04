@@ -12,6 +12,7 @@ from ...types import (
     PsSignedIntegerType,
     PsIeeeFloatType,
     PsPointerType,
+    PsShortArrayType,
     PsVoidType,
     constify,
 )
@@ -36,6 +37,7 @@ from ..ast.expressions import (
     PsDiv,
     PsCast,
     PsCall,
+    PsSubscript,
 )
 from ..ast.structural import PsDeclaration, PsBlock
 from ..ast.vector import PsVecMemAcc, PsVecBroadcast, PsVecHorizontal, ReductionOp
@@ -56,7 +58,7 @@ class SveCpu(GenericVectorCpu):
 
     @property
     def required_headers(self) -> set[str]:
-        headers = {"<arm_sve.h>", '"pystencils_runtime/sve.hpp"'}
+        headers = {'"pystencils_runtime/sve.hpp"'}
         return super().required_headers | headers
 
     def get_intrinsic_selector(
@@ -128,9 +130,13 @@ class SelectIntrinsicsSve(ArmCommonIntrinsics, SelectIntrinsics):
         return node
 
     def type_intrinsic(
-        self, vector_type: PsVectorType, sc: SelectionContext
+        self, vector_type: PsVectorType | PsShortArrayType, sc: SelectionContext
     ) -> PsCustomType:
-        return self._vtype_intrin(vector_type)
+        match vector_type:
+            case PsVectorType():
+                return self._vtype_intrin(vector_type)
+            case PsShortArrayType():
+                return self._tuple_type_intrin(vector_type)
 
     def _vtype_intrin(self, vector_type: PsVectorType) -> PsCustomType:
         sctype = vector_type.scalar_type
@@ -143,6 +149,21 @@ class SelectIntrinsicsSve(ArmCommonIntrinsics, SelectIntrinsics):
         base_typename = str(vector_type.scalar_type)
 
         return PsCustomType(f"sv{base_typename}_t")
+
+    def _tuple_type_intrin(self, array_type: PsShortArrayType) -> PsCustomType:
+        btype = array_type.base_type
+
+        if not isinstance(btype, PsVectorType):
+            raise MaterializationError(
+                f"Cannot select intrinsic for non-vectorial short array type {array_type}"
+            )
+
+        if array_type.num_elements not in (2, 3, 4):
+            raise MaterializationError(f"Cannot select intrinsic for type {array_type}")
+
+        btype_intrin = self._vtype_intrin(btype)
+        btype_name_stem = btype_intrin.c_string()[:-2]  # remove _t suffix
+        return PsCustomType(f"{btype_name_stem}x{array_type.num_elements}_t")
 
     def constant_intrinsic(self, c: PsConstant, sc: SelectionContext) -> PsExpression:
         vtype = cast(PsVectorType, c.get_dtype())
@@ -238,6 +259,36 @@ class SelectIntrinsicsSve(ArmCommonIntrinsics, SelectIntrinsics):
         else:
             st_intrin = self._svst1(vtype)
             return st_intrin(pred, addr, arg)
+
+    def rng_engine_intrinsic(
+        self, expr: PsCall, args: Sequence[PsExpression], sc: SelectionContext
+    ) -> PsExpression:
+        return self._common_rng_engine_intrinsic(expr, args, sc, namespace="sve")
+
+    def subscript_intrinsic(
+        self,
+        subscript: PsSubscript,
+        arr: PsExpression,
+        indices: Sequence[PsExpression],
+        sc: SelectionContext,
+    ) -> PsExpression:
+        array_type = subscript.array.get_dtype()
+        if not isinstance(array_type, PsShortArrayType):
+            raise MaterializationError(
+                f"Cannot materialize subscript on vector array type {array_type}"
+            )
+
+        svget = self._svget(array_type)
+        return svget(arr, indices[0])
+
+    def _svget(self, array_type: PsShortArrayType) -> CFunction:
+        tuple_type = self._tuple_type_intrin(array_type)
+        rtype = self._vtype_intrin(cast(PsVectorType, array_type.base_type))
+        return CFunction(
+            f"svget{array_type.num_elements}",
+            (tuple_type, PsUnsignedIntegerType(64)),
+            rtype,
+        )
 
     def _insr(self, vtype: PsVectorType) -> CFunction:
         suffix = self._op_type_suffix(vtype.scalar_type)

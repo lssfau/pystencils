@@ -33,7 +33,6 @@ from ..functions import (
     PsIrFunction,
     PsMathFunction,
     PsRngEngineFunction,
-    RngSpec,
 )
 from ..kernelcreation import AstFactory, KernelCreationContext, Typifier
 from ..kernelcreation.iteration_space import (
@@ -138,20 +137,15 @@ class SyclPlatform(Platform):
                 expr = self._select_integer_function(call)
 
         elif isinstance(call.function, PsRngEngineFunction):
-            # raise NotImplementedError("Random Functions are currently not Implemented in Sycl backend")
-
             spec = call.function.rng_spec
             atypes = (spec.int_arg_type,) * call.function.arg_count
+            ctr_type = spec.int_arg_type
 
-            match spec:
-                case RngSpec.PhiloxFp32:
-                    rng_func = CFunction(
-                        "pystencils::runtime::random::philox_fp32x4", atypes, spec.dtype
-                    )
-                case RngSpec.PhiloxFp64:
-                    rng_func = CFunction(
-                        "pystencils::runtime::random::philox_fp64x2", atypes, spec.dtype
-                    )
+            rng_func = CFunction(
+                f"pystencils::runtime::random::{spec.rng_name}< {ctr_type.c_string()} >",
+                atypes,
+                spec.short_array_type,
+            )
 
             expr = rng_func(*call.args)
 

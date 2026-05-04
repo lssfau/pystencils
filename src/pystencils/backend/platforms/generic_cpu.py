@@ -11,7 +11,6 @@ from ..functions import (
     PsConstantFunction,
     ConstantFunctions,
     PsRngEngineFunction,
-    RngSpec,
 )
 from ..reduction_op_mapping import reduction_op_to_expr
 from ...sympyextensions import ReductionOp
@@ -144,17 +143,13 @@ class GenericCpu(Platform):
 
         elif isinstance(call.function, PsRngEngineFunction):
             spec = call.function.rng_spec
+            ctr_type = spec.int_arg_type
             atypes = (spec.int_arg_type,) * call.function.arg_count
-
-            match spec:
-                case RngSpec.PhiloxFp32:
-                    rng_func = CFunction(
-                        "pystencils::runtime::random::philox_fp32x4", atypes, spec.dtype
-                    )
-                case RngSpec.PhiloxFp64:
-                    rng_func = CFunction(
-                        "pystencils::runtime::random::philox_fp64x2", atypes, spec.dtype
-                    )
+            rng_func = CFunction(
+                f"pystencils::runtime::random::{spec.rng_name}< {ctr_type.c_string()} >",
+                atypes,
+                spec.short_array_type,
+            )
 
             expr = rng_func(*call.args)
 

@@ -15,10 +15,12 @@ from ..kernelcreation.iteration_space import IterationSpace
 class Platform(ABC):
     """Abstract base class for all supported platforms.
 
-    The platform performs all target-dependent tasks during code generation:
+    Platform classes are responsible for lowering abstract IR constructs to target-specific implementations.
 
-    - Translation of the iteration space to an index source (loop nest, GPU indexing, ...)
-    - Platform-specific optimizations (e.g. vectorization, OpenMP)
+    **Runtime Library:** In the pystencils runtime library (``include/pystencils_runtime``) each platform
+    should have a single corresponding public header file of the same name.
+    That header file should be listed in `required_headers`, and must contain or re-export all platform-
+    specific runtime functions (including vendors' intrinsics headers, etc)..
     """
 
     def __init__(self, ctx: KernelCreationContext) -> None:

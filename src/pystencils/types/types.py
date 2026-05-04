@@ -121,6 +121,8 @@ class PsArrayType(PsDereferencableType):
     If ``element_type`` is const, its constness will be removed.
     """
 
+    __match_args__ = ("base_type", "shape")
+
     def __init__(
         self,
         element_type: PsType,
@@ -197,7 +199,7 @@ class PsNamedArrayType(PsArrayType):
         self._name = name
         super().__init__(element_type, shape, const)
 
-    def __args__(self):
+    def __args__(self) -> tuple:
         return (self._name,) + super().__args__()
 
     @property
@@ -207,6 +209,55 @@ class PsNamedArrayType(PsArrayType):
 
     def c_string(self) -> str:
         return self._const_string() + self._name
+
+    def __repr__(self) -> str:
+        return (
+            f"PsNamedArrayType(name={self.name}, element_type={repr(self._base_type)}, "
+            f"shape={self._shape}, const={self._const})"
+        )
+
+
+class PsShortArrayType(PsNamedArrayType):
+    """Short-array types of the pystencils runtime.
+
+    These are first-class 1D arrays with value semantics provided by the pystencils
+    runtime, similar to C++ ``std::array`` but device-compatible.
+    These are also the only array types recognized by the vectorizer.
+
+    Args:
+        element_type: Data type of the array entries
+        size: Number of array entries
+        const: Constness of the array object
+    """
+
+    __match_args__ = ("base_type", "num_elements")
+
+    def __init__(self, element_type: PsType, size: SupportsIndex, const: bool = False):
+        super().__init__(
+            f"ShortArray< {str(element_type)}, {size} >",
+            element_type,
+            size,
+            const=const,
+        )
+
+    def __args__(self):
+        return (self._base_type, self.num_elements)
+
+    @property
+    def num_elements(self) -> int:
+        return self.shape[0]
+
+    def __str__(self) -> str:
+        return f"ShortArray< {str(self.base_type)}, {self.num_elements} >"
+
+    def __repr__(self) -> str:
+        return (
+            f"PsShortArrayType(element_type={repr(self._base_type)}, "
+            f"size={self._shape}, const={self._const})"
+        )
+
+    def c_string(self) -> str:
+        return f"pystencils::runtime::ShortArray< {self.base_type.c_string()}, {self.num_elements} >"
 
 
 class PsStructType(PsType):

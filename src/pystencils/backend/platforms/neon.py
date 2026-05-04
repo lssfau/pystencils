@@ -13,6 +13,7 @@ from ...types import (
     PsUnsignedIntegerType,
     PsIeeeFloatType,
     PsPointerType,
+    PsShortArrayType,
     constify,
     PsVoidType,
 )
@@ -57,7 +58,7 @@ class NeonCpu(GenericVectorCpu):
 
     @property
     def required_headers(self) -> set[str]:
-        headers = {"<arm_neon.h>", '"pystencils_runtime/neon.hpp"'}
+        headers = {'"pystencils_runtime/neon.hpp"'}
         return super().required_headers | headers
 
     def get_intrinsic_selector(
@@ -111,9 +112,25 @@ class SelectIntrinsicsNeon(ArmCommonIntrinsics, SelectIntrinsics):
         self._typify = Typifier(ctx)
 
     def type_intrinsic(
-        self, vector_type: PsVectorType, sc: SelectionContext
-    ) -> PsCustomType:
-        return self._vtype_intrin(vector_type)
+        self, vector_type: PsVectorType | PsShortArrayType, sc: SelectionContext
+    ) -> PsCustomType | PsShortArrayType:
+        match vector_type:
+            case PsVectorType():
+                return self._vtype_intrin(vector_type)
+
+            case PsShortArrayType(btype, num_elements) if num_elements in (2, 3, 4):
+                if not isinstance(btype, PsVectorType):
+                    raise MaterializationError(
+                        f"Cannot select intrinsic for non-vectorial short array type {vector_type}"
+                    )
+
+                btype_intrin = self._vtype_intrin(btype)
+                return PsShortArrayType(btype_intrin, num_elements)
+
+            case _:
+                raise MaterializationError(
+                    f"Cannot select intrinsic for type {vector_type}"
+                )
 
     def _vtype_intrin(self, vector_type: PsVectorType) -> PsCustomType:
         sctype = vector_type.scalar_type
@@ -210,6 +227,11 @@ class SelectIntrinsicsNeon(ArmCommonIntrinsics, SelectIntrinsics):
         )
         st_intrin = self._vst1(vtype)
         return st_intrin(addr, arg)
+
+    def rng_engine_intrinsic(
+        self, expr: PsCall, args: Sequence[PsExpression], sc: SelectionContext
+    ) -> PsExpression:
+        return self._common_rng_engine_intrinsic(expr, args, sc, namespace="neon")
 
     def _q(self, vtype: PsVectorType) -> str:
         if vtype.width == 128:

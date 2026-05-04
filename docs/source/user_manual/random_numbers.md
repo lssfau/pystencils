@@ -63,7 +63,7 @@ The following example illustrates this by adding up all four generated `float32`
 and writing them to a field:
 
 ```{code-cell} ipython3
-t = ps.TypedSymbol("t", "uint32")
+t = ps.TypedSymbol("t", ps.DynamicType.INDEX_TYPE)
 rx, rasm = rng.get_random_vector(t)
 
 f = ps.fields("f: float32[2D]")
@@ -79,6 +79,9 @@ asms
 We can now generate code for and execute the kernel:
 
 ```{code-cell} ipython3
+cfg = ps.CreateKernelConfig()
+cfg.index_dtype = "int32"
+
 ker = ps.create_kernel(asms)
 
 kfunc = ker.compile()
@@ -89,6 +92,14 @@ plt.imshow(arr)
 ```
 
 Ta-da! Random noise.
+
+:::{warning} Caveat: Index Types
+
+When using random number generators, the kernel's [index type](default-types) must have the same width
+as the generator's output type.
+In the above example, for instance, a `float32` RNG must be combined with the `int32` kernel index type.
+
+:::
 
 ## Controlling RNG Behavior
 
