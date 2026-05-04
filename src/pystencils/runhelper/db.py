@@ -8,13 +8,13 @@ import six
 from blitzdb.backends.file.backend import serializer_classes
 from blitzdb.backends.file.utils import JsonEncoder
 
-from pystencils.cpu.cpujit import get_compiler_config
-from pystencils import CreateKernelConfig, Target, Backend, Field
+from pystencils.jit.legacy_cpu import get_compiler_config
+from pystencils import CreateKernelConfig, Target, Field
 
 import json
 import sympy as sp
 
-from pystencils.typing import BasicType
+from pystencils.types import PsType
 
 
 class PystencilsJsonEncoder(JsonEncoder):
@@ -26,9 +26,9 @@ class PystencilsJsonEncoder(JsonEncoder):
             return float(obj)
         if isinstance(obj, sp.Integer):
             return int(obj)
-        if isinstance(obj, (BasicType, MappingProxyType)):
+        if isinstance(obj, (PsType, MappingProxyType)):
             return str(obj)
-        if isinstance(obj, (Target, Backend, sp.Symbol)):
+        if isinstance(obj, (Target, sp.Symbol)):
             return obj.name
         if isinstance(obj, Field):
             return f"pystencils.Field(name = {obj.name}, field_type = {obj.field_type.name}, " \

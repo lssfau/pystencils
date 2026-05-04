@@ -1,9 +1,10 @@
 import sympy as sp
 
 from pystencils.boundaries.boundaryhandling import DEFAULT_FLAG_TYPE
-from pystencils.typing import TypedSymbol, create_type
+from pystencils.sympyextensions import TypedSymbol
+from pystencils.types import create_type
 from pystencils.field import Field
-from pystencils.integer_functions import bitwise_and
+from pystencils.sympyextensions.integer_functions import bitwise_and
 
 
 def add_neumann_boundary(eqs, fields, flag_field, boundary_flag="neumann_flag", inverse_flag=False):

@@ -1,6 +1,7 @@
 import warnings
 
 import numpy as np
+from pystencils.types.quick import SInt
 
 
 try:
@@ -21,14 +22,14 @@ if cython_funcs_available:
 
 boundary_index_array_coordinate_names = ["x", "y", "z"]
 direction_member_name = "dir"
-default_index_array_dtype = np.int32
+default_index_array_dtype = SInt(32)
 
 
 def numpy_data_type_for_boundary_object(boundary_object, dim):
     coordinate_names = boundary_index_array_coordinate_names[:dim]
     return np.dtype(
-        [(name, default_index_array_dtype) for name in coordinate_names]
-        + [(direction_member_name, default_index_array_dtype)]
+        [(name, default_index_array_dtype.numpy_dtype) for name in coordinate_names]
+        + [(direction_member_name, default_index_array_dtype.numpy_dtype)]
         + [(i[0], i[1].numpy_dtype) for i in boundary_object.additional_data],
         align=True,
     )
@@ -56,8 +57,8 @@ def _create_index_list_python(
         : len(flag_field_arr.shape)
     ]
     index_arr_dtype = np.dtype(
-        [(name, default_index_array_dtype) for name in coordinate_names]
-        + [(direction_member_name, default_index_array_dtype)]
+        [(name, default_index_array_dtype.numpy_dtype) for name in coordinate_names]
+        + [(direction_member_name, default_index_array_dtype.numpy_dtype)]
     )
 
     # boundary cells are extracted via np.where. To ensure continous memory access in the compute kernel these cells
@@ -147,11 +148,11 @@ def create_boundary_index_list(
     dim = len(flag_field.shape)
     coordinate_names = boundary_index_array_coordinate_names[:dim]
     index_arr_dtype = np.dtype(
-        [(name, default_index_array_dtype) for name in coordinate_names]
-        + [(direction_member_name, default_index_array_dtype)]
+        [(name, default_index_array_dtype.numpy_dtype) for name in coordinate_names]
+        + [(direction_member_name, default_index_array_dtype.numpy_dtype)]
     )
 
-    stencil = np.array(stencil, dtype=default_index_array_dtype)
+    stencil = np.array(stencil, dtype=default_index_array_dtype.numpy_dtype)
     args = (
         flag_field,
         nr_of_ghost_layers,

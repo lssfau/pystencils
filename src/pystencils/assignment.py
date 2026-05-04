@@ -1,6 +1,7 @@
 import numpy as np
 import sympy as sp
-from sympy.codegen.ast import Assignment, AugmentedAssignment, AddAugmentedAssignment
+from sympy.codegen.ast import Assignment, AugmentedAssignment
+from sympy.codegen.ast import AddAugmentedAssignment as SpAddAugAssignment
 from sympy.printing.latex import LatexPrinter
 
 __all__ = ['Assignment', 'AugmentedAssignment', 'AddAugmentedAssignment', 'assignment_from_stencil']
@@ -38,6 +39,9 @@ AugmentedAssignment.__str__ = assignment_str
 LatexPrinter._print_AugmentedAssignment = print_assignment_latex
 
 sp.MutableDenseMatrix.__hash__ = lambda self: hash(tuple(self))
+
+#   Re-Export
+AddAugmentedAssignment = SpAddAugAssignment
 
 
 def assignment_from_stencil(stencil_array, input_field, output_field,

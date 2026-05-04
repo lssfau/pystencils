@@ -1,0 +1,58 @@
+from __future__ import annotations
+from typing import Sequence, TYPE_CHECKING
+from abc import ABC, abstractmethod
+
+from .error import JitError
+
+if TYPE_CHECKING:
+    from ..codegen import Kernel, Parameter, Target
+
+
+class KernelWrapper(ABC):
+    """Wrapper around a compiled and executable pystencils kernel."""
+
+    __match_args__ = ("kernel",)
+
+    def __init__(self, ker: Kernel) -> None:
+        self._kernel = ker
+
+    @abstractmethod
+    def __call__(self, **kwargs) -> None:
+        pass
+
+    @property
+    def kernel(self) -> Kernel:
+        return self._kernel
+
+    @property
+    def ast(self) -> Kernel:
+        return self._kernel
+
+    @property
+    def target(self) -> Target:
+        return self._kernel.target
+
+    @property
+    def parameters(self) -> Sequence[Parameter]:
+        return self._kernel.parameters
+
+    @property
+    def code(self) -> str:
+        return self._kernel.get_c_code()
+
+
+class JitBase(ABC):
+    """Base class for just-in-time compilation interfaces implemented in pystencils."""
+
+    @abstractmethod
+    def compile(self, kernel: Kernel) -> KernelWrapper:
+        """Compile a kernel function and return a callable object which invokes the kernel."""
+
+
+class NoJit(JitBase):
+    """Not a JIT compiler: Used to explicitly disable JIT compilation on an AST."""
+
+    def compile(self, kernel: Kernel) -> KernelWrapper:
+        raise JitError(
+            "Just-in-time compilation of this kernel was explicitly disabled."
+        )

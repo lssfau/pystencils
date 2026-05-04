@@ -1,0 +1,731 @@
+import sympy as sp
+import pytest
+
+from pystencils import (
+    Assignment,
+    fields,
+    create_type,
+    create_numeric_type,
+    TypedSymbol,
+    DynamicType,
+    KernelConstraintsError,
+)
+from pystencils.sympyextensions import tcast, bit_conditional
+from pystencils.sympyextensions.pointers import mem_acc
+
+from pystencils.backend.ast.structural import (
+    PsAssignment,
+    PsDeclaration,
+)
+from pystencils.backend.ast.expressions import (
+    PsBufferAcc,
+    PsBitwiseAnd,
+    PsBitwiseOr,
+    PsBitwiseXor,
+    PsExpression,
+    PsTernary,
+    PsIntDiv,
+    PsLeftShift,
+    PsRightShift,
+    PsAnd,
+    PsOr,
+    PsNot,
+    PsEq,
+    PsNe,
+    PsLt,
+    PsLe,
+    PsGt,
+    PsGe,
+    PsCall,
+    PsCast,
+    PsConstantExpr,
+    PsAdd,
+    PsMul,
+    PsSub,
+    PsArrayInitList,
+    PsSubscript,
+    PsMemAcc,
+    PsSymbolExpr,
+)
+from pystencils.backend.constants import PsConstant
+from pystencils.backend.functions import (
+    PsMathFunction,
+    MathFunctions,
+    PsConstantFunction,
+    ConstantFunctions,
+    PsGpuIntrinsicFunction,
+    GpuFpIntrinsics,
+)
+from pystencils.backend.kernelcreation import (
+    KernelCreationContext,
+    FreezeExpressions,
+    FullIterationSpace,
+)
+from pystencils.backend.kernelcreation.freeze import FreezeError
+
+from pystencils.sympyextensions.integer_functions import (
+    bit_shift_left,
+    bit_shift_right,
+    bitwise_and,
+    bitwise_or,
+    bitwise_xor,
+    int_div,
+    int_power_of_2,
+    round_to_multiple_towards_zero,
+    ceil_to_multiple,
+    div_ceil,
+)
+from pystencils.sympyextensions.reduction import (
+    AddReductionAssignment,
+    SubReductionAssignment,
+    MulReductionAssignment,
+    MinReductionAssignment,
+    MaxReductionAssignment,
+)
+from pystencils.sympyextensions.fast_approximation import (
+    fast_division,
+    fast_sqrt,
+    fast_inv_sqrt,
+)
+from pystencils.types import PsTypeError
+
+
+def test_freeze_simple():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+    asm = Assignment(z, 2 * x + y)
+
+    fasm = freeze(asm)
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+    z2 = PsExpression.make(ctx.get_symbol("z"))
+
+    two = PsExpression.make(PsConstant(2))
+
+    should = PsDeclaration(z2, y2 + two * x2)
+
+    assert fasm.structurally_equal(should)
+    assert not fasm.structurally_equal(PsAssignment(z2, two * x2 + y2))
+
+
+def test_freeze_fields():
+    ctx = KernelCreationContext()
+
+    zero = PsExpression.make(PsConstant(0, ctx.index_dtype))
+    forty_two = PsExpression.make(PsConstant(42, ctx.index_dtype))
+    one = PsExpression.make(PsConstant(1, ctx.index_dtype))
+    counter = ctx.get_symbol("ctr", ctx.index_dtype)
+    ispace = FullIterationSpace(
+        ctx, [FullIterationSpace.Dimension(zero, forty_two, one, counter)]
+    )
+    ctx.set_iteration_space(ispace)
+
+    freeze = FreezeExpressions(ctx)
+
+    f, g = fields("f, g : [1D]")
+    asm = Assignment(f.center(0), g.center(0))
+
+    f_arr = ctx.get_buffer(f)
+    g_arr = ctx.get_buffer(g)
+
+    fasm = freeze(asm)
+
+    zero = PsExpression.make(PsConstant(0))
+
+    lhs = PsBufferAcc(f_arr.base_pointer, (PsExpression.make(counter) + zero, zero))
+    rhs = PsBufferAcc(g_arr.base_pointer, (PsExpression.make(counter) + zero, zero))
+
+    should = PsAssignment(lhs, rhs)
+
+    assert fasm.structurally_equal(should)
+
+
+def test_freeze_constants():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    expr = freeze(sp.pi)
+    assert isinstance(expr, PsCall)
+    assert isinstance(expr.function, PsConstantFunction)
+    assert expr.function.func == ConstantFunctions.Pi
+
+    expr = freeze(sp.E)
+    assert isinstance(expr, PsCall)
+    assert isinstance(expr.function, PsConstantFunction)
+    assert expr.function.func == ConstantFunctions.E
+
+    expr = freeze(sp.oo)
+    assert isinstance(expr, PsCall)
+    assert isinstance(expr.function, PsConstantFunction)
+    assert expr.function.func == ConstantFunctions.PosInfinity
+
+    expr = freeze(-sp.oo)
+    assert isinstance(expr, PsCall)
+    assert isinstance(expr.function, PsConstantFunction)
+    assert expr.function.func == ConstantFunctions.NegInfinity
+
+
+def test_freeze_integer_binops():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+    expr = bit_shift_left(
+        bit_shift_right(bitwise_and(x, y), bitwise_or(y, z)), bitwise_xor(x, z)
+    )
+
+    fexpr = freeze(expr)
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+    z2 = PsExpression.make(ctx.get_symbol("z"))
+
+    should = PsLeftShift(
+        PsRightShift(PsBitwiseAnd(x2, y2), PsBitwiseOr(y2, z2)), PsBitwiseXor(x2, z2)
+    )
+
+    assert fexpr.structurally_equal(should)
+
+
+def test_freeze_integer_functions():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x2 = PsExpression.make(ctx.get_symbol("x", ctx.index_dtype))
+    y2 = PsExpression.make(ctx.get_symbol("y", ctx.index_dtype))
+    z2 = PsExpression.make(ctx.get_symbol("z", ctx.index_dtype))
+
+    x, y, z = sp.symbols("x, y, z")
+    one = PsExpression.make(PsConstant(1))
+    asms = [
+        Assignment(z, int_div(x, y)),
+        Assignment(z, int_power_of_2(x, y)),
+        Assignment(z, round_to_multiple_towards_zero(x, y)),
+        Assignment(z, ceil_to_multiple(x, y)),
+        Assignment(z, div_ceil(x, y)),
+    ]
+
+    fasms = [freeze(asm) for asm in asms]
+
+    should = [
+        PsDeclaration(z2, PsIntDiv(x2, y2)),
+        PsDeclaration(z2, PsLeftShift(PsExpression.make(PsConstant(1)), x2)),
+        PsDeclaration(z2, PsIntDiv(x2, y2) * y2),
+        PsDeclaration(z2, PsIntDiv(x2 + y2 - one, y2) * y2),
+        PsDeclaration(z2, PsIntDiv(x2 + y2 - one, y2)),
+    ]
+
+    for fasm, correct in zip(fasms, should):
+        assert fasm.structurally_equal(correct)
+
+
+def test_freeze_booleans():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+    z2 = PsExpression.make(ctx.get_symbol("z"))
+    w2 = PsExpression.make(ctx.get_symbol("w"))
+
+    x, y, z, w = sp.symbols("x, y, z, w")
+
+    expr = freeze(sp.Not(sp.And(x, y)))
+    assert expr.structurally_equal(PsNot(PsAnd(x2, y2)))
+
+    expr = freeze(sp.Or(sp.Not(z), sp.And(y, sp.Not(x))))
+    assert expr.structurally_equal(PsOr(PsNot(z2), PsAnd(y2, PsNot(x2))))
+
+    expr = freeze(sp.And(w, x, y, z))
+    assert expr.structurally_equal(PsAnd(PsAnd(PsAnd(w2, x2), y2), z2))
+
+    expr = freeze(sp.Or(w, x, y, z))
+    assert expr.structurally_equal(PsOr(PsOr(PsOr(w2, x2), y2), z2))
+
+
+@pytest.mark.parametrize(
+    "rel_pair",
+    [
+        (sp.Eq, PsEq),
+        (sp.Ne, PsNe),
+        (sp.Lt, PsLt),
+        (sp.Gt, PsGt),
+        (sp.Le, PsLe),
+        (sp.Ge, PsGe),
+    ],
+)
+def test_freeze_relations(rel_pair):
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    sp_op, ps_op = rel_pair
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+    z2 = PsExpression.make(ctx.get_symbol("z"))
+
+    x, y, z = sp.symbols("x, y, z")
+
+    expr1 = freeze(sp_op(x, y + z))
+    assert expr1.structurally_equal(ps_op(x2, y2 + z2))
+
+
+def test_freeze_piecewise():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    p, q, x, y, z = sp.symbols("p, q, x, y, z")
+
+    p2 = PsExpression.make(ctx.get_symbol("p"))
+    q2 = PsExpression.make(ctx.get_symbol("q"))
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+    z2 = PsExpression.make(ctx.get_symbol("z"))
+
+    piecewise = sp.Piecewise((x, p), (y, q), (z, True))
+    expr = freeze(piecewise)
+
+    assert isinstance(expr, PsTernary)
+
+    should = PsTernary(p2, x2, PsTernary(q2, y2, z2))
+    assert expr.structurally_equal(should)
+
+    piecewise = sp.Piecewise((x, p), (y, q), (z, sp.Or(p, q)))
+    with pytest.raises(FreezeError):
+        freeze(piecewise)
+
+
+def test_multiarg_min_max():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    w, x, y, z = sp.symbols("w, x, y, z")
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+    z2 = PsExpression.make(ctx.get_symbol("z"))
+    w2 = PsExpression.make(ctx.get_symbol("w"))
+
+    def op(a, b):
+        return PsCall(PsMathFunction(MathFunctions.Min), (a, b))
+
+    expr = freeze(sp.Min(w, x, y))
+    assert expr.structurally_equal(op(op(w2, x2), y2))
+
+    expr = freeze(sp.Min(w, x, y, z))
+    assert expr.structurally_equal(op(op(w2, x2), op(y2, z2)))
+
+    def op(a, b):
+        return PsCall(PsMathFunction(MathFunctions.Max), (a, b))
+
+    expr = freeze(sp.Max(w, x, y))
+    assert expr.structurally_equal(op(op(w2, x2), y2))
+
+    expr = freeze(sp.Max(w, x, y, z))
+    assert expr.structurally_equal(op(op(w2, x2), op(y2, z2)))
+
+
+def test_dynamic_types():
+    ctx = KernelCreationContext(
+        default_dtype=create_numeric_type("float16"), index_dtype=create_type("int16")
+    )
+    freeze = FreezeExpressions(ctx)
+
+    x, y = [TypedSymbol(n, DynamicType.NUMERIC_TYPE) for n in "xy"]
+    p, q = [TypedSymbol(n, DynamicType.INDEX_TYPE) for n in "pq"]
+
+    expr = freeze(x + y)
+
+    assert ctx.get_symbol("x").dtype == ctx.default_dtype
+    assert ctx.get_symbol("y").dtype == ctx.default_dtype
+
+    expr = freeze(p - q)
+    assert ctx.get_symbol("p").dtype == ctx.index_dtype
+    assert ctx.get_symbol("q").dtype == ctx.index_dtype
+
+
+def test_cast_func():
+    ctx = KernelCreationContext(
+        default_dtype=create_numeric_type("float16"), index_dtype=create_type("int16")
+    )
+    freeze = FreezeExpressions(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+    z2 = PsExpression.make(ctx.get_symbol("z"))
+
+    expr = freeze(tcast(x, create_type("int")))
+    assert expr.structurally_equal(PsCast(create_type("int"), x2))
+
+    expr = freeze(tcast.as_numeric(y))
+    assert expr.structurally_equal(PsCast(ctx.default_dtype, y2))
+
+    expr = freeze(tcast.as_index(z))
+    assert expr.structurally_equal(PsCast(ctx.index_dtype, z2))
+
+    expr = freeze(tcast(42, create_type("int16")))
+    assert expr.structurally_equal(PsConstantExpr(PsConstant(42, create_type("int16"))))
+
+
+def test_add_sub():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x = sp.Symbol("x")
+    y = sp.Symbol("y", negative=True)
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+
+    two = PsExpression.make(PsConstant(2))
+    minus_two = PsExpression.make(PsConstant(-2))
+
+    expr = freeze(x + y)
+    assert expr.structurally_equal(PsAdd(x2, y2))
+
+    expr = freeze(x - y)
+    assert expr.structurally_equal(PsSub(x2, y2))
+
+    expr = freeze(x + 2 * y)
+    assert expr.structurally_equal(PsAdd(x2, PsMul(two, y2)))
+
+    expr = freeze(x - 2 * y)
+    assert expr.structurally_equal(PsAdd(x2, PsMul(minus_two, y2)))
+
+
+def test_powers():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+
+    #   Integer powers
+    expr = freeze(x**2)
+    assert expr.structurally_equal(x2 * x2)
+
+    expr = freeze(x**3)
+    assert expr.structurally_equal(x2 * x2 * x2)
+
+    expr = freeze(x**4)
+    assert expr.structurally_equal((x2 * x2) * (x2 * x2))
+
+    expr = freeze(x**5)
+    assert expr.structurally_equal((x2 * x2) * (x2 * x2) * x2)
+
+    #   Negative integer powers
+    one = PsExpression.make(PsConstant(1))
+
+    expr = freeze(x**-2)
+    assert expr.structurally_equal(one / (x2 * x2))
+
+    expr = freeze(x**-3)
+    assert expr.structurally_equal(one / (x2 * x2 * x2))
+
+    expr = freeze(x**-4)
+    assert expr.structurally_equal(one / ((x2 * x2) * (x2 * x2)))
+
+    expr = freeze(x**-5)
+    assert expr.structurally_equal(one / ((x2 * x2) * (x2 * x2) * x2))
+
+    #   Integer powers of the square root
+    sqrt = PsMathFunction(MathFunctions.Sqrt)
+
+    expr = freeze(x ** sp.Rational(1, 2))
+    assert expr.structurally_equal(sqrt(x2))
+
+    expr = freeze(x ** sp.Rational(2, 2))
+    assert expr.structurally_equal(x2)
+
+    expr = freeze(x ** sp.Rational(3, 2))
+    assert expr.structurally_equal(sqrt(x2) * sqrt(x2) * sqrt(x2))
+
+    expr = freeze(x ** sp.Rational(4, 2))
+    assert expr.structurally_equal(x2 * x2)
+
+    expr = freeze(x ** sp.Rational(5, 2))
+    assert expr.structurally_equal(
+        (sqrt(x2) * sqrt(x2)) * (sqrt(x2) * sqrt(x2)) * sqrt(x2)
+    )
+
+    #   Negative integer powers of sqrt
+    expr = freeze(x ** sp.Rational(-1, 2))
+    assert expr.structurally_equal(one / sqrt(x2))
+
+    expr = freeze(x ** sp.Rational(-3, 2))
+    assert expr.structurally_equal(one / (sqrt(x2) * sqrt(x2) * sqrt(x2)))
+
+    #   Cube root
+    pow = PsMathFunction(MathFunctions.Pow)
+    expr = freeze(x ** sp.Rational(1, 3))
+    assert expr.structurally_equal(pow(x2, freeze(sp.Rational(1, 3))))
+
+    #   Unknown exponent
+    expr = freeze(x**y)
+    assert expr.structurally_equal(pow(x2, y2))
+
+
+def test_tuple_array_literals():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+    z2 = PsExpression.make(ctx.get_symbol("z"))
+
+    one = PsExpression.make(PsConstant(1))
+    three = PsExpression.make(PsConstant(3))
+    four = PsExpression.make(PsConstant(4))
+
+    arr_literal = freeze(sp.Tuple(3 + y, z, z / 4))
+    assert arr_literal.structurally_equal(
+        PsArrayInitList([three + y2, z2, one / four * z2])
+    )
+
+
+def test_nested_tuples():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    def f(n):
+        return freeze(sp.sympify(n))
+
+    shape = (2, 3, 2)
+    symb_arr = sp.Tuple(((1, 2), (3, 4), (5, 6)), ((5, 6), (7, 8), (9, 10)))
+    arr_literal = freeze(symb_arr)
+
+    assert isinstance(arr_literal, PsArrayInitList)
+    assert arr_literal.shape == shape
+
+    assert arr_literal.structurally_equal(
+        PsArrayInitList(
+            [
+                ((f(1), f(2)), (f(3), f(4)), (f(5), f(6))),
+                ((f(5), f(6)), (f(7), f(8)), (f(9), f(10))),
+            ]
+        )
+    )
+
+
+def test_invalid_arrays():
+    ctx = KernelCreationContext()
+
+    freeze = FreezeExpressions(ctx)
+    #   invalid: nonuniform nesting depth
+    symb_arr = sp.Tuple((3, 32), 14)
+    with pytest.raises(FreezeError):
+        _ = freeze(symb_arr)
+
+    #   invalid: nonuniform sub-array length
+    symb_arr = sp.Tuple((3, 32), (14, -7, 3))
+    with pytest.raises(FreezeError):
+        _ = freeze(symb_arr)
+
+    #   invalid: empty subarray
+    symb_arr = sp.Tuple((), (0, -9))
+    with pytest.raises(FreezeError):
+        _ = freeze(symb_arr)
+
+    #   invalid: all subarrays empty
+    symb_arr = sp.Tuple((), ())
+    with pytest.raises(FreezeError):
+        _ = freeze(symb_arr)
+
+
+@pytest.mark.parametrize(
+    "reduction_assignment_rhs_type",
+    [
+        (AddReductionAssignment, PsAdd),
+        (SubReductionAssignment, PsSub),
+        (MulReductionAssignment, PsMul),
+        (MinReductionAssignment, PsCall),
+        (MaxReductionAssignment, PsCall),
+    ],
+)
+def test_reduction_assignments(reduction_assignment_rhs_type):
+    x = fields(f"x: float64[1d]")
+    w = TypedSymbol("w", "float64")
+
+    reduction_op, rhs_type = reduction_assignment_rhs_type
+
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    one = PsExpression.make(PsConstant(1, ctx.index_dtype))
+    counter = ctx.get_symbol("ctr", ctx.index_dtype)
+    ispace = FullIterationSpace(
+        ctx, [FullIterationSpace.Dimension(one, one, one, counter)]
+    )
+    ctx.set_iteration_space(ispace)
+
+    expr = freeze(reduction_op(w, 3 * x.center()))
+
+    info = ctx.find_reduction_info(w.name)
+
+    assert isinstance(expr, PsAssignment)
+    assert isinstance(expr.lhs, PsSymbolExpr)
+
+    assert expr.lhs.symbol == info.local_symbol
+    assert expr.lhs.dtype == w.dtype
+
+    assert isinstance(expr.rhs, rhs_type)
+
+
+def test_invalid_reduction_assignments():
+    x = fields(f"x: float64[1d]")
+    w = TypedSymbol("w", "float64")
+
+    assignment = Assignment(w, -1 * x.center())
+    reduction_assignment = AddReductionAssignment(w, 3 * x.center())
+
+    expected_errors_for_invalid_cases = [
+        # 1) Reduction symbol is used before ReductionAssignment.
+        #    May only be used for reductions -> KernelConstraintsError
+        ([assignment, reduction_assignment], KernelConstraintsError),
+        # 2) Reduction symbol is used after ReductionAssignment.
+        #    Reduction symbol is converted to pointer after freeze -> PsTypeError
+        ([reduction_assignment, assignment], PsTypeError),
+        # 3) Duplicate ReductionAssignment
+        #    May only be used once for now -> KernelConstraintsError
+        ([reduction_assignment, reduction_assignment], KernelConstraintsError),
+    ]
+
+    for invalid_assignment, error_class in expected_errors_for_invalid_cases:
+        ctx = KernelCreationContext()
+        freeze = FreezeExpressions(ctx)
+
+        one = PsExpression.make(PsConstant(1, ctx.index_dtype))
+        counter = ctx.get_symbol("ctr", ctx.index_dtype)
+        ispace = FullIterationSpace(
+            ctx, [FullIterationSpace.Dimension(one, one, one, counter)]
+        )
+        ctx.set_iteration_space(ispace)
+
+        with pytest.raises(error_class):
+            _ = [freeze(asm) for asm in invalid_assignment]
+
+
+def test_memory_access():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    ptr = sp.Symbol("ptr")
+    expr = freeze(mem_acc(ptr, 31))
+
+    assert isinstance(expr, PsMemAcc)
+    assert expr.pointer.structurally_equal(PsExpression.make(ctx.get_symbol("ptr")))
+    assert expr.offset.structurally_equal(PsExpression.make(PsConstant(31)))
+
+
+def test_indexed():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+    a = sp.IndexedBase("a")
+
+    x2 = PsExpression.make(ctx.get_symbol("x"))
+    y2 = PsExpression.make(ctx.get_symbol("y"))
+    z2 = PsExpression.make(ctx.get_symbol("z"))
+    a2 = PsExpression.make(ctx.get_symbol("a"))
+
+    expr = freeze(a[x, y, z])
+    assert expr.structurally_equal(PsSubscript(a2, (x2, y2, z2)))
+
+
+def test_freeze_bit_conditional():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x, y, z = sp.symbols("x, y, z")
+    expr = freeze(bit_conditional(x, y, z))
+    one = freeze(sp.Integer(1))
+
+    assert expr.structurally_equal(
+        PsMul(
+            PsCast(
+                None,
+                PsBitwiseAnd(
+                    PsRightShift(
+                        PsExpression.make(ctx.get_symbol("y")),
+                        PsExpression.make(ctx.get_symbol("x")),
+                    ),
+                    one,
+                ),
+            ),
+            PsExpression.make(ctx.get_symbol("z")),
+        )
+    )
+
+    expr = freeze(bit_conditional(x, y, z, z))
+    assert expr.structurally_equal(
+        PsAdd(
+            PsMul(
+                PsCast(
+                    None,
+                    PsBitwiseAnd(
+                        PsRightShift(
+                            PsExpression.make(ctx.get_symbol("y")),
+                            PsExpression.make(ctx.get_symbol("x")),
+                        ),
+                        one,
+                    ),
+                ),
+                PsExpression.make(ctx.get_symbol("z")),
+            ),
+            PsMul(
+                PsCast(
+                    None,
+                    PsBitwiseXor(
+                        PsBitwiseAnd(
+                            PsRightShift(
+                                PsExpression.make(ctx.get_symbol("y")),
+                                PsExpression.make(ctx.get_symbol("x")),
+                            ),
+                            one,
+                        ),
+                        one,
+                    ),
+                ),
+                PsExpression.make(ctx.get_symbol("z")),
+            ),
+        )
+    )
+
+
+def test_freeze_gpu_intrinsics():
+    ctx = KernelCreationContext()
+    freeze = FreezeExpressions(ctx)
+
+    x, y = sp.symbols("x, y")
+
+    expr = freeze(fast_division(x, y))
+    assert expr.structurally_equal(
+        PsGpuIntrinsicFunction(GpuFpIntrinsics.dividef)(
+            PsExpression.make(ctx.get_symbol("x")),
+            PsExpression.make(ctx.get_symbol("y")),
+        )
+    )
+
+    expr = freeze(fast_sqrt(x))
+    assert expr.structurally_equal(
+        PsGpuIntrinsicFunction(GpuFpIntrinsics.SqrtRn)(
+            PsExpression.make(ctx.get_symbol("x")),
+        )
+    )
+
+    expr = freeze(fast_inv_sqrt(x))
+    assert expr.structurally_equal(
+        PsGpuIntrinsicFunction(GpuFpIntrinsics.RSqrtRn)(
+            PsExpression.make(ctx.get_symbol("x")),
+        )
+    )

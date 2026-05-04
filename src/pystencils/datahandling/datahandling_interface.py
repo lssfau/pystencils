@@ -3,7 +3,7 @@ from typing import Callable, Dict, Iterable, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from pystencils.enums import Target, Backend
+from ..codegen import Target
 from pystencils.field import Field, FieldType
 
 
@@ -16,9 +16,6 @@ class DataHandling(ABC):
     Keep in mind that the data can be distributed, so use the 'access' method whenever possible and avoid the
     'gather' function that has collects (parts of the) distributed data on a single process.
     """
-
-    _GPU_LIKE_TARGETS = [Target.GPU]
-    _GPU_LIKE_BACKENDS = [Backend.CUDA]
 
     # ---------------------------- Adding and accessing data -----------------------------------------------------------
     @property
@@ -83,7 +80,7 @@ class DataHandling(ABC):
         >>> dh = create_data_handling((20, 30))
         >>> x, y =dh.add_arrays('x, y(9)')
         >>> print(dh.fields)
-        {'x': x: double[22,32], 'y': y(9): double[22,32]}
+        {'x': x: float64[22,32], 'y': y(9): float64[22,32]}
         >>> assert x == dh.fields['x']
         >>> assert dh.fields['x'].shape == (22, 32)
         >>> assert dh.fields['y'].index_shape == (9,)

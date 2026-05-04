@@ -1,30 +1,12 @@
-from enum import Enum, auto
+from .codegen import Target as _Target
 
+from warnings import warn
 
-class Target(Enum):
-    """
-    The Target enumeration represents all possible targets that can be used for the code generation.
-    """
-    CPU = auto()
-    """
-    Target CPU architecture.
-    """
-    GPU = auto()
-    """
-    Target GPU architecture.
-    """
+warn(
+    "Importing anything from `pystencils.enums` is deprecated and the module will be removed in pystencils 2.1. "
+    "Import from `pystencils` instead.",
+    FutureWarning,
+    stacklevel=2,
+)
 
-
-class Backend(Enum):
-    """
-    The Backend enumeration represents all possible backends that can be used for the code generation.
-    Backends and targets must be combined with care. For example CPU as a target and CUDA as a backend makes no sense.
-    """
-    C = auto()
-    """
-    Use the C Backend of pystencils.
-    """
-    CUDA = auto()
-    """
-    Use the CUDA backend to generate code for NVIDIA GPUs.
-    """
+Target = _Target

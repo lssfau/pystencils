@@ -1,0 +1,87 @@
+from abc import ABC, abstractmethod
+
+from ..exceptions import MaterializationError
+from ...sympyextensions import ReductionOp
+from ...types import PsIntegerType
+from ..ast.structural import PsBlock, PsStructuralNode
+from ..ast.expressions import PsCall, PsExpression, PsTernary, PsGe, PsLe
+from ..functions import PsMathFunction, MathFunctions
+from ..constants import PsConstant
+
+from ..kernelcreation.context import KernelCreationContext
+from ..kernelcreation.iteration_space import IterationSpace
+
+
+class Platform(ABC):
+    """Abstract base class for all supported platforms.
+
+    Platform classes are responsible for lowering abstract IR constructs to target-specific implementations.
+
+    **Runtime Library:** In the pystencils runtime library (``include/pystencils_runtime``) each platform
+    should have a single corresponding public header file of the same name.
+    That header file should be listed in `required_headers`, and must contain or re-export all platform-
+    specific runtime functions (including vendors' intrinsics headers, etc)..
+    """
+
+    def __init__(self, ctx: KernelCreationContext) -> None:
+        self._ctx = ctx
+
+    @property
+    @abstractmethod
+    def required_headers(self) -> set[str]:
+        """Set of header files that must be included at the point of definition of a kernel
+        running on this platform."""
+        pass
+
+    def materialize_iteration_space(
+        self, body: PsBlock, ispace: IterationSpace
+    ) -> PsBlock:
+        """Materialize the given iteration space as an indexing structure and embed the given
+        kernel body into that structure.
+
+        Deprecated; code generation pipelines should use the `axis expansion system <AxisExpansion>` instead.
+        """
+        raise NotImplementedError(
+            "`materialize_iteration_space` is not implemented by this platform."
+        )
+
+    def resolve_reduction(
+        self,
+        ptr_expr: PsExpression,
+        symbol_expr: PsExpression,
+        reduction_op: ReductionOp,
+    ) -> PsStructuralNode:
+        raise MaterializationError(
+            f"Resolution of reductions for {self.__class__.__name__} not implemented."
+        )
+
+    @abstractmethod
+    def select_function(self, call: PsCall) -> PsExpression:
+        """Select an implementation for the given function on the given data type.
+
+        If no viable implementation exists, raise a `MaterializationError`.
+        """
+        pass
+
+    #   Some common lowerings
+
+    def _select_integer_function(self, call: PsCall) -> PsExpression | None:
+        assert isinstance(call.function, PsMathFunction)
+
+        func = call.function.func
+        dtype = call.get_dtype()
+        assert isinstance(dtype, PsIntegerType)
+
+        match func:
+            case MathFunctions.Abs:
+                zero = PsExpression.make(PsConstant(0, dtype))
+                arg = call.args[0]
+                return PsTernary(PsGe(arg, zero), arg, -arg)
+            case MathFunctions.Min:
+                arg1, arg2 = call.args
+                return PsTernary(PsLe(arg1, arg2), arg1, arg2)
+            case MathFunctions.Max:
+                arg1, arg2 = call.args
+                return PsTernary(PsGe(arg1, arg2), arg1, arg2)
+            case _:
+                return None

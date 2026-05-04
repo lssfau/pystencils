@@ -6,9 +6,14 @@ import numpy as np
 
 from pystencils.datahandling.blockiteration import SerialBlock
 from pystencils.datahandling.datahandling_interface import DataHandling
-from pystencils.enums import Target
-from pystencils.field import (Field, FieldType, create_numpy_array_with_layout,
-                              layout_string_to_tuple, spatial_layout_string_to_tuple)
+from ..codegen import Target
+from pystencils.field import (
+    Field,
+    FieldType,
+    create_numpy_array_with_layout,
+    layout_string_to_tuple,
+    spatial_layout_string_to_tuple,
+)
 from pystencils.gpu.gpu_array_handler import GPUArrayHandler, GPUNotAvailableHandler
 from pystencils.slicing import normalize_slice, remove_ghost_layers
 from pystencils.utils import DotDict
@@ -16,14 +21,16 @@ from pystencils.utils import DotDict
 
 class SerialDataHandling(DataHandling):
 
-    def __init__(self,
-                 domain_size: Sequence[int],
-                 default_ghost_layers: int = 1,
-                 default_layout: str = 'SoA',
-                 periodicity: Union[bool, Sequence[bool]] = False,
-                 default_target: Target = Target.CPU,
-                 array_handler=None,
-                 device_number=None) -> None:
+    def __init__(
+        self,
+        domain_size: Sequence[int],
+        default_ghost_layers: int = 1,
+        default_layout: str = "SoA",
+        periodicity: Union[bool, Sequence[bool]] = False,
+        default_target: Target = Target.CPU,
+        array_handler=None,
+        device_number=None,
+    ) -> None:
         """
         Creates a data handling for single node simulations.
 
@@ -58,9 +65,13 @@ class SerialDataHandling(DataHandling):
             try:
                 if device_number is None:
                     import cupy.cuda.runtime
+
                     if cupy.cuda.runtime.getDeviceCount() > 0:
-                        device_number = sorted(range(cupy.cuda.runtime.getDeviceCount()),
-                                               key=lambda i: cupy.cuda.Device(i).mem_info[1], reverse=True)[0]
+                        device_number = sorted(
+                            range(cupy.cuda.runtime.getDeviceCount()),
+                            key=lambda i: cupy.cuda.Device(i).mem_info[1],
+                            reverse=True,
+                        )[0]
                 self.array_handler = GPUArrayHandler(device_number)
             except ImportError:
                 self.array_handler = GPUNotAvailableHandler()
@@ -98,41 +109,52 @@ class SerialDataHandling(DataHandling):
         return self._fields
 
     def ghost_layers_of_field(self, name):
-        return self._field_information[name]['ghost_layers']
+        return self._field_information[name]["ghost_layers"]
 
     def values_per_cell(self, name):
-        return self._field_information[name]['values_per_cell']
+        return self._field_information[name]["values_per_cell"]
 
-    def add_array(self, name, values_per_cell=1, dtype=np.float64, latex_name=None, ghost_layers=None, layout=None,
-                  cpu=True, gpu=None, alignment=False, field_type=FieldType.GENERIC):
+    def add_array(
+        self,
+        name,
+        values_per_cell=1,
+        dtype=np.float64,
+        latex_name=None,
+        ghost_layers=None,
+        layout=None,
+        cpu=True,
+        gpu=None,
+        alignment=False,
+        field_type=FieldType.GENERIC,
+    ):
         if ghost_layers is None:
             ghost_layers = self.default_ghost_layers
         if layout is None:
             layout = self.default_layout
         if gpu is None:
-            gpu = self.default_target in self._GPU_LIKE_TARGETS
+            gpu = self.default_target.is_gpu()
 
         kwargs = {
-            'shape': tuple(s + 2 * ghost_layers for s in self._domainSize),
-            'dtype': dtype,
+            "shape": tuple(s + 2 * ghost_layers for s in self._domainSize),
+            "dtype": dtype,
         }
 
-        if not hasattr(values_per_cell, '__len__'):
+        if not hasattr(values_per_cell, "__len__"):
             values_per_cell = (values_per_cell,)
         if len(values_per_cell) == 1 and values_per_cell[0] == 1:
             values_per_cell = ()
 
         self._field_information[name] = {
-            'ghost_layers': ghost_layers,
-            'values_per_cell': values_per_cell,
-            'layout': layout,
-            'dtype': dtype,
-            'alignment': alignment,
-            'field_type': field_type,
+            "ghost_layers": ghost_layers,
+            "values_per_cell": values_per_cell,
+            "layout": layout,
+            "dtype": dtype,
+            "alignment": alignment,
+            "field_type": field_type,
         }
 
         index_dimensions = len(values_per_cell)
-        kwargs['shape'] = kwargs['shape'] + values_per_cell
+        kwargs["shape"] = kwargs["shape"] + values_per_cell
 
         if index_dimensions > 0:
             layout_tuple = layout_string_to_tuple(layout, self.dim + index_dimensions)
@@ -143,10 +165,16 @@ class SerialDataHandling(DataHandling):
         byte_offset = ghost_layers * np.dtype(dtype).itemsize
 
         if gpu:
-            cpu_arr = self.array_handler.pinned_numpy_array(shape=kwargs['shape'], layout=layout_tuple, dtype=dtype)
+            cpu_arr = self.array_handler.pinned_numpy_array(
+                shape=kwargs["shape"], layout=layout_tuple, dtype=dtype
+            )
         else:
-            cpu_arr = create_numpy_array_with_layout(layout=layout_tuple, alignment=alignment,
-                                                     byte_offset=byte_offset, **kwargs)
+            cpu_arr = create_numpy_array_with_layout(
+                layout=layout_tuple,
+                alignment=alignment,
+                byte_offset=byte_offset,
+                **kwargs,
+            )
 
         if alignment and gpu:
             raise NotImplementedError("Alignment for GPU fields not supported")
@@ -160,19 +188,33 @@ class SerialDataHandling(DataHandling):
                 raise ValueError("GPU Field with this name already exists")
             self.gpu_arrays[name] = self.array_handler.to_gpu(cpu_arr)
 
-        assert all(f.name != name for f in self.fields.values()), "Symbolic field with this name already exists"
-        self.fields[name] = Field.create_from_numpy_array(name, cpu_arr, index_dimensions=index_dimensions,
-                                                          field_type=field_type)
+        assert all(
+            f.name != name for f in self.fields.values()
+        ), "Symbolic field with this name already exists"
+        self.fields[name] = Field.create_from_numpy_array(
+            name, cpu_arr, index_dimensions=index_dimensions, field_type=field_type
+        )
         self.fields[name].latex_name = latex_name
         return self.fields[name]
 
-    def add_custom_data(self, name, cpu_creation_function,
-                        gpu_creation_function=None, cpu_to_gpu_transfer_func=None, gpu_to_cpu_transfer_func=None):
+    def add_custom_data(
+        self,
+        name,
+        cpu_creation_function,
+        gpu_creation_function=None,
+        cpu_to_gpu_transfer_func=None,
+        gpu_to_cpu_transfer_func=None,
+    ):
 
         if cpu_creation_function and gpu_creation_function:
             if cpu_to_gpu_transfer_func is None or gpu_to_cpu_transfer_func is None:
-                raise ValueError("For GPU data, both transfer functions have to be specified")
-            self._custom_data_transfer_functions[name] = (cpu_to_gpu_transfer_func, gpu_to_cpu_transfer_func)
+                raise ValueError(
+                    "For GPU data, both transfer functions have to be specified"
+                )
+            self._custom_data_transfer_functions[name] = (
+                cpu_to_gpu_transfer_func,
+                gpu_to_cpu_transfer_func,
+            )
 
         assert name not in self.custom_data_cpu
         if cpu_creation_function:
@@ -186,11 +228,20 @@ class SerialDataHandling(DataHandling):
     def has_data(self, name):
         return name in self.fields
 
-    def add_array_like(self, name, name_of_template_field, latex_name=None, cpu=True, gpu=None):
-        return self.add_array(name, latex_name=latex_name, cpu=cpu, gpu=gpu,
-                              **self._field_information[name_of_template_field])
+    def add_array_like(
+        self, name, name_of_template_field, latex_name=None, cpu=True, gpu=None
+    ):
+        return self.add_array(
+            name,
+            latex_name=latex_name,
+            cpu=cpu,
+            gpu=gpu,
+            **self._field_information[name_of_template_field],
+        )
 
-    def iterate(self, slice_obj=None, gpu=False, ghost_layers=True, inner_ghost_layers=True):
+    def iterate(
+        self, slice_obj=None, gpu=False, ghost_layers=True, inner_ghost_layers=True
+    ):
         if ghost_layers is True:
             ghost_layers = self.default_ghost_layers
         elif ghost_layers is False:
@@ -200,25 +251,32 @@ class SerialDataHandling(DataHandling):
 
         if slice_obj is None:
             slice_obj = (slice(None, None, None),) * self.dim
-        slice_obj = normalize_slice(slice_obj, tuple(s + 2 * ghost_layers for s in self._domainSize))
-        slice_obj = tuple(s if type(s) is slice else slice(s, s + 1, None) for s in slice_obj)
+        slice_obj = normalize_slice(
+            slice_obj, tuple(s + 2 * ghost_layers for s in self._domainSize)
+        )
+        slice_obj = tuple(
+            s if type(s) is slice else slice(s, s + 1, None) for s in slice_obj
+        )
 
         arrays = self.gpu_arrays if gpu else self.cpu_arrays
         custom_data_dict = self.custom_data_gpu if gpu else self.custom_data_cpu
         iter_dict = custom_data_dict.copy()
         for name, arr in arrays.items():
-            field_gls = self._field_information[name]['ghost_layers']
+            field_gls = self._field_information[name]["ghost_layers"]
             if field_gls < ghost_layers:
                 continue
-            arr = remove_ghost_layers(arr, index_dimensions=len(arr.shape) - self.dim,
-                                      ghost_layers=field_gls - ghost_layers)
+            arr = remove_ghost_layers(
+                arr,
+                index_dimensions=len(arr.shape) - self.dim,
+                ghost_layers=field_gls - ghost_layers,
+            )
             iter_dict[name] = arr
 
         offset = tuple(s.start - ghost_layers for s in slice_obj)
         yield SerialBlock(iter_dict, offset, slice_obj)
 
     def gather_array(self, name, slice_obj=None, ghost_layers=False, **kwargs):
-        gl_to_remove = self._field_information[name]['ghost_layers']
+        gl_to_remove = self._field_information[name]["ghost_layers"]
         if isinstance(ghost_layers, int):
             gl_to_remove -= ghost_layers
         if ghost_layers is True:
@@ -227,11 +285,18 @@ class SerialDataHandling(DataHandling):
         ind_dimensions = self.fields[name].index_dimensions
         spatial_dimensions = self.fields[name].spatial_dimensions
 
-        arr = remove_ghost_layers(arr, index_dimensions=ind_dimensions, ghost_layers=gl_to_remove)
+        arr = remove_ghost_layers(
+            arr, index_dimensions=ind_dimensions, ghost_layers=gl_to_remove
+        )
 
         if slice_obj is not None:
-            normalized_slice = normalize_slice(slice_obj[:spatial_dimensions], arr.shape[:spatial_dimensions])
-            normalized_slice = tuple(s if type(s) is slice else slice(s, s + 1, None) for s in normalized_slice)
+            normalized_slice = normalize_slice(
+                slice_obj[:spatial_dimensions], arr.shape[:spatial_dimensions]
+            )
+            normalized_slice = tuple(
+                s if type(s) is slice else slice(s, s + 1, None)
+                for s in normalized_slice
+            )
             normalized_slice += slice_obj[spatial_dimensions:]
             arr = arr[normalized_slice]
         else:
@@ -241,25 +306,31 @@ class SerialDataHandling(DataHandling):
 
     def swap(self, name1, name2, gpu=None):
         if gpu is None:
-            gpu = self.default_target in self._GPU_LIKE_TARGETS
+            gpu = self.default_target.is_gpu()
         arr = self.gpu_arrays if gpu else self.cpu_arrays
         arr[name1], arr[name2] = arr[name2], arr[name1]
 
     def all_to_cpu(self):
-        for name in (self.cpu_arrays.keys() & self.gpu_arrays.keys()) | self._custom_data_transfer_functions.keys():
+        for name in (
+            self.cpu_arrays.keys() & self.gpu_arrays.keys()
+        ) | self._custom_data_transfer_functions.keys():
             self.to_cpu(name)
 
     def all_to_gpu(self):
-        for name in (self.cpu_arrays.keys() & self.gpu_arrays.keys()) | self._custom_data_transfer_functions.keys():
+        for name in (
+            self.cpu_arrays.keys() & self.gpu_arrays.keys()
+        ) | self._custom_data_transfer_functions.keys():
             self.to_gpu(name)
 
     def run_kernel(self, kernel_function, **kwargs):
-        arrays = self.gpu_arrays if kernel_function.ast.backend in self._GPU_LIKE_BACKENDS else self.cpu_arrays
+        arrays = self.gpu_arrays if kernel_function.target.is_gpu() else self.cpu_arrays
         kernel_function(**{**arrays, **kwargs})
 
     def get_kernel_kwargs(self, kernel_function, **kwargs):
         result = {}
-        result.update(self.gpu_arrays if kernel_function.ast.backend in self._GPU_LIKE_BACKENDS else self.cpu_arrays)
+        result.update(
+            self.gpu_arrays if kernel_function.target.is_gpu() else self.cpu_arrays
+        )
         result.update(kwargs)
         return [result]
 
@@ -269,7 +340,9 @@ class SerialDataHandling(DataHandling):
             transfer_func(self.custom_data_gpu[name], self.custom_data_cpu[name])
         else:
             if name in self.cpu_arrays.keys() & self.gpu_arrays.keys():
-                self.array_handler.download(self.gpu_arrays[name], self.cpu_arrays[name])
+                self.array_handler.download(
+                    self.gpu_arrays[name], self.cpu_arrays[name]
+                )
 
     def to_gpu(self, name):
         if name in self._custom_data_transfer_functions:
@@ -288,19 +361,28 @@ class SerialDataHandling(DataHandling):
     def synchronization_function_gpu(self, names, stencil_name=None, **_):
         return self.synchronization_function(names, stencil_name, target=Target.GPU)
 
-    def synchronization_function(self, names, stencil=None, target=None, functor=None, **_):
+    def synchronization_function(
+        self, names, stencil=None, target=None, functor=None, **_
+    ):
         if target is None:
             target = self.default_target
-        assert target in (Target.CPU, Target.GPU)
-        if not hasattr(names, '__len__') or type(names) is str:
+
+        if not (target.is_cpu() or target.is_gpu()):
+            raise ValueError(f"Unsupported target: {target}")
+
+        if not hasattr(names, "__len__") or type(names) is str:
             names = [names]
 
         filtered_stencil = []
         neighbors = [-1, 0, 1]
 
-        if (stencil is None and self.dim == 2) or (stencil is not None and stencil.startswith('D2')):
+        if (stencil is None and self.dim == 2) or (
+            stencil is not None and stencil.startswith("D2")
+        ):
             directions = itertools.product(*[neighbors] * 2)
-        elif (stencil is None and self.dim == 3) or (stencil is not None and stencil.startswith('D3')):
+        elif (stencil is None and self.dim == 3) or (
+            stencil is not None and stencil.startswith("D3")
+        ):
             directions = itertools.product(*[neighbors] * 3)
         else:
             raise ValueError("Invalid stencil")
@@ -317,38 +399,51 @@ class SerialDataHandling(DataHandling):
 
         result = []
         for name in names:
-            gls = self._field_information[name]['ghost_layers']
-            values_per_cell = self._field_information[name]['values_per_cell']
+            gls = self._field_information[name]["ghost_layers"]
+            values_per_cell = self._field_information[name]["values_per_cell"]
             if values_per_cell == ():
                 values_per_cell = (1,)
             if len(values_per_cell) == 1:
                 values_per_cell = values_per_cell[0]
 
             if len(filtered_stencil) > 0:
-                if target == Target.CPU:
+                if target.is_cpu():
                     if functor is None:
                         from pystencils.slicing import get_periodic_boundary_functor
+
                         functor = get_periodic_boundary_functor
                     result.append(functor(filtered_stencil, ghost_layers=gls))
                 else:
                     if functor is None:
-                        from pystencils.gpu.periodicity import get_periodic_boundary_functor as functor
-                        target = Target.GPU
-                    result.append(functor(filtered_stencil, self._domainSize,
-                                          index_dimensions=self.fields[name].index_dimensions,
-                                          index_dim_shape=values_per_cell,
-                                          dtype=self.fields[name].dtype.numpy_dtype,
-                                          ghost_layers=gls,
-                                          target=target))
+                        from pystencils.gpu.periodicity import (
+                            get_periodic_boundary_functor as functor,
+                        )
+                    result.append(
+                        functor(
+                            filtered_stencil,
+                            self._domainSize,
+                            index_dimensions=self.fields[name].index_dimensions,
+                            index_dim_shape=values_per_cell,
+                            dtype=self.fields[name].dtype.numpy_dtype,
+                            ghost_layers=gls,
+                            target=target,
+                        )
+                    )
 
-        if target == Target.CPU:
+        if target.is_cpu():
+
             def result_functor():
                 for arr_name, func in zip(names, result):
-                    func(pdfs=self.cpu_arrays[arr_name])
+                    func(self.cpu_arrays[arr_name])
+
+        elif target.is_gpu():
+
+            def result_functor():
+                for arr_name, func in zip(names, result):
+                    func(self.gpu_arrays[arr_name])
+
         else:
-            def result_functor():
-                for arr_name, func in zip(names, result):
-                    func(pdfs=self.gpu_arrays[arr_name])
+            raise ValueError(f"Unsupported target: {target}")
 
         return result_functor
 
@@ -370,10 +465,15 @@ class SerialDataHandling(DataHandling):
         from pystencils.datahandling.vtk import image_to_vtk
 
         def writer(step):
-            full_file_name = "%s_%08d" % (file_name, step,)
+            full_file_name = "%s_%08d" % (
+                file_name,
+                step,
+            )
             cell_data = {}
             for name in data_names:
-                field = self._get_field_with_given_number_of_ghost_layers(name, ghost_layers)
+                field = self._get_field_with_given_number_of_ghost_layers(
+                    name, ghost_layers
+                )
                 if self.dim == 2:
                     field = field[:, :, np.newaxis]
                 if len(field.shape) == 3:
@@ -381,30 +481,48 @@ class SerialDataHandling(DataHandling):
                 elif len(field.shape) == 4:
                     values_per_cell = field.shape[-1]
                     if values_per_cell == self.dim:
-                        field = [np.ascontiguousarray(field[..., i]) for i in range(values_per_cell)]
+                        field = [
+                            np.ascontiguousarray(field[..., i])
+                            for i in range(values_per_cell)
+                        ]
                         if len(field) == 2:
                             field.append(np.zeros_like(field[0]))
                         cell_data[name] = tuple(field)
                     else:
                         for i in range(values_per_cell):
-                            cell_data["%s[%d]" % (name, i)] = np.ascontiguousarray(field[..., i])
+                            cell_data["%s[%d]" % (name, i)] = np.ascontiguousarray(
+                                field[..., i]
+                            )
                 else:
-                    raise NotImplementedError("VTK export for fields with more than one index "
-                                              "coordinate not implemented")
+                    raise NotImplementedError(
+                        "VTK export for fields with more than one index "
+                        "coordinate not implemented"
+                    )
             image_to_vtk(full_file_name, cell_data=cell_data)
 
         return writer
 
-    def create_vtk_writer_for_flag_array(self, file_name, data_name, masks_to_name, ghost_layers=False):
+    def create_vtk_writer_for_flag_array(
+        self, file_name, data_name, masks_to_name, ghost_layers=False
+    ):
         from pystencils.datahandling.vtk import image_to_vtk
 
         def writer(step):
-            full_file_name = "%s_%08d" % (file_name, step,)
-            field = self._get_field_with_given_number_of_ghost_layers(data_name, ghost_layers)
+            full_file_name = "%s_%08d" % (
+                file_name,
+                step,
+            )
+            field = self._get_field_with_given_number_of_ghost_layers(
+                data_name, ghost_layers
+            )
             if self.dim == 2:
                 field = field[:, :, np.newaxis]
-            cell_data = {name: np.ascontiguousarray(np.bitwise_and(field, field.dtype.type(mask)) > 0, dtype=np.uint8)
-                         for mask, name in masks_to_name.items()}
+            cell_data = {
+                name: np.ascontiguousarray(
+                    np.bitwise_and(field, field.dtype.type(mask)) > 0, dtype=np.uint8
+                )
+                for mask, name in masks_to_name.items()
+            }
             image_to_vtk(full_file_name, cell_data=cell_data)
 
         return writer
@@ -415,10 +533,10 @@ class SerialDataHandling(DataHandling):
             ghost_layers = actual_ghost_layers
 
         gl_to_remove = actual_ghost_layers - ghost_layers
-        ind_dims = len(self._field_information[name]['values_per_cell'])
+        ind_dims = len(self._field_information[name]["values_per_cell"])
         return remove_ghost_layers(self.cpu_arrays[name], ind_dims, gl_to_remove)
 
-    def log(self, *args, level='INFO'):
+    def log(self, *args, level="INFO"):
         level = level.upper()
         message = " ".join(str(e) for e in args)
 
@@ -427,7 +545,7 @@ class SerialDataHandling(DataHandling):
         message = f"[{level: <8}]{spacing * '-'}({time_running:.3f} sec) {message} "
         print(message, flush=True)
 
-    def log_on_root(self, *args, level='INFO'):
+    def log_on_root(self, *args, level="INFO"):
         self.log(*args, level=level)
 
     @property
@@ -440,7 +558,7 @@ class SerialDataHandling(DataHandling):
 
     def save_all(self, filename, compressed=True, synchronise_data=True):
         if synchronise_data:
-            for name in (self.cpu_arrays.keys() & self.gpu_arrays.keys()):
+            for name in self.cpu_arrays.keys() & self.gpu_arrays.keys():
                 self.to_cpu(name)
         if compressed:
             np.savez_compressed(filename, **self.cpu_arrays)
@@ -448,16 +566,20 @@ class SerialDataHandling(DataHandling):
             np.savez(filename, **self.cpu_arrays)
 
     def load_all(self, filename, synchronise_data=True):
-        if '.npz' not in filename:
-            filename += '.npz'
+        if ".npz" not in filename:
+            filename += ".npz"
         file_contents = np.load(filename)
         for arr_name, arr_contents in self.cpu_arrays.items():
             if arr_name not in file_contents:
-                print(f"Skipping read data {arr_name} because there is no data with this name in data handling")
+                print(
+                    f"Skipping read data {arr_name} because there is no data with this name in data handling"
+                )
                 continue
             if file_contents[arr_name].shape != arr_contents.shape:
-                print(f"Skipping read data {arr_name} because shapes don't match. "
-                      f"Read array shape {file_contents[arr_name].shape}, existing array shape {arr_contents.shape}")
+                print(
+                    f"Skipping read data {arr_name} because shapes don't match. "
+                    f"Read array shape {file_contents[arr_name].shape}, existing array shape {arr_contents.shape}"
+                )
                 continue
             np.copyto(arr_contents, file_contents[arr_name])
             if synchronise_data:

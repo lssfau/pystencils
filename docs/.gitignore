@@ -1,0 +1,4 @@
+build
+
+#   sphinx.ext.autosummary generated files
+**/generated

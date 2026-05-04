@@ -3,7 +3,7 @@ from typing import Any, Callable, Optional, Sequence
 
 import sympy as sp
 
-from pystencils.simp.assignment_collection import AssignmentCollection
+from ..simp import AssignmentCollection
 
 
 class SimplificationStrategy:
@@ -57,7 +57,7 @@ class SimplificationStrategy:
 
             def __str__(self):
                 try:
-                    import tabulate
+                    from tabulate import tabulate
                     return tabulate(self.elements, headers=['Name', 'Runtime', 'Adds', 'Muls', 'Divs', 'Total'])
                 except ImportError:
                     result = "Name, Adds, Muls, Divs, Runtime\n"

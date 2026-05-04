@@ -1,0 +1,57 @@
+from __future__ import annotations
+from typing import Any, TYPE_CHECKING, cast
+
+from ..exceptions import PsInternalCompilerError
+from ..memory import PsSymbol
+from ..memory import PsBuffer
+from ...types import PsDereferencableType
+
+
+if TYPE_CHECKING:
+    from .expressions import PsExpression
+
+
+def failing_cast(target: type | tuple[type, ...], obj: Any) -> Any:
+    if not isinstance(obj, target):
+        raise TypeError(f"Casting {obj} to {target} failed.")
+    return obj
+
+
+def determine_memory_object(
+    expr: PsExpression,
+) -> tuple[PsSymbol | PsBuffer | None, bool]:
+    """Return the memory object accessed by the given expression, together with its constness
+
+    Returns:
+        Tuple ``(mem_obj, const)`` identifying the memory object accessed by the given expression,
+        as well as its constness
+    """
+    from pystencils.backend.ast.expressions import (
+        PsSubscript,
+        PsLookup,
+        PsSymbolExpr,
+        PsMemAcc,
+        PsBufferAcc,
+    )
+
+    while isinstance(expr, (PsSubscript, PsLookup)):
+        match expr:
+            case PsSubscript(arr, _):
+                expr = arr
+            case PsLookup(record, _):
+                expr = record
+
+    match expr:
+        case PsSymbolExpr(symb):
+            return symb, symb.get_dtype().const
+        case PsMemAcc(ptr, _):
+            return None, cast(PsDereferencableType, ptr.get_dtype()).base_type.const
+        case PsBufferAcc(ptr, _):
+            return (
+                expr.buffer,
+                cast(PsDereferencableType, ptr.get_dtype()).base_type.const,
+            )
+        case _:
+            raise PsInternalCompilerError(
+                "The given expression is a transient and does not refer to a memory object"
+            )
