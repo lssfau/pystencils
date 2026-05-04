@@ -53,13 +53,11 @@ def sycl_jit(tmp_path) -> SYCLJit | NoJit:
 
 
 @pytest.fixture
-def jit(target: ps.Target, tmp_path) -> JitBase:
+def jit(target: ps.Target, compiler_info, tmp_path) -> JitBase:
     if target.is_cpu():
         #   Set target in compiler info such that `-march` is set accordingly
-        cinfo = CompilerInfo.get_default(target=target)
-
         return CpuJit(
-            compiler_info=cinfo,
+            compiler_info=compiler_info,
             objcache=tmp_path,
             emit_warnings=True
         )

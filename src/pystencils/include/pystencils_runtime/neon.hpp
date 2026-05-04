@@ -1,3 +1,20 @@
+/*
+Copyright 2026 Frederik Hennig
+
+This file is part of pystencils.
+
+pystencils is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of the License,
+or (at your option) any later version.
+
+pystencils is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with pystencils.
+If not, see <https://www.gnu.org/licenses/>.
+*/
+
 #pragma once
 
 #include <array>
@@ -5,6 +22,8 @@
 #include <arm_neon.h>
 
 #include "./half.h"
+#include "./short_arrays.hpp"
+#include "./bits/philox_rand.h"
 
 namespace pystencils::runtime::neon
 {
@@ -202,4 +221,62 @@ namespace pystencils::runtime::neon
     {
         return vgetq_lane_f64(v, 0) * vgetq_lane_f64(v, 1);
     }
-}
+
+    namespace random
+    {
+        template <typename Idx>
+        ShortArray<float32x4_t, 4> philox_float32(uint32x4_t ctr0, uint32x4_t ctr1, uint32x4_t ctr2, uint32x4_t ctr3, Idx key0, Idx key1)
+        {
+            ShortArray<float32x4_t, 4> result;
+            pystencils::runtime::random::detail::philox_float4(
+                ctr0, ctr1, ctr2, ctr3,                    //
+                (uint32_t)key0, (uint32_t)key1,            //
+                result[0], result[1], result[2], result[3] //
+            );
+            return result;
+        }
+
+        template <typename Idx>
+        ShortArray<float32x4_t, 4> philox_float32(int32x4_t ctr0, int32x4_t ctr1, int32x4_t ctr2, int32x4_t ctr3, Idx key0, Idx key1)
+        {
+            return philox_float32(
+                vreinterpretq_u32_s32(ctr0),
+                vreinterpretq_u32_s32(ctr1),
+                vreinterpretq_u32_s32(ctr2),
+                vreinterpretq_u32_s32(ctr3),
+                key0,
+                key1);
+        }
+
+        template <typename Idx>
+        ShortArray<float64x2_t, 2> philox_float64(uint64x2_t ctr0, uint64x2_t ctr1, uint64x2_t ctr2, uint64x2_t ctr3, Idx key0, Idx key1)
+        {
+            uint32x4_t ctr0_u32{vuzp1q_u32(vreinterpretq_u32_s64(ctr0), vdupq_n_u32(0u))};
+            uint32x4_t ctr1_u32{vuzp1q_u32(vreinterpretq_u32_s64(ctr1), vdupq_n_u32(0u))};
+            uint32x4_t ctr2_u32{vuzp1q_u32(vreinterpretq_u32_s64(ctr2), vdupq_n_u32(0u))};
+            uint32x4_t ctr3_u32{vuzp1q_u32(vreinterpretq_u32_s64(ctr3), vdupq_n_u32(0u))};
+
+            ShortArray<float64x2_t, 2> result;
+            float64x2_t ignore;
+            pystencils::runtime::random::detail::philox_double2(
+                ctr0_u32, ctr1_u32, ctr2_u32, ctr3_u32, //
+                (uint32_t)key0, (uint32_t)key1,         //
+                result[0], ignore, result[1], ignore    //
+            );
+            return result;
+        }
+
+        template <typename Idx>
+        ShortArray<float64x2_t, 2> philox_float64(int64x2_t ctr0, int64x2_t ctr1, int64x2_t ctr2, int64x2_t ctr3, Idx key0, Idx key1)
+        {
+            return philox_float64(
+                vreinterpretq_u64_s64(ctr0),
+                vreinterpretq_u64_s64(ctr1),
+                vreinterpretq_u64_s64(ctr2),
+                vreinterpretq_u64_s64(ctr3),
+                key0,
+                key1);
+        }
+    } // namespace random
+
+} // namespace pystencils::runtime::neon

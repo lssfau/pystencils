@@ -23,6 +23,7 @@ import pystencils as ps
 import sympy as sp
 ```
 
+(default-types)=
 ## Changing the Default Data Types
 
 The pystencils code generator defines two default data types:

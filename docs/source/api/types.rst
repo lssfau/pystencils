@@ -45,6 +45,7 @@ unless you have very particular needs.
     PsPointerType
     PsArrayType
     PsNamedArrayType
+    PsShortArrayType
     PsNumericType
     PsScalarType
     PsVectorType

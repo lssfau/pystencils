@@ -25,6 +25,7 @@ from ...types import (
     PsPointerType,
     PsType,
     PsVoidType,
+    PsShortArrayType,
 )
 from ..constants import PsConstant
 
@@ -128,22 +129,9 @@ class X86VectorCpu(GenericVectorCpu):
 
     @property
     def required_headers(self) -> set[str]:
-        if self._vector_arch == X86VectorArch.SSE:
-            headers = {
-                "<immintrin.h>",
-                "<xmmintrin.h>",
-                "<emmintrin.h>",
-                "<pmmintrin.h>",
-                "<tmmintrin.h>",
-                "<smmintrin.h>",
-                "<nmmintrin.h>",
-            }
-        else:
-            headers = {"<immintrin.h>"}
-
-        headers.update({'"pystencils_runtime/simd_horizontal_helpers.h"'})
-
-        return super().required_headers | headers
+        return super().required_headers | {
+            '"pystencils_runtime/x86.hpp"',
+        }
 
     def get_intrinsic_selector(
         self, use_builtin_convertvector: bool = False
@@ -172,9 +160,22 @@ class SelectIntrinsicsX86(SelectIntrinsics):
         self._type_fold = type_fold
 
     def type_intrinsic(
-        self, vector_type: PsVectorType, sc: SelectionContext
+        self, vector_type: PsVectorType | PsShortArrayType, sc: SelectionContext
     ) -> PsCustomType:
-        return self._vector_arch.intrin_type(vector_type)
+        match vector_type:
+            case PsVectorType():
+                return self._vector_arch.intrin_type(vector_type)
+
+            case PsShortArrayType(btype, num_elements):
+                if not isinstance(btype, PsVectorType):
+                    raise MaterializationError(
+                        f"Cannot select intrinsic for non-vectorial short array type {vector_type}"
+                    )
+
+                elem_type = self.type_intrinsic(btype, sc)
+                return PsCustomType(
+                    f"pystencils::runtime::x86::{elem_type.c_string()}x{num_elements}"
+                )
 
     def constant_intrinsic(self, c: PsConstant, sc: SelectionContext) -> PsExpression:
         vtype = c.dtype
@@ -367,6 +368,11 @@ class SelectIntrinsicsX86(SelectIntrinsics):
             scatter_intrin = scatter_func(addr, vindex, arg, scale)
             scatter_intrin.dtype = scatter_func.return_type
             return scatter_intrin
+
+    def rng_engine_intrinsic(
+        self, expr: PsCall, args: Sequence[PsExpression], sc: SelectionContext
+    ) -> PsExpression:
+        return self._common_rng_engine_intrinsic(expr, args, sc, namespace="x86")
 
 
 @cache

@@ -190,13 +190,15 @@ class MaterializeAxes:
                             ),
                         )
                     )
-                    mv_horizontal_reduce = PsAssignment(
-                        PsSymbolExpr(mv_symb),
-                        PsVecHorizontal(
+                    mv_horizontal_reduce = self._type_fold(
+                        PsAssignment(
                             PsSymbolExpr(mv_symb),
-                            PsSymbolExpr(vector_mv_symb),
-                            rinfo.op,
-                        ),
+                            PsVecHorizontal(
+                                PsSymbolExpr(mv_symb),
+                                PsSymbolExpr(vector_mv_symb),
+                                rinfo.op,
+                            ),
+                        )
                     )
                     mc.modulo_variables[reduction_id].append(
                         ModuloVariablePack(

@@ -1,45 +1,40 @@
 #pragma once
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#include "./bits/platforms.h"
 
-#define QUALIFIERS __device__ __forceinline__
-
-#else
+#if !PYSTENCILS_PLATFORM_IS_GPU
 
 #include <cstdint>
 
 using std::size_t;
 
-#define QUALIFIERS
-
 #endif
 
-namespace pystencils::runtime {
+#if PYSTENCILS_PLATFORM_HAS_SSE || PYSTENCILS_PLATFORM_HAS_AVX || PYSTENCILS_PLATFORM_HAS_AVX512
+#include <immintrin.h>
+#endif
 
-    struct Fp32x4 {
-        float v[4];
 
-        QUALIFIERS float & operator[] (size_t i) {
+namespace pystencils::runtime
+{
+
+    template <typename T, size_t N>
+    struct ShortArray
+    {
+        T v[4];
+
+        PYSTENCILS_DEVICE_QUALIFIERS T &operator[](size_t i)
+        {
             return v[i];
         }
 
-        QUALIFIERS const float & operator[] (size_t i) const {
+        PYSTENCILS_DEVICE_QUALIFIERS const T &operator[](size_t i) const
+        {
             return v[i];
         }
     };
 
-    struct Fp64x2 {
-        double v[2];
 
-        QUALIFIERS double & operator[] (size_t i) {
-            return v[i];
-        }
-
-        QUALIFIERS const double & operator[] (size_t i) const {
-            return v[i];
-        }
-    };
-
-}  // namespace pystencils::runtime
+} // namespace pystencils::runtime
 
 #undef QUALIFIERS

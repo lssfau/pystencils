@@ -5,13 +5,26 @@ from abc import ABC, abstractmethod
 from ..kernelcreation import KernelCreationContext
 from ..constants import PsConstant
 from ..memory import PsSymbol
-from ..ast.structural import PsAstNode, PsDeclaration, PsAssignment, PsStatement, PsBlock
-from ..ast.expressions import PsExpression, PsCall, PsCast, PsLiteral
-from ...types import PsCustomType, PsVectorType, constify, deconstify
+from ..ast.structural import (
+    PsAstNode,
+    PsDeclaration,
+    PsAssignment,
+    PsStatement,
+    PsBlock,
+)
+from ..ast.expressions import PsExpression, PsCall, PsCast, PsLiteral, PsSubscript
+from ...types import (
+    PsType,
+    PsCustomType,
+    PsVectorType,
+    PsShortArrayType,
+    constify,
+    deconstify,
+)
 from ..ast.expressions import PsSymbolExpr, PsConstantExpr, PsUnOp, PsBinOp
 from ..ast.vector import PsVecMemAcc, PsVecHorizontal
 from ..exceptions import MaterializationError
-from ..functions import CFunction, PsMathFunction
+from ..functions import CFunction, PsMathFunction, PsRngEngineFunction
 
 
 __all__ = ["SelectIntrinsics"]
@@ -26,10 +39,16 @@ class SelectionContext:
 
     def get_intrin_symbol(self, symb: PsSymbol) -> PsSymbol:
         if symb not in self._intrin_symbols:
-            assert isinstance(symb.dtype, PsVectorType)
-            intrin_type = self._visitor.type_intrinsic(deconstify(symb.dtype), self)
+            dtype = deconstify(symb.get_dtype())
 
-            if symb.dtype.const:
+            if isinstance(dtype, PsVectorType | PsShortArrayType):
+                intrin_type = self._visitor.type_intrinsic(dtype, self)
+            else:
+                raise MaterializationError(
+                    f"Cannot get intrinsic type for symbol {symb}"
+                )
+
+            if dtype.const:
                 intrin_type = constify(intrin_type)
 
             replacement = self._ctx.duplicate_symbol(symb, intrin_type)
@@ -65,7 +84,9 @@ class SelectIntrinsics(ABC):
     #   Selection methods to be implemented by subclasses
 
     @abstractmethod
-    def type_intrinsic(self, vector_type: PsVectorType, sc: SelectionContext) -> PsCustomType:
+    def type_intrinsic(
+        self, vector_type: PsVectorType | PsShortArrayType, sc: SelectionContext
+    ) -> PsType:
         """Return the intrinsic vector type for the given generic vector type,
         or raise a `MaterializationError` if type is not supported."""
 
@@ -76,7 +97,10 @@ class SelectIntrinsics(ABC):
 
     @abstractmethod
     def op_intrinsic(
-        self, expr: PsUnOp | PsBinOp, operands: Sequence[PsExpression], sc: SelectionContext
+        self,
+        expr: PsUnOp | PsBinOp,
+        operands: Sequence[PsExpression],
+        sc: SelectionContext,
     ) -> PsExpression:
         """Return an expression intrinsically invoking the given operation
         or raise a `MaterializationError` if not supported."""
@@ -94,9 +118,65 @@ class SelectIntrinsics(ABC):
         or raise a `MaterializationError` if not supported."""
 
     @abstractmethod
-    def vector_store(self, acc: PsVecMemAcc, arg: PsExpression, sc: SelectionContext) -> PsExpression:
+    def vector_store(
+        self, acc: PsVecMemAcc, arg: PsExpression, sc: SelectionContext
+    ) -> PsExpression:
         """Return an expression intrinsically performing a vector store,
         or raise a `MaterializationError` if not supported."""
+
+    #   Selection methods with default implementations
+
+    def subscript_intrinsic(
+        self, subscript: PsSubscript, arr: PsExpression, indices: Sequence[PsExpression], sc: SelectionContext
+    ) -> PsExpression:
+        return PsSubscript(arr, indices)
+
+    def rng_engine_intrinsic(
+        self, expr: PsCall, args: Sequence[PsExpression], sc: SelectionContext
+    ) -> PsExpression:
+        raise MaterializationError(
+            "Current platform does not support vectorized RNG engines"
+        )
+
+    def _common_rng_engine_intrinsic(
+        self,
+        expr: PsCall,
+        args: Sequence[PsExpression],
+        sc: SelectionContext,
+        namespace: str,
+    ) -> PsExpression:
+        assert isinstance(expr.function, PsRngEngineFunction)
+        spec = expr.function.rng_spec
+
+        if not isinstance(spec.int_arg_type, PsVectorType) or not isinstance(
+            spec.short_array_type.base_type, PsVectorType
+        ):
+            raise MaterializationError(
+                f"Cannot select intrinsic implementation for RNG engine {spec.rng_name}"
+            )
+
+        simd_idx_type: PsVectorType = spec.int_arg_type
+        scalar_idx_type = simd_idx_type.scalar_type
+
+        vtype: PsVectorType = spec.short_array_type.base_type
+        sctype = vtype.scalar_type
+
+        if sctype.width != scalar_idx_type.width:
+            raise MaterializationError(
+                "Cannot materialize SIMD RNG: Counter and result type widths do not match.\n"
+                f"    at {expr}"
+            )
+
+        atypes = (self.type_intrinsic(simd_idx_type, sc),) * spec.num_ctrs + (
+            scalar_idx_type,
+        ) * spec.num_keys
+        rtype = self.type_intrinsic(spec.short_array_type, sc)
+
+        return CFunction(
+            f"pystencils::runtime::{namespace}::random::{spec.rng_name}",
+            atypes,
+            rtype,
+        )(*args)
 
     #   Visitor
 
@@ -113,10 +193,10 @@ class SelectIntrinsics(ABC):
 
     def visit(self, node: PsAstNode, sc: SelectionContext) -> PsAstNode:
         match node:
-            case PsExpression() if isinstance(node.dtype, PsVectorType):
+            case PsExpression() if self._is_vectorial(node.get_dtype()):
                 return self.visit_expr(node, sc)
 
-            case PsDeclaration(lhs, rhs) if isinstance(lhs.dtype, PsVectorType):
+            case PsDeclaration(lhs, rhs) if self._is_vectorial(lhs.get_dtype()):
                 lhs_new = cast(PsSymbolExpr, self.visit_expr(lhs, sc))
                 rhs_new = self.visit_expr(rhs, sc)
                 return PsDeclaration(lhs_new, rhs_new)
@@ -135,14 +215,12 @@ class SelectIntrinsics(ABC):
         return node
 
     def visit_expr(self, expr: PsExpression, sc: SelectionContext) -> PsExpression:
-        if not isinstance(expr.dtype, PsVectorType):
+        if not self._is_vectorial(expr.get_dtype()):
             # special case: result type of horizontal reduction is scalar
             if isinstance(expr, PsVecHorizontal):
                 scalar_op = expr.scalar_operand
                 vector_op_to_scalar = self.visit_expr(expr.vector_operand, sc)
-                return self.op_intrinsic(
-                    expr, [scalar_op, vector_op_to_scalar], sc
-                )
+                return self.op_intrinsic(expr, [scalar_op, vector_op_to_scalar], sc)
             else:
                 return expr
 
@@ -182,11 +260,24 @@ class SelectIntrinsics(ABC):
             case PsVecMemAcc():
                 return self.vector_load(expr, sc)
 
-            case PsCall(function, args) if isinstance(function, PsMathFunction):
+            case PsCall(PsMathFunction(), args):
                 arguments = [self.visit_expr(a, sc) for a in args]
                 return self.math_func_intrinsic(expr, arguments, sc)
+
+            case PsCall(PsRngEngineFunction(), args):
+                arguments = [self.visit_expr(a, sc) for a in args]
+                return self.rng_engine_intrinsic(expr, arguments, sc)
+
+            case PsSubscript(arr, indices):
+                return self.subscript_intrinsic(expr, self.visit_expr(arr, sc), indices, sc)
 
             case _:
                 raise MaterializationError(
                     f"Unable to select intrinsic implementation for {expr}"
                 )
+
+    def _is_vectorial(self, dtype: PsType):
+        return (isinstance(dtype, PsVectorType)) or (
+            isinstance(dtype, PsShortArrayType)
+            and isinstance(dtype.base_type, PsVectorType)
+        )

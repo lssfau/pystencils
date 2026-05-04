@@ -516,7 +516,9 @@ class FreezeExpressions:
                 rng_state := RngBase.get_invocation_state(func)
             ) is not None:
                 #   Random number generator invocation
-                ir_func = PsRngEngineFunction.get_for_rng(rng_state)
+                ir_func = PsRngEngineFunction.get_for_rng(
+                    rng_state, self._ctx.index_dtype
+                )
 
                 ispace = self._ctx.iteration_space
                 if ispace is not None:
