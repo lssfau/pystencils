@@ -146,7 +146,7 @@ build-documentation:
 pages:
   image: alpine:latest
   stage: deploy
-  needs: ["testsuite-gpu-py3.10", "build-documentation"]
+  needs: ["coverage-report", "build-documentation"]
   script:
     - mv docs/build/html public
     - mv coverage_report public/coverage_report

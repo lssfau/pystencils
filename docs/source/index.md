@@ -1,4 +1,4 @@
-# pystencils v2.0-dev Documentation
+# pystencils
 
 Welcome to the documentation and reference guide of *pystencils*!
 *Pystencils* offers a symbolic language and code generator for the development of high-performing
@@ -21,8 +21,7 @@ Its features include:
 - **Framework Integration:** Export your kernels and use them inside HPC frameworks
   such as [waLBerla] to build massively parallel simulations.
 
-Topics
-------
+## Table of Contents
 
 :::{toctree}
 :maxdepth: 1
@@ -65,8 +64,7 @@ migration
 backend/index
 :::
 
-Projects using pystencils
--------------------------
+## Projects using pystencils
 
 - [lbmpy](https://pycodegen.pages.i10git.cs.fau.de/lbmpy/)
 - [walberla]
@@ -74,3 +72,13 @@ Projects using pystencils
 
 
 [walberla]: https://walberla.net
+
+## Cite Us
+
+When using *pystencils* in your published works, please cite the following articles:
+
+**Overview:**
+  - M. Bauer et al, Code Generation for Massively Parallel Phase-Field Simulations. Association for Computing Machinery, 2019. https://doi.org/10.1145/3295500.3356186
+
+**Performance Modelling:**
+  - D. Ernst et al, Analytical performance estimation during code generation on modern GPUs. Journal of Parallel and Distributed Computing, 2023. https://doi.org/10.1016/j.jpdc.2022.11.003
