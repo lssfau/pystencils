@@ -33,6 +33,7 @@ classifiers = [
 "Bug Tracker" = "https://i10git.cs.fau.de/pycodegen/pystencils/-/issues"
 "Documentation" = "https://pycodegen.pages.i10git.cs.fau.de/pystencils/"
 "Source Code" = "https://i10git.cs.fau.de/pycodegen/pystencils"
+"Homepage" = "https://pycodegen.pages.i10git.cs.fau.de/"
 
 [project.optional-dependencies]
 alltrafos = ['islpy', 'py-cpuinfo']

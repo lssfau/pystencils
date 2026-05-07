@@ -1,0 +1,62 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: pystencils
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Martin
+    family-names: Bauer
+    email: martin.bauer@fau.de
+  - given-names: Markus
+    family-names: Holzer
+    orcid: 'https://orcid.org/0000-0001-5499-5857'
+  - given-names: Stephan
+    family-names: Seitz
+    email: stephan.seitz@fau.de
+  - given-names: Michael
+    family-names: Kuron
+    email: mkuron@icp.uni-stuttgart.de
+    orcid: 'https://orcid.org/0000-0002-3231-3330'
+  - given-names: Jan
+    family-names: Hönig
+    email: jan.hoenig@fau.de
+  - email: julian.hammer@fau.de
+    given-names: Julian
+    family-names: Hammer
+  - given-names: Nils
+    family-names: Kohl
+    email: nils.kohl@fau.de
+    orcid: 'https://orcid.org/0000-0003-4797-0664'
+  - given-names: Frederik
+    family-names: Hennig
+    email: frederik.hennig@fau.de
+    orcid: 'https://orcid.org/0000-0001-5298-7968'
+  - given-names: Dominik
+    family-names: Ernst
+    email: dominik.ernst@fau.de
+  - given-names: Christian
+    family-names: Godenschwager
+    email: christian.godenschwager@fau.de
+  - given-names: Dominik
+    family-names: Thoennes
+    email: dominik.thoennes@fau.de
+  - given-names: Richard
+    family-names: Angersbach
+    orcid: 'https://orcid.org/0000-0001-7749-8239'
+    email: richard.angersbach@fau.de
+  - given-names: Christoph
+    family-names: Alt
+    email: christoph.alt@fau.de
+  - given-names: Daniel
+    family-names: Bauer
+    email: daniel.j.bauer@fau.de
+identifiers:
+  - type: swh
+    value: 'swh:1:dir:03330e21d183c5b098f95ff4579bc332177114a4'
+repository-code: 'https://i10git.cs.fau.de/pycodegen/pystencils'
+url: 'https://pycodegen.pages.i10git.cs.fau.de'
+license: GPL-3.0-or-later

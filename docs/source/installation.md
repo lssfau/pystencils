@@ -3,17 +3,27 @@
 
 ## Install pystencils
 
-There are two ways to install the latest development version of pystencils 2.0.
-You can either install it directly from our git repository:
+### Released Versions
+
+Released versions of pystencils can be installed from PyPI using `pip` (replace `version` by the desired version specifier):
 
 ```bash
-pip install "git+https://i10git.cs.fau.de/pycodegen/pystencils.git@v2.0-dev"
+pip install pystencils~=<version>
+```
+
+### Development Revisions
+
+To install a development revision directly from our Git repository, you can use `pip` in the following
+way (replace `<branch>` by the branch name you'd like to check out):
+
+```bash
+pip install "git+https://i10git.cs.fau.de/pycodegen/pystencils.git@<branch>"
 ```
 
 Or clone the repository locally and perform an editable install:
 
 ```bash
-git clone -b v2.0-dev https://i10git.cs.fau.de/pycodegen/pystencils.git
+git clone -b <branch> https://i10git.cs.fau.de/pycodegen/pystencils.git
 pip install -e pystencils
 ```
 
