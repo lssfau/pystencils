@@ -34,6 +34,7 @@ from pystencils.backend.ast.expressions import (
     PsCall,
     PsTernary,
     PsMemAcc,
+    PsUndefined,
 )
 from pystencils.backend.ast.vector import PsVecBroadcast, PsVecHorizontal
 from pystencils.backend.ast import dfs_preorder
@@ -928,3 +929,33 @@ def test_typify_gpu_indexing():
     expr = PsGpuIndexingFunction(GpuGridScope.threadIdx, GpuGridDimension.Z)()
     expr = typify(expr)
     assert expr.dtype == ctx.index_dtype
+
+
+def test_typify_undefined():
+    ctx = KernelCreationContext(default_dtype=create_type("float32"))
+    freeze = FreezeExpressions(ctx)
+    typify = Typifier(ctx)
+
+    expr = PsUndefined(create_type("uint32"))
+    expr = typify(expr)
+    assert expr.dtype == create_type("uint32")
+
+    x, y, z = sp.symbols("x, y, z")
+
+    expr = freeze(x + y) + PsUndefined(create_type("float32"))
+    expr = typify(expr)
+
+    assert expr.dtype == create_type("float32")
+
+    assert ctx.get_symbol("x").dtype == create_type("float32")
+    assert ctx.get_symbol("y").dtype == create_type("float32")
+
+    expr = freeze(x + y) + PsUndefined(create_type("int16"))
+    with pytest.raises(TypificationError):
+        #   Mismatch with default symbol type
+        expr = typify(expr)
+
+    asm = PsDeclaration(freeze(z), PsUndefined(create_type("int16")))
+    asm = typify(asm)
+
+    assert asm.lhs.get_dtype() == create_type("int16")

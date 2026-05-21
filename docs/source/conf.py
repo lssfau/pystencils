@@ -51,6 +51,7 @@ intersphinx_mapping = {
     "cupy": ("https://docs.cupy.dev/en/stable/", None),
     "dpctl": ("https://intelpython.github.io/dpctl/0.21.1/", None),
     "sycl": ("https://github.khronos.org/SYCL_Reference/", None),
+    "graphviz": ("https://graphviz.readthedocs.io/en/stable/", None),
 }
 
 # -- Options for inheritance diagrams-----------------------------------------

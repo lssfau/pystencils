@@ -43,6 +43,8 @@ user_manual/WorkingWithTypes
 user_manual/reductions
 user_manual/random_numbers
 user_manual/sycl_kernels
+user_manual/flowgraphs
+
 :::
 
 :::{toctree}
@@ -53,6 +55,7 @@ api/symbolic/index
 api/types
 api/codegen
 api/jit
+api/flow
 :::
 
 :::{toctree}

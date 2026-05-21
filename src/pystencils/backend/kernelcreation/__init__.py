@@ -4,6 +4,8 @@ from .freeze import FreezeExpressions
 from .typification import Typifier
 from .ast_factory import AstFactory
 
+from .freeze_flowgraph import FreezeFlowgraph
+
 from .iteration_space import (
     IterationSpace,
     FullIterationSpace,
@@ -23,4 +25,5 @@ __all__ = [
     "SparseIterationSpace",
     "create_full_iteration_space",
     "create_sparse_iteration_space",
+    "FreezeFlowgraph",
 ]

@@ -4,6 +4,7 @@ from .codegen import Target, CreateKernelConfig, AUTO
 from .defaults import DEFAULTS
 from . import fd
 from . import stencil as stencil
+from . import flow
 from .display_utils import get_code_str, show_code, to_dot
 from .inspection import inspect
 from .field import Field, FieldType, fields
@@ -85,6 +86,7 @@ __all__ = [
     "x_staggered_vector",
     "fd",
     "stencil",
+    "flow",
     "tcast",
     "random",
     "inspect_ast",

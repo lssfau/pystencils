@@ -1,4 +1,4 @@
-from typing import overload, cast, Any, TypeAlias
+from typing import overload, cast, Any, TypeAlias, Protocol
 from functools import reduce
 from operator import add, mul, sub
 
@@ -8,6 +8,7 @@ import sympy.core.relational
 import sympy.logic.boolalg
 from sympy.codegen.ast import AssignmentBase, AugmentedAssignment
 
+from ...flow.flowgraph import FlowgraphAssignment, Let, Export, Store, Reduce
 from ...assignment import Assignment
 from ...simp import AssignmentCollection
 from ...sympyextensions import (
@@ -24,6 +25,7 @@ from ...sympyextensions.random import RngBase
 from ...field import Field, FieldType
 
 from .context import KernelCreationContext
+from ..memory import PsSymbol
 
 from ..ast.structural import (
     PsAstNode,
@@ -81,7 +83,7 @@ from ..exceptions import FreezeError
 
 
 ExprLike: TypeAlias = (
-    sp.Expr
+    sp.Basic
     | sp.Tuple
     | sympy.core.relational.Relational
     | sympy.logic.boolalg.BooleanFunction
@@ -92,6 +94,18 @@ _ExprLike = (
     sympy.core.relational.Relational,
     sympy.logic.boolalg.BooleanFunction,
 )
+
+
+class SymbolsProvider(Protocol):
+    """Symbol provider protocol, used by `FreezeExpressions` to generate symbols"""
+
+    def get_symbol(self, name: str, dtype: PsType | None = None) -> PsSymbol:
+        """Get a backend symbol instance for the given name and data type"""
+        ...
+
+    def declare_symbol(self, name: str, dtype: PsType | None = None) -> PsSymbol:
+        """Declare a new symbol of the given name and data type"""
+        ...
 
 
 class FreezeExpressions:
@@ -105,8 +119,13 @@ class FreezeExpressions:
     TODO: Properly document the SymPy extensions provided by pystencils
     """
 
-    def __init__(self, ctx: KernelCreationContext):
+    def __init__(
+        self, ctx: KernelCreationContext, sym_provider: SymbolsProvider | None = None
+    ):
         self._ctx = ctx
+        self._sym_provider: SymbolsProvider = (
+            ctx if sym_provider is None else sym_provider
+        )
 
     @overload
     def __call__(self, obj: AssignmentCollection) -> PsBlock:
@@ -117,22 +136,32 @@ class FreezeExpressions:
         pass
 
     @overload
+    def __call__(self, obj: Let | Export) -> PsDeclaration:  # type: ignore[overload-cannot-match]
+        pass
+
+    @overload
+    def __call__(self, obj: FlowgraphAssignment) -> PsAssignment:  # type: ignore[overload-cannot-match]
+        pass
+
+    @overload
     def __call__(self, obj: ExprLike) -> PsExpression:  # type: ignore[overload-cannot-match]
         pass
 
-    def __call__(self, obj: AssignmentCollection | sp.Basic) -> PsAstNode:
+    def __call__(
+        self, obj: AssignmentCollection | sp.Basic | FlowgraphAssignment
+    ) -> PsAstNode:
         if isinstance(obj, AssignmentCollection):
             return PsBlock(
                 [cast(PsStructuralNode, self.visit(asm)) for asm in obj.all_assignments]
             )
-        elif isinstance(obj, AssignmentBase):
+        elif isinstance(obj, AssignmentBase | FlowgraphAssignment):
             return cast(PsAssignment, self.visit(obj))
         elif isinstance(obj, _ExprLike):
             return cast(PsExpression, self.visit(obj))
         else:
             raise PsInputError(f"Don't know how to freeze {obj}")
 
-    def visit(self, node: sp.Basic) -> PsAstNode:
+    def visit(self, node: sp.Basic | FlowgraphAssignment) -> PsAstNode:
         mro = list(type(node).__mro__)
 
         while mro:
@@ -162,6 +191,31 @@ class FreezeExpressions:
 
     def freeze_expression(self, expr: sp.Expr) -> PsExpression:
         return cast(PsExpression, self.visit(expr))
+
+    def map_FlowgraphAssignment(self, asm: FlowgraphAssignment):
+        match asm:
+            case Let(lhs, rhs) | Export(lhs, rhs):
+                match lhs:
+                    case TypedSymbol():
+                        lhs_symb = self._sym_provider.declare_symbol(
+                            lhs.name, self._ctx.resolve_dynamic_type(lhs.dtype)
+                        )
+                    case sp.Symbol():
+                        lhs_symb = self._sym_provider.declare_symbol(lhs.name)
+
+                return PsDeclaration(
+                    PsExpression.make(lhs_symb),
+                    cast(PsExpression, self.visit(rhs)),
+                )
+            case Store(lhs, rhs):
+                return PsAssignment(
+                    cast(PsExpression, self.visit(lhs)),
+                    cast(PsExpression, self.visit(rhs)),
+                )
+            case Reduce(lhs, rhs, op):
+                return self._handle_reduce(lhs, rhs, op)
+            case _:
+                assert False, "unexpected subclass of BaseAssignment"
 
     def map_Assignment(self, expr: Assignment):
         lhs = self.visit(expr.lhs)
@@ -201,13 +255,15 @@ class FreezeExpressions:
 
     def map_ReductionAssignment(self, expr: ReductionAssignment):
         assert isinstance(expr.lhs, TypedSymbol)
+        return self._handle_reduce(expr.lhs, expr.rhs, expr.reduction_op)
 
-        rhs = self.visit(expr.rhs)
+    def _handle_reduce(
+        self, lhs_symbol: TypedSymbol, sympy_rhs: sp.Basic, reduction_op: ReductionOp
+    ) -> PsAssignment:
+        rhs = self.visit(sympy_rhs)
 
         assert isinstance(rhs, PsExpression)
 
-        reduction_op = expr.reduction_op
-        lhs_symbol = expr.lhs
         lhs_dtype = self._ctx.resolve_dynamic_type(lhs_symbol.dtype)
         lhs_name = lhs_symbol.name
 
@@ -226,7 +282,7 @@ class FreezeExpressions:
         return PsAssignment(new_lhs, new_rhs)
 
     def map_Symbol(self, spsym: sp.Symbol) -> PsSymbolExpr:
-        symb = self._ctx.get_symbol(spsym.name)
+        symb = self._sym_provider.get_symbol(spsym.name)
         return PsSymbolExpr(symb)
 
     def map_Add(self, expr: sp.Add) -> PsExpression:
@@ -331,7 +387,7 @@ class FreezeExpressions:
 
     def map_TypedSymbol(self, expr: TypedSymbol):
         dtype = self._ctx.resolve_dynamic_type(expr.dtype)
-        symb = self._ctx.get_symbol(expr.name, dtype)
+        symb = self._sym_provider.get_symbol(expr.name, dtype)
         return PsSymbolExpr(symb)
 
     def map_Tuple(self, expr: sp.Tuple) -> PsArrayInitList:

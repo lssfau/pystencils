@@ -27,6 +27,12 @@ from .sympyextensions.typed_sympy import TypedSymbol, DynamicType
 from .sympyextensions import is_integer_sequence
 from .types import UserTypeSpec
 
+try:
+    import cupy as cp
+    _has_cupy = True
+except ImportError:
+    _has_cupy = False
+
 
 __all__ = ["Field", "fields", "FieldType", "Field"]
 
@@ -244,6 +250,9 @@ class Field:
             index_dimensions: see documentation of Field
             field_type: kind of field
         """
+        if not (isinstance(array, np.ndarray) or (_has_cupy and isinstance(array, cp.ndarray))):
+            raise ValueError("`create_from_numpy_array` cannot handle non-NumPy arrays")
+
         spatial_dimensions = len(array.shape) - index_dimensions
         if spatial_dimensions < 1:
             raise ValueError(
@@ -1149,7 +1158,7 @@ def fields(
         Create a 3D scalar field of default numeric type:
             >>> f = fields("f(1): [2D]")
             >>> str(f.dtype)
-            'DynamicType.NUMERIC_TYPE'
+            'ps::numeric_t'
 
         Create a 2D scalar and vector field of 64-bit float type:
             >>> s, v = fields("s, v(2): double[2D]")

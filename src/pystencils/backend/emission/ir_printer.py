@@ -9,7 +9,7 @@ from pystencils.types.meta import PsType, deconstify
 from .base_printer import BasePrinter, Ops, LR
 
 from ..ast import PsAstNode
-from ..ast.expressions import PsBufferAcc
+from ..ast.expressions import PsBufferAcc, PsUndefined
 from ..ast.vector import PsVecMemAcc, PsVecBroadcast, PsVecHorizontal
 from ..ast.axes import (
     PsAxisRange,
@@ -125,6 +125,9 @@ class IRAstPrinter(BasePrinter):
                 body_code = self.visit(body, pc)
                 code = f"{self._axis_key(node)}({range_code})\n{body_code}"
                 return pc.indent(code)
+
+            case PsUndefined():
+                return f"[undefined: {self._type_str(node.get_dtype())}]"
 
             case _:
                 return super().visit(node, pc)

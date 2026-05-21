@@ -8,7 +8,7 @@ from pystencils.backend.memory import PsSymbol
 from .base_printer import BasePrinter
 
 from ...types import PsType, PsArrayType, PsScalarType, PsTypeError
-from ..ast.expressions import PsBufferAcc
+from ..ast.expressions import PsBufferAcc, PsUndefined
 from ..ast.vector import PsVecMemAcc
 
 if TYPE_CHECKING:
@@ -34,6 +34,9 @@ class CAstPrinter(BasePrinter):
                     f"Unable to print C code for buffer access {node}.\n"
                     f"Buffer accesses must be lowered using the `LowerToC` pass before emission."
                 )
+
+            case PsUndefined():
+                return "{}"
 
             case _:
                 return super().visit(node, pc)

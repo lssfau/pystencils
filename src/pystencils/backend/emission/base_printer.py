@@ -239,7 +239,8 @@ class BasePrinter(ABC):
 
                 if branch_false is not None:
                     else_code = self.visit(branch_false, pc)
-                    code += f"\nelse\n{else_code}"
+                    code += "\n" + pc.indent("else\n")
+                    code += else_code
 
                 return pc.indent(code)
 
