@@ -3,6 +3,7 @@ from .typed_sympy import TypedSymbol, CastFunc, tcast, DynamicType
 from .pointers import mem_acc
 from .reduction import reduction_assignment, ReductionOp
 from .bit_masks import bit_conditional
+from .stencils import convolve
 
 from .math import (
     prod,
@@ -68,5 +69,6 @@ __all__ = [
     "get_symmetric_part",
     "SymbolCreator",
     "DynamicType",
-    "bit_conditional"
+    "bit_conditional",
+    "convolve"
 ]

@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import Sequence, TYPE_CHECKING
+from typing import Sequence, TYPE_CHECKING, Iterable, cast
 from abc import ABC
 from dataclasses import dataclass
 from functools import reduce
 from operator import mul
 
-from ...defaults import DEFAULTS
 from ...simp import AssignmentCollection
+from ...flow.flowgraph import Flowgraph
+
+from ...defaults import DEFAULTS
 from ...field import Field, FieldType
 
 from ..memory import PsSymbol, PsBuffer
@@ -23,7 +25,7 @@ from ..ast.expressions import (
 )
 from ..ast.util import failing_cast
 from ...types import PsStructType
-from ..exceptions import PsInputError, KernelConstraintsError
+from ..exceptions import PsInputError, KernelConstraintsError, PsInternalCompilerError
 
 if TYPE_CHECKING:
     from .context import KernelCreationContext
@@ -407,7 +409,6 @@ def get_archetype_field(
 
 def create_sparse_iteration_space(
     ctx: KernelCreationContext,
-    assignments: AssignmentCollection,
     index_field: Field | None = None,
 ) -> IterationSpace:
     #   All domain and custom fields must have the same spatial dimensions
@@ -453,12 +454,48 @@ def create_sparse_iteration_space(
     )
 
 
+def infer_ghost_layers(symbolic_kernel: AssignmentCollection | Flowgraph) -> int:
+    """Infer the number of ghost layers required by a kernel from a sequence of its symbolic nodes.
+
+    Searches for domain field accesses and returns the largest spatial offset encountered as
+    the number of required ghost layers.
+    """
+
+    accesses: set[Field.Access]
+
+    #   Collect all relative accesses into domain fields
+    if isinstance(symbolic_kernel, AssignmentCollection):
+        accesses = set().union(
+            *(asm.atoms(Field.Access) for asm in symbolic_kernel.all_assignments)
+        )
+    else:
+        accesses = cast(set[Field.Access], symbolic_kernel.atoms(Field.Access))
+
+    return _ghost_layers_from_field_accesses(accesses)
+
+
+def _ghost_layers_from_field_accesses(field_accesses: Iterable[Field.Access]):
+    def access_filter(acc: Field.Access):
+        return acc.field.field_type in (
+            FieldType.GENERIC,
+            FieldType.STAGGERED,
+            FieldType.STAGGERED_FLUX,
+        )
+
+    domain_field_accesses = set(filter(access_filter, field_accesses))
+
+    if len(domain_field_accesses) > 0:
+        inferred_gls = max([fa.required_ghost_layers for fa in domain_field_accesses])
+    else:
+        inferred_gls = 0
+
+    return inferred_gls
+
+
 def create_full_iteration_space(
     ctx: KernelCreationContext,
-    assignments: AssignmentCollection,
     ghost_layers: None | int | Sequence[int | tuple[int, int]] = None,
     iteration_slice: None | int | slice | tuple[int | slice, ...] = None,
-    infer_ghost_layers: bool = False,
 ) -> IterationSpace:
     """Create a dense iteration space from a sequence of assignments and iteration slice information.
 
@@ -490,42 +527,24 @@ def create_full_iteration_space(
         Also, if ``infer_ghost_layers=True``, none of them may be set.
     """
 
-    assert not ctx.fields.index_fields
+    if ctx.fields.index_fields:
+        raise PsInternalCompilerError(
+            "Cannot create full iteration space for a kernel including index fields."
+        )
 
-    if (ghost_layers is None) and (iteration_slice is None) and not infer_ghost_layers:
+    if int(ghost_layers is not None) + int(iteration_slice is not None) != 1:
         raise ValueError(
-            "One argument of `ghost_layers`, `iteration_slice`, and `infer_ghost_layers` must be set."
+            "Exactly one of `ghost_layers` and `iteration_slice` must be set."
         )
-
-    if (
-        int(ghost_layers is not None)
-        + int(iteration_slice is not None)
-        + int(infer_ghost_layers)
-        > 1
-    ):
-        raise ValueError(
-            "At most one of `ghost_layers`, `iteration_slice`, and `infer_ghost_layers` may be set."
-        )
-
-    #   Collect all relative accesses into domain fields
-    def access_filter(acc: Field.Access):
-        return acc.field.field_type in (
-            FieldType.GENERIC,
-            FieldType.STAGGERED,
-            FieldType.STAGGERED_FLUX,
-        )
-
-    domain_field_accesses = assignments.atoms(Field.Access)
-    domain_field_accesses = set(filter(access_filter, domain_field_accesses))
 
     # The following scenarios exist:
     # - We have at least one domain field -> find the common field and use it to determine the iteration region
     # - We have no domain fields, but at least one custom field -> determine common field from custom fields
     # - We have neither domain nor custom fields -> Error
 
-    if len(domain_field_accesses) > 0:
+    if ctx.fields.domain_fields:
         archetype_field = get_archetype_field(ctx.fields.domain_fields)
-    elif len(ctx.fields.custom_fields) > 0:
+    elif ctx.fields.custom_fields:
         #   TODO: Warn about inferring iteration space from custom fields
         archetype_field = get_archetype_field(ctx.fields.custom_fields)
     else:
@@ -533,23 +552,7 @@ def create_full_iteration_space(
             "Unable to construct iteration space: The kernel contains no accesses to domain or custom fields."
         )
 
-    # If the user provided a ghost layer specification, use that
-    # Otherwise, if an iteration slice was specified, use that
-    # Otherwise, use the inferred ghost layers
-
-    if infer_ghost_layers:
-        if len(domain_field_accesses) > 0:
-            inferred_gls = max(
-                [fa.required_ghost_layers for fa in domain_field_accesses]
-            )
-        else:
-            inferred_gls = 0
-
-        ctx.metadata["ghost_layers"] = inferred_gls
-        return FullIterationSpace.create_with_ghost_layers(
-            ctx, inferred_gls, archetype_field
-        )
-    elif ghost_layers is not None:
+    if ghost_layers is not None:
         ctx.metadata["ghost_layers"] = ghost_layers
         return FullIterationSpace.create_with_ghost_layers(
             ctx, ghost_layers, archetype_field

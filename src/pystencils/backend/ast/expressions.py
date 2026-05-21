@@ -232,6 +232,19 @@ class PsLiteralExpr(PsLeafMixIn, PsExpression):
         return f"PsLiteralExpr({repr(self._literal)})"
 
 
+class PsUndefined(PsLeafMixIn, PsExpression):
+    """Undefined value of a given data type."""
+
+    def __init__(self, dtype: PsType) -> None:
+        super().__init__(dtype)
+
+    def _clone_expr(self) -> PsExpression:
+        return PsUndefined(self.get_dtype())
+
+    def structurally_equal(self, other: PsAstNode) -> bool:
+        return isinstance(other, PsUndefined)
+
+
 class PsBufferAcc(PsLvalue, PsExpression):
     """Access into a `PsBuffer`."""
 

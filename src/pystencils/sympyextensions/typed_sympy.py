@@ -32,6 +32,13 @@ class DynamicType(Enum):
     This is guaranteed to be an interger type.
     """
 
+    def __str__(self) -> str:
+        match self:
+            case DynamicType.NUMERIC_TYPE:
+                return "ps::numeric_t"
+            case DynamicType.INDEX_TYPE:
+                return "ps::index_t"
+
 
 class TypeAtom(sp.Atom):
     """Wrapper around a type to disguise it as a SymPy atom."""

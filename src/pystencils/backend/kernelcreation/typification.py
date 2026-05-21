@@ -41,6 +41,7 @@ from ..ast.expressions import (
     PsCast,
     PsAddressOf,
     PsConstantExpr,
+    PsUndefined,
     PsLookup,
     PsSubscript,
     PsMemAcc,
@@ -463,6 +464,9 @@ class Typifier:
 
             case PsLiteralExpr(lit):
                 tc.apply_dtype(lit.dtype, expr)
+
+            case PsUndefined():
+                tc.apply_dtype(expr.get_dtype())
 
             case PsBufferAcc(_, indices):
                 tc.apply_dtype(expr.buffer.element_type, expr)

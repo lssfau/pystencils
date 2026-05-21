@@ -164,6 +164,16 @@ class KernelCreationContext:
 
         return symb
 
+    def declare_symbol(self, name: str, dtype: PsType | None = None) -> PsSymbol:
+        """Declare a new symbol, raising an error if a symbol of the given name already exists"""
+
+        if name in self._symbols:
+            raise PsInternalCompilerError(
+                f"Cannot declare symbol {name}; symbol alreay exists"
+            )
+
+        return self.get_symbol(name, dtype=dtype)
+
     def get_new_symbol(self, name: str, dtype: PsType | None = None) -> PsSymbol:
         """Always create a new symbol, deduplicating its name if another symbol with the same name already exists."""
 

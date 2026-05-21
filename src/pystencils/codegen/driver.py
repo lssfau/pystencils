@@ -1,31 +1,69 @@
 from __future__ import annotations
-
+from typing import (
+    cast,
+    Sequence,
+    Callable,
+    TYPE_CHECKING,
+    Protocol,
+    TypeAlias,
+)
 from dataclasses import replace
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Callable, Protocol, Sequence, cast
 from warnings import warn
 
 from sympy.codegen.ast import AssignmentBase
 
+from ..field import Field
+from ..simp import AssignmentCollection
+from ..types import PsIntegerType, PsScalarType
+from ..flow.flowgraph import FlowgraphNode
+from ..flow import Flowgraph, tie as tie_flowgraph
+
+from ..backend.memory import PsSymbol
 from ..backend.ast import PsAstNode
 from ..backend.ast.analysis import collect_required_headers, collect_undefined_symbols
 from ..backend.ast.expressions import PsExpression
 from ..backend.ast.structural import PsBlock
 from ..backend.kernelcreation import (
-    AstFactory, FreezeExpressions, KernelAnalysis, KernelCreationContext, Typifier)
+    KernelCreationContext,
+    KernelAnalysis,
+    FreezeExpressions,
+    Typifier,
+    FreezeFlowgraph,
+    AstFactory,
+)
 from ..backend.kernelcreation.iteration_space import (
-    IterationSpace, create_full_iteration_space, create_sparse_iteration_space)
-from ..backend.memory import PsSymbol
-from ..backend.platforms import GenericCpu, GenericGpu, GenericVectorCpu, Platform
+    create_sparse_iteration_space,
+    create_full_iteration_space,
+    infer_ghost_layers,
+    IterationSpace,
+)
+from ..backend.platforms import (
+    Platform,
+    GenericCpu,
+    GenericGpu,
+    GenericVectorCpu,
+)
+
 from ..backend.transformations import (
-    CanonicalizeSymbols, EliminateConstants, HoistIterationInvariantDeclarations, LowerToC,
-    MaterializeAxes, ReductionsToMemory, SelectFunctions)
-from ..field import Field
-from ..simp import AssignmentCollection
-from ..types import PsIntegerType, PsScalarType
+    CanonicalizeSymbols,
+    EliminateConstants,
+    HoistIterationInvariantDeclarations,
+    LowerToC,
+    MaterializeAxes,
+    ReductionsToMemory,
+    SelectFunctions,
+)
+
 from .config import (
-    _AUTO_TYPE, AUTO, CreateKernelConfig, GhostLayerSpec, GpuIndexingScheme, GpuOptions,
-    IterationSliceSpec)
+    _AUTO_TYPE,
+    AUTO,
+    CreateKernelConfig,
+    GhostLayerSpec,
+    GpuIndexingScheme,
+    GpuOptions,
+    IterationSliceSpec,
+)
 from .cpu_loop_strategies import DefaultCpuLoopStrategies
 from .functions import Lambda
 from .gpu_indexing import GpuIndexing, GpuIndexMappingStrategy, GpuLaunchConfiguration
@@ -39,18 +77,24 @@ if TYPE_CHECKING:
     from ..jit import JitBase
 
 
-__all__ = ["create_kernel"]
+SymbolicKernel: TypeAlias = (
+    AssignmentCollection
+    | Sequence[AssignmentBase]
+    | AssignmentBase
+    | FlowgraphNode
+    | Flowgraph
+)
+"""Various forms of symbolic kernels that can be consumed by the code generator."""
 
 
 class ProvidesLaunchConfigFactory(Protocol):
 
     @abstractmethod
-    def get_launch_config_factory(self) -> Callable[[], GpuLaunchConfiguration]:
-        ...
+    def get_launch_config_factory(self) -> Callable[[], GpuLaunchConfiguration]: ...
 
 
 def create_kernel(
-    assignments: AssignmentCollection | Sequence[AssignmentBase] | AssignmentBase,
+    assignments: SymbolicKernel,
     config: CreateKernelConfig | None = None,
     **kwargs,
 ) -> Kernel:
@@ -132,22 +176,34 @@ class DefaultKernelCreationDriver:
         )
 
         self._target = cfg.get_target()
-        self._gpu_indexing: ProvidesLaunchConfigFactory | None = self._get_gpu_indexing()
+        self._gpu_indexing: ProvidesLaunchConfigFactory | None = (
+            self._get_gpu_indexing()
+        )
         self._platform = self._get_platform()
         self._factory = AstFactory(self._ctx)
 
     def __call__(
         self,
-        assignments: AssignmentCollection | Sequence[AssignmentBase] | AssignmentBase,
+        symbolic_kernel: SymbolicKernel,
     ) -> Kernel:
-
-        kernel_body = self.parse_kernel_body(assignments)
+        kernel_body = self.parse_kernel_body(symbolic_kernel)
         kernel_ast = self._materialize_iteration_space(kernel_body)
         kernel_ast = self._general_optimize(kernel_ast)
         kernel_ast = self._lowering(kernel_ast)
         return self._finalize(kernel_ast)
 
     def parse_kernel_body(
+        self,
+        symbolic_kernel: SymbolicKernel,
+    ):
+        if isinstance(symbolic_kernel, FlowgraphNode | Flowgraph):
+            kernel_body = self.parse_flowgraph(symbolic_kernel)
+        else:
+            kernel_body = self.parse_assignment_collection(symbolic_kernel)
+
+        return kernel_body
+
+    def parse_assignment_collection(
         self,
         assignments: AssignmentCollection | Sequence[AssignmentBase] | AssignmentBase,
     ) -> PsBlock:
@@ -166,29 +222,7 @@ class DefaultKernelCreationDriver:
         )
         analysis(assignments)
 
-        if self._index_field is not None:
-            ispace = create_sparse_iteration_space(
-                self._ctx, assignments, index_field=self._cfg.index_field
-            )
-        else:
-            gls: GhostLayerSpec | None
-            if self._ghost_layers == AUTO:
-                infer_gls = True
-                gls = None
-            else:
-                assert not isinstance(self._ghost_layers, _AUTO_TYPE)
-                infer_gls = False
-                gls = self._ghost_layers
-
-            ispace = create_full_iteration_space(
-                self._ctx,
-                assignments,
-                ghost_layers=gls,
-                iteration_slice=self._iteration_slice,
-                infer_ghost_layers=infer_gls,
-            )
-
-        self._ctx.set_iteration_space(ispace)
+        self._create_iteration_space(assignments)
 
         freeze = FreezeExpressions(self._ctx)
         kernel_body = freeze(assignments)
@@ -197,6 +231,45 @@ class DefaultKernelCreationDriver:
         kernel_body = typify(kernel_body)
 
         return kernel_body
+
+    def parse_flowgraph(self, flowgraph: FlowgraphNode | Flowgraph):
+        if not isinstance(flowgraph, Flowgraph):
+            flowgraph = tie_flowgraph(flowgraph)
+
+        fields = flowgraph.fields_read | flowgraph.fields_written
+        for f in fields:
+            const = f not in flowgraph.fields_written
+            self._ctx.add_field(f, const=const)
+
+        self._create_iteration_space(flowgraph)
+
+        freeze = FreezeFlowgraph(self._ctx)
+        kernel_body = freeze(flowgraph)
+
+        return kernel_body
+
+    def _create_iteration_space(
+        self, symbolic_kernel: AssignmentCollection | Flowgraph
+    ):
+        if self._index_field is not None:
+            ispace = create_sparse_iteration_space(
+                self._ctx, index_field=self._cfg.index_field
+            )
+        else:
+            gls: GhostLayerSpec | None
+            if self._ghost_layers == AUTO:
+                gls = infer_ghost_layers(symbolic_kernel)
+            else:
+                assert not isinstance(self._ghost_layers, _AUTO_TYPE)
+                gls = self._ghost_layers
+
+            ispace = create_full_iteration_space(
+                self._ctx,
+                ghost_layers=gls,
+                iteration_slice=self._iteration_slice,
+            )
+
+        self._ctx.set_iteration_space(ispace)
 
     def _materialize_iteration_space(self, kernel_body: PsBlock) -> PsBlock:
         match self._platform:
@@ -254,8 +327,12 @@ class DefaultKernelCreationDriver:
 
         kernel_factory = KernelFactory(self._ctx)
 
-        range_kernel = self._target == Target.SYCL and self._cfg.sycl.get_option("automatic_block_size")
-        nd_range_kernel = self._target == Target.SYCL and not self._cfg.sycl.get_option("automatic_block_size")
+        range_kernel = self._target == Target.SYCL and self._cfg.sycl.get_option(
+            "automatic_block_size"
+        )
+        nd_range_kernel = self._target == Target.SYCL and not self._cfg.sycl.get_option(
+            "automatic_block_size"
+        )
 
         if self._target.is_cpu() or range_kernel:
             return kernel_factory.create_generic_kernel(
@@ -280,7 +357,9 @@ class DefaultKernelCreationDriver:
             assert False, "unexpected target"
 
     def _get_gpu_indexing(self) -> ProvidesLaunchConfigFactory | None:
-        nd_range_kernel = self._target == Target.SYCL and not self._cfg.sycl.get_option("automatic_block_size")
+        nd_range_kernel = self._target == Target.SYCL and not self._cfg.sycl.get_option(
+            "automatic_block_size"
+        )
         if not self._target.is_gpu() and not nd_range_kernel:
             return None
 
@@ -300,11 +379,13 @@ class DefaultKernelCreationDriver:
             )
 
         if nd_range_kernel:
-            return SyclIndexing(self._ctx,
-                                idx_scheme,
-                                warp_size,
-                                manual_launch_grid,
-                                assume_warp_aligned_block_size,)
+            return SyclIndexing(
+                self._ctx,
+                idx_scheme,
+                warp_size,
+                manual_launch_grid,
+                assume_warp_aligned_block_size,
+            )
 
         return GpuIndexing(
             self._ctx,
@@ -341,6 +422,7 @@ class DefaultKernelCreationDriver:
                 return NeonCpu(self._ctx, enable_fp16=Target._FP16 in self._target)
             elif self._target == Target.ARM_SVE:
                 from ..backend.platforms.sve import SveCpu
+
                 return SveCpu(self._ctx)
             elif self._target == Target.GenericCPU:
                 return GenericCpu(self._ctx)
