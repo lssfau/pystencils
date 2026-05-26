@@ -332,8 +332,9 @@ class FreezeFlowgraph:
             node_info = graph.node_infos[node]
             if not isinstance(node, Top | Bottom):
                 assert node_info.ast is not None
-                pre_comment = PsComment(f"(begin {node_info.node.name})")
-                post_comment = PsComment(f"(end {node_info.node.name})")
+                node_type = type(node_info.node).__name__
+                pre_comment = PsComment(f"(begin {node_type} {node_info.node.name})")
+                post_comment = PsComment(f"(end {node_type} {node_info.node.name})")
                 all_statements += (
                     [pre_comment] + node_info.ast.statements + [post_comment]
                 )

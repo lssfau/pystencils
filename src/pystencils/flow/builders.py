@@ -159,7 +159,9 @@ class EquationsBlockBuilder(let_export_adaptor):
 
 @overload
 def block(
-    *, preds: Iterable[FlowgraphNode] | None = None
+    *,
+    preds: Iterable[FlowgraphNode] | None = None,
+    name: str | None = None,
 ) -> Callable[[Callable[[EquationsBlockBuilder], None]], EquationsBlock]: ...
 
 
@@ -171,18 +173,27 @@ def block(
     func: Callable[[EquationsBlockBuilder], None] | None = None,
     /,
     preds: Iterable[FlowgraphNode] | None = None,
+    name: str | None = None,
 ):
     """Define a flowgraph block using ``let`` syntax.
 
     `block` is a decorator used to define flowgraph blocks
     using Python function syntax.
+
+    Args:
+        - preds: Predecessor nodes to this block
+        - name: Name of this block. If none is given, the function's name will be used
     """
     predecessors: set[FlowgraphNode] = set() if preds is None else set(preds)
 
     def decorate(func: Callable[[EquationsBlockBuilder], None]) -> EquationsBlock:
         builder = EquationsBlockBuilder(predecessors)
         func(builder)
-        return EquationsBlock(builder._assignments, builder._predecessors, name=func.__name__)
+        return EquationsBlock(
+            builder._assignments,
+            builder._predecessors,
+            name=func.__name__ if name is None else name,
+        )
 
     if func is not None:
         return decorate(func)
@@ -226,7 +237,9 @@ class CasesBuilder:
 
 @overload
 def cases(
-    *, preds: Iterable[FlowgraphNode] | None = None
+    *,
+    preds: Iterable[FlowgraphNode] | None = None,
+    name: str | None = None,
 ) -> Callable[[Callable[[CasesBuilder], None]], Cases]: ...
 
 
@@ -238,6 +251,7 @@ def cases(
     func: Callable[[CasesBuilder], None] | None = None,
     /,
     preds: Iterable[FlowgraphNode] | None = None,
+    name: str | None = None,
 ):
     """Define a flowgraph cases block.
 
@@ -249,7 +263,11 @@ def cases(
     def decorate(func: Callable[[CasesBuilder], None]) -> Cases:
         builder = CasesBuilder()
         func(builder)
-        return Cases(builder._branches, predecessors, name=func.__name__)
+        return Cases(
+            builder._branches,
+            predecessors,
+            name=func.__name__ if name is None else name,
+        )
 
     if func is not None:
         return decorate(func)
