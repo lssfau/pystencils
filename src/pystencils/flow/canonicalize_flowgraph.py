@@ -64,7 +64,7 @@ class CanonicalizeFlowgraph:
     and raise an error otherwise.
     In particular, `CanonicalizeFlowgraph` will add explicit bottom and top nodes
     if these are missing, and introduce edges from :math:`\\top` to any node with
-    dangling free symbols.
+    dangling free symbols, and to any node that has no predecessors.
 
     The canonicalizer returns a `CanonicalizationResult`, containing the canonicalized
     graph together with its sets of free symbols, exports, and side effects.

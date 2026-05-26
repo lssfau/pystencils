@@ -1,8 +1,9 @@
 from __future__ import annotations
-from typing import cast, TypeVar, Generic, Sequence, Generator, Iterable
+from typing import cast, TypeVar, Generic, Sequence, Generator, Iterable, Mapping
 from abc import ABC, abstractmethod
 from functools import reduce
 from itertools import chain
+from functools import cache
 
 import sympy as sp
 
@@ -12,6 +13,7 @@ from ..sympyextensions.pointers import mem_acc
 from ..sympyextensions.reduction import ReductionOp
 
 LHS_T = TypeVar("LHS_T", bound=sp.Basic)
+SubstitutionMapping = Mapping[sp.Basic, sp.Basic]
 
 
 class Flowgraph:
@@ -85,6 +87,33 @@ class Flowgraph:
     def walk(self) -> Generator[FlowgraphNode, None, None]:
         return self._bottom.walk()
 
+    def subs(self, substitutions: SubstitutionMapping, **kwargs) -> Flowgraph:
+        """Create a new flowgraph from this one by performing the given substitutions.
+
+        This method acts as the SymPy ``subs`` method, with the difference that symbol substitutions
+        of the kind ``symbol -> expr`` are only applied if ``symbol`` is a free symbol of the flowgraph.
+
+        See the `subs <sympy.core.basic.Basic.subs>` method of ``sp.Basic`` for details.
+        """
+        substitutions = dict(substitutions)
+        symbs = set(
+            k
+            for k in substitutions.keys()
+            if isinstance(k, sp.Symbol) and not isinstance(k, Field.Access)
+        )
+        for symb in symbs:
+            if symb not in self.free_symbols:
+                del substitutions[symb]
+
+        @cache
+        def _recursive_subs(node: FlowgraphNode) -> FlowgraphNode:
+            return node.subs(substitutions, **kwargs).replace_predecessors(
+                [_recursive_subs(p) for p in node.predecessors]
+            )
+
+        bot = cast(Bottom, _recursive_subs(self._bottom))
+        return Flowgraph(bot, name=self._name)
+
     def list_topological(self) -> tuple[FlowgraphNode, ...]:
         edges: list[tuple[int, int]] = []
         nodes: list[FlowgraphNode] = list(self.walk())
@@ -142,6 +171,16 @@ class FlowgraphAssignment(ABC, Generic[LHS_T]):
 
     def atoms(self, *types) -> set[sp.Basic]:
         return self._lhs.atoms(*types) | self._rhs.atoms(*types)
+
+    def subs(self, substitutions: SubstitutionMapping, **kwargs):
+        """Perform substitutions inside this assignment.
+
+        See the `subs <sympy.core.basic.Basic.subs>` method of ``sp.Basic`` for details.
+        """
+        return type(self)(
+            cast(LHS_T, self._lhs.subs(substitutions, **kwargs)),
+            self._rhs.subs(substitutions, **kwargs),
+        )
 
     def _hashable_contents(self) -> tuple:
         return (self._lhs, self._rhs)
@@ -233,10 +272,17 @@ class Reduce(FlowgraphAssignment[TypedSymbol]):
 
     @classmethod
     def _check_lhs(cls, lhs: sp.Basic):
-        if not isinstance(lhs, TypedSymbol):
+        if not isinstance(lhs, TypedSymbol) or isinstance(lhs, Field.Access):
             raise TypeError(
                 f"Invalid type of left-hand side to `reduce`-assignment: {type(lhs)}"
             )
+
+    def subs(self, substitutions: SubstitutionMapping, **kwargs):
+        return Reduce(
+            cast(TypedSymbol, self._lhs.subs(substitutions, **kwargs)),
+            self._rhs.subs(substitutions, **kwargs),
+            self._op,
+        )
 
     def _hashable_contents(self) -> tuple:
         return super()._hashable_contents() + (self._op,)
@@ -316,6 +362,9 @@ class FlowgraphNode(ABC):
         return frozenset()
 
     @abstractmethod
+    def subs(self, substitutions: SubstitutionMapping, **kwargs) -> FlowgraphNode: ...
+
+    @abstractmethod
     def replace_predecessors(
         self, predecessors: Iterable[FlowgraphNode]
     ) -> FlowgraphNode:
@@ -357,8 +406,10 @@ class FlowgraphNode(ABC):
 
         other = cast(FlowgraphNode, other)
 
-        return self._name == other._name and (
-            self._hashable_contents() == other._hashable_contents()
+        return (
+            self._name == other._name
+            and (self._predecessors == other._predecessors)
+            and (self._hashable_contents() == other._hashable_contents())
         )
 
     def __str__(self) -> str:
@@ -379,8 +430,13 @@ class Top(FlowgraphNode):
     def __init__(self) -> None:
         super().__init__(frozenset(), name="⊤")
 
+    def subs(self, substitutions: SubstitutionMapping, **kwargs) -> Top:
+        return self
+
     def replace_predecessors(self, predecessors: Iterable[FlowgraphNode]) -> Top:
-        raise ValueError("Cannot add predecessors to the top node")
+        if predecessors:
+            raise ValueError("Cannot add predecessors to the top node")
+        return self
 
     def _hashable_contents(self) -> tuple:
         return ()
@@ -394,6 +450,9 @@ class Bottom(FlowgraphNode):
 
     def replace_predecessors(self, predecessors: Iterable[FlowgraphNode]) -> Bottom:
         return Bottom(predecessors)
+
+    def subs(self, substitutions: SubstitutionMapping, **kwargs) -> Bottom:
+        return self
 
     def _hashable_contents(self) -> tuple:
         return ()
@@ -484,6 +543,26 @@ class EquationsBlock(FlowgraphNode):
     def atoms(self, *types) -> set[sp.Basic]:
         return set().union(*(asm.atoms(*types) for asm in self._assignments))
 
+    def subs(self, substitutions: SubstitutionMapping, **kwargs) -> EquationsBlock:
+        """Apply substitutions to equations in this block.
+
+        .. note::
+            Substitutions of expressions for symbols (``symbol -> expr``) are only applied
+            if ``symbol`` is a free symbol of this block.
+        """
+        substitutions = dict(substitutions)
+        symbs = set(
+            k
+            for k in substitutions.keys()
+            if isinstance(k, sp.Symbol) and not isinstance(k, Field.Access)
+        )
+        for symb in symbs:
+            if symb not in self.free_symbols:
+                del substitutions[symb]
+
+        asms = [asm.subs(substitutions, **kwargs) for asm in self._assignments]
+        return EquationsBlock(asms, predecessors=self._predecessors, name=self._name)
+
     def replace_predecessors(
         self, predecessors: Iterable[FlowgraphNode]
     ) -> EquationsBlock:
@@ -532,6 +611,19 @@ class Subgraph(FlowgraphNode):
 
     def atoms(self, *types) -> set[sp.Basic]:
         return self._graph.atoms(*types)
+
+    def subs(self, substitutions: SubstitutionMapping, **kwargs) -> Subgraph:
+        """Apply substitutions in this subgraph and return a new, transformed subgraph.
+
+        .. note::
+            Substitutions of expressions for symbols (``symbol -> expr``) are only applied
+            if ``symbol`` is a free symbol of this subgraph.
+        """
+        return Subgraph(
+            self._graph.subs(substitutions, **kwargs),
+            self._predecessors,
+            name=self._name,
+        )
 
     def _hashable_contents(self) -> tuple:
         return (self._graph,)
@@ -648,6 +740,19 @@ class Cases(FlowgraphNode):
                 for cond, subgr in self._branches
             )
         )
+
+    def subs(self, substitutions: SubstitutionMapping, **kwargs) -> Cases:
+        """Apply substitutions inside this case distinction.
+
+        .. note::
+            Substitutions of expressions for symbols (``symbol -> expr``) are only applied
+            to a branch subgraph if ``symbol`` is a free symbol of that subgraph.
+        """
+        branches = [
+            (c.subs(substitutions, **kwargs), b.subs(substitutions, **kwargs))
+            for c, b in self._branches
+        ]
+        return Cases(branches, predecessors=self._predecessors, name=self._name)
 
     def replace_predecessors(
         self, predecessors: Iterable[FlowgraphNode]

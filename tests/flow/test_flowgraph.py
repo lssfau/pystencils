@@ -71,6 +71,9 @@ def test_invalid_assignments():
     with pytest.raises(TypeError):
         _ = Reduce(x, w, ReductionOp.Sub)
 
+    with pytest.raises(TypeError):
+        _ = Reduce(f(1), w, ReductionOp.Sub)
+
 
 def test_assignment_equality():
     x, y, z, w = sp.symbols("x, y, z, w")

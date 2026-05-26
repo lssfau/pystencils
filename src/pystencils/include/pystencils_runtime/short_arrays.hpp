@@ -4,7 +4,7 @@
 
 #if !PYSTENCILS_PLATFORM_IS_GPU
 
-#include <cstdint>
+#include <cstddef>
 
 using std::size_t;
 
