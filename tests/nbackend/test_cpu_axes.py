@@ -4,7 +4,6 @@ import pytest
 import pystencils as ps
 import numpy as np
 
-
 from pystencils.backend.kernelcreation import (
     KernelCreationContext,
     AstFactory,

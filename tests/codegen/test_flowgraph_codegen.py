@@ -4,13 +4,13 @@ import sympy as sp
 import pystencils as ps
 
 from pystencils import (
-    fields,
     Field,
     Target,
     CreateKernelConfig,
     create_type,
 )
 from pystencils.flow import block, tie, cases
+from pystencils.grids import TensorField
 from pystencils.codegen.properties import FieldBasePtr
 from pystencils.types import PsPointerType
 from pystencils.sympyextensions import convolve
@@ -45,7 +45,8 @@ def test_filter_kernel(gen_config, xp, dtype):
     weight = sp.Symbol("weight")
     stencil = [[1, 1, 1], [1, 1, 1], [1, 1, 1]]
 
-    src, dst = fields("src, dst: [2D]")
+    src = TensorField("src", 2)
+    dst = TensorField("dst", 2)
 
     @block
     def update_rule(let):
@@ -53,6 +54,7 @@ def test_filter_kernel(gen_config, xp, dtype):
 
     cfg = gen_config.copy()
     cfg.default_dtype = dtype
+    cfg.ghost_layers = 1
 
     if cfg.get_target().is_cpu():
         cfg.cpu.openmp.enable = True
@@ -61,7 +63,7 @@ def test_filter_kernel(gen_config, xp, dtype):
 
     for param in ker.parameters:
         if pprop := param.get_properties(FieldBasePtr):
-            field: Field = pprop.pop().field
+            field: TensorField = pprop.pop().field
             assert isinstance(param.dtype, PsPointerType)
 
             if field == src:
@@ -133,7 +135,8 @@ def test_filter_kernel_fixedsize(gen_config, xp, dtype):
 
 def test_diamond_graph_codegen(gen_config, xp):
     x, y, z, v, w = sp.symbols("x, y, z, v, w")
-    f, g = fields("f, g: [2D]")
+    f = TensorField("f", 2)
+    g = TensorField("g", 2)
 
     @block
     def block1(let):
@@ -175,7 +178,8 @@ def test_diamond_graph_codegen(gen_config, xp):
 )
 def test_parallel_graphs_codegen(gen_config, xp):
     x, y, z, v, w = sp.symbols("x, y, z, v, w")
-    f, g = fields("f(2), g(2): [2D]")
+    f = TensorField("f", 2, (2,))
+    g = TensorField("g", 2, (2,))
 
     @block
     def block1a(let):
@@ -221,7 +225,9 @@ def test_parallel_graphs_codegen(gen_config, xp):
     [t for t in Target.available_targets() if t not in [Target.HIP, Target.SYCL]],
 )
 def test_reductions(gen_config, xp):
-    f, g = fields("f, g: [2D]")
+    f = TensorField("f", 2)
+    g = TensorField("g", 2)
+
     q = ps.TypedSymbol("q", ps.DynamicType.NUMERIC_TYPE)
     r = ps.TypedSymbol("r", ps.DynamicType.NUMERIC_TYPE)
 
@@ -259,7 +265,9 @@ def test_reductions(gen_config, xp):
 def test_simple_cases_graph_codegen(gen_config, xp):
     x, y = sp.symbols("x, y")
     u, v = sp.symbols("u, v")
-    f, g, h = fields("f(2), g(2), h(2): [2D]")
+    f = TensorField("f", 2, (2,))
+    g = TensorField("g", 2, (2,))
+    h = TensorField("h", 2, (2,))
 
     @cases
     def cs_block1(cs):
@@ -328,7 +336,10 @@ def test_simple_cases_graph_codegen(gen_config, xp):
 def test_nested_cases_graph_codegen(gen_config, xp):
     x, y, z, w = sp.symbols("x, y, z, w")
     u, v = sp.symbols("u, v")
-    f, g, h, l = fields("f(2), g(2), h(2), l(2): [2D]")
+    f = TensorField("f", 2, (2,))
+    g = TensorField("g", 2, (2,))
+    h = TensorField("h", 2, (2,))
+    k = TensorField("k", 2, (2,))
 
     @block
     def block1_pred(let):
@@ -348,8 +359,8 @@ def test_nested_cases_graph_codegen(gen_config, xp):
     @block(preds=[block2_pred])
     def block2(let):
         let[x] = y + 2
-        let.store[l(0)] = x - v - 3
-        let.store[l(1)] = x + 2
+        let.store[k(0)] = x - v - 3
+        let.store[k(1)] = x + 2
 
     @cases
     def cs_block_nested(cs):
@@ -382,9 +393,9 @@ def test_nested_cases_graph_codegen(gen_config, xp):
 
     f_arr = xp.array(rng.random((18, 23, 2)))
     g_arr = xp.array(rng.random((18, 23, 2)))
-    l_arr = xp.zeros_like(g_arr)
+    k_arr = xp.zeros_like(g_arr)
 
-    l_arr_expected = xp.zeros_like(l_arr)
+    k_arr_expected = xp.zeros_like(k_arr)
     h_arr_expected = xp.zeros_like(g_arr)
 
     # u > 0, v > 0
@@ -392,13 +403,13 @@ def test_nested_cases_graph_codegen(gen_config, xp):
     u_val = 2
     v_val = 31
 
-    l_arr_expected[:, :, 0] = g_arr[:, :, 1] + v_val + 3
-    l_arr_expected[:, :, 1] = g_arr[:, :, 1] + 2 * v_val + 6
+    k_arr_expected[:, :, 0] = g_arr[:, :, 1] + v_val + 3
+    k_arr_expected[:, :, 1] = g_arr[:, :, 1] + 2 * v_val + 6
 
     h_arr_expected[:, :, 0] = f_arr[:, :, 0] + u_val
     h_arr_expected[:, :, 1] = g_arr[:, :, 0] + v_val + 2
 
-    ker(f=f_arr, g=g_arr, h=h_arr, l=l_arr, u=u_val, v=v_val)
+    ker(f=f_arr, g=g_arr, h=h_arr, k=k_arr, u=u_val, v=v_val)
 
     xp.testing.assert_allclose(h_arr, h_arr_expected)
 
@@ -407,13 +418,13 @@ def test_nested_cases_graph_codegen(gen_config, xp):
     u_val = 0
     v_val = 31
 
-    l_arr_expected[:, :, 0] = g_arr[:, :, 1] + v_val + 3
-    l_arr_expected[:, :, 1] = g_arr[:, :, 1] + 2 * v_val + 6
+    k_arr_expected[:, :, 0] = g_arr[:, :, 1] + v_val + 3
+    k_arr_expected[:, :, 1] = g_arr[:, :, 1] + 2 * v_val + 6
 
     h_arr_expected[:, :, 0] = f_arr[:, :, 1] - 2 * u_val
     h_arr_expected[:, :, 1] = g_arr[:, :, 0] + v_val + 2
 
-    ker(f=f_arr, g=g_arr, h=h_arr, l=l_arr, u=u_val, v=v_val)
+    ker(f=f_arr, g=g_arr, h=h_arr, k=k_arr, u=u_val, v=v_val)
 
     xp.testing.assert_allclose(h_arr, h_arr_expected)
 
@@ -422,20 +433,23 @@ def test_nested_cases_graph_codegen(gen_config, xp):
     u_val = 0
     v_val = 0
 
-    l_arr_expected[:, :, 0] = g_arr[:, :, 1] + v_val + 3
-    l_arr_expected[:, :, 1] = g_arr[:, :, 1] + 2 * v_val + 6
+    k_arr_expected[:, :, 0] = g_arr[:, :, 1] + v_val + 3
+    k_arr_expected[:, :, 1] = g_arr[:, :, 1] + 2 * v_val + 6
 
     h_arr_expected[:, :, 0] = g_arr[:, :, 1] - v_val - 1
     h_arr_expected[:, :, 1] = g_arr[:, :, 0] + v_val + 2
 
-    ker(f=f_arr, g=g_arr, h=h_arr, l=l_arr, u=u_val, v=v_val)
+    ker(f=f_arr, g=g_arr, h=h_arr, k=k_arr, u=u_val, v=v_val)
 
     xp.testing.assert_allclose(h_arr, h_arr_expected)
 
 
 @pytest.mark.parametrize("target", [Target.GenericCPU])
 def test_conditional_reductions_and_writes(gen_config, xp):
-    f, g, h = fields("f, g, h: [2D]")
+    f = TensorField("f", 2)
+    g = TensorField("g", 2)
+    h = TensorField("h", 2)
+
     q = ps.TypedSymbol("q", ps.DynamicType.NUMERIC_TYPE)
     r = ps.TypedSymbol("r", ps.DynamicType.NUMERIC_TYPE)
 
@@ -481,7 +495,9 @@ def test_conditional_reductions_and_writes(gen_config, xp):
 
 def test_subgraph(gen_config, xp):
     x, y, z, v = sp.symbols("x, y, z, v")
-    f, g, h = fields("f, g, h: [2D]")
+    f = TensorField("f", 2)
+    g = TensorField("g", 2)
+    h = TensorField("h", 2)
 
     @ps.flow.block
     def block1(_eq):

@@ -12,6 +12,7 @@ from .properties import (
 )
 from ..types import PsType
 from ..field import Field
+from ..grids import IField
 from ..sympyextensions import TypedSymbol
 
 
@@ -28,13 +29,11 @@ class Parameter:
         self._properties: frozenset[PsSymbolProperty] = (
             frozenset(properties) if properties is not None else frozenset()
         )
-        self._fields: tuple[Field, ...] = tuple(
+        self._fields: tuple[Field | IField, ...] = tuple(
             sorted(
                 set(
-                    p.field  # type: ignore
-                    for p in filter(
-                        lambda p: isinstance(p, _FieldProperty), self._properties
-                    )
+                    p.field
+                    for p in self._properties if isinstance(p, _FieldProperty)
                 ),
                 key=lambda f: f.name,
             )
@@ -75,7 +74,7 @@ class Parameter:
         return TypedSymbol(self.name, self.dtype)
 
     @property
-    def fields(self) -> Sequence[Field]:
+    def fields(self) -> Sequence[Field | IField]:
         """Set of fields associated with this parameter."""
         return self._fields
 

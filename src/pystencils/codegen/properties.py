@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..field import Field
+from ..grids.protocols import IField
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class UniqueSymbolProperty(PsSymbolProperty):
 class FieldShape(PsSymbolProperty):
     """Symbol acts as a shape parameter to a field."""
 
-    field: Field
+    field: Field | IField
     coordinate: int
 
 
@@ -26,7 +27,7 @@ class FieldShape(PsSymbolProperty):
 class FieldStride(PsSymbolProperty):
     """Symbol acts as a stride parameter to a field."""
 
-    field: Field
+    field: Field | IField
     coordinate: int
 
 
@@ -34,7 +35,7 @@ class FieldStride(PsSymbolProperty):
 class FieldBasePtr(UniqueSymbolProperty):
     """Symbol acts as a base pointer to a field."""
 
-    field: Field
+    field: Field | IField
 
 
 @dataclass(frozen=True)

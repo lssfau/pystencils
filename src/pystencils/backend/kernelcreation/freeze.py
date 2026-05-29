@@ -23,6 +23,7 @@ from ...sympyextensions.reduction import ReductionAssignment, ReductionOp
 from ...sympyextensions.bit_masks import bit_conditional
 from ...sympyextensions.random import RngBase
 from ...field import Field, FieldType
+from ...grids.protocols import IFieldAccess
 
 from .context import KernelCreationContext
 from ..memory import PsSymbol
@@ -80,7 +81,6 @@ from ..functions import (
     GpuFpIntrinsics,
 )
 from ..exceptions import FreezeError
-
 
 ExprLike: TypeAlias = (
     sp.Basic
@@ -162,6 +162,9 @@ class FreezeExpressions:
             raise PsInputError(f"Don't know how to freeze {obj}")
 
     def visit(self, node: sp.Basic | FlowgraphAssignment) -> PsAstNode:
+        if isinstance(node, IFieldAccess):
+            return self._handle_ifield_access(node)
+
         mro = list(type(node).__mro__)
 
         while mro:
@@ -215,7 +218,14 @@ class FreezeExpressions:
             case Reduce(lhs, rhs, op):
                 return self._handle_reduce(lhs, rhs, op)
             case _:
-                assert False, "unexpected subclass of BaseAssignment"
+                assert False, "unexpected subclass of FlowgraphAssignment"
+
+    def _handle_ifield_access(self, facc: IFieldAccess) -> PsBufferAcc:
+        ifield = facc.field
+        buffer = self._ctx.get_buffer(ifield)
+        ptr = buffer.base_pointer
+        indices = [self.visit_expr(idx) for idx in facc.get_buffer_indices()]
+        return PsBufferAcc(ptr, indices)
 
     def map_Assignment(self, expr: Assignment):
         lhs = self.visit(expr.lhs)

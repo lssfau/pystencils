@@ -10,6 +10,7 @@ from .gpu_indexing import GpuLaunchConfiguration
 
 from ..backend.ast.structural import PsBlock
 from ..field import Field
+from ..grids import IField
 
 if TYPE_CHECKING:
     from ..jit import JitBase, KernelWrapper
@@ -78,11 +79,11 @@ class Kernel:
         _deprecated_member("get_parameters", "parameters")
         return self.parameters
 
-    def get_fields(self) -> set[Field]:
+    def get_fields(self) -> set[Field | IField]:
         return set(chain.from_iterable(p.fields for p in self._params))
 
     @property
-    def fields_accessed(self) -> set[Field]:  # pragma: no cover
+    def fields_accessed(self) -> set[Field | IField]:  # pragma: no cover
         warn(
             "`fields_accessed` is deprecated and will be removed in a future version of pystencils. "
             "Use `get_fields` instead.",

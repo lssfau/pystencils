@@ -14,6 +14,7 @@ from ...types import (
     deconstify,
 )
 from ...field import Field, FieldType
+from ...grids import IField
 from ...sympyextensions import DynamicType
 from ...codegen import Kernel, Parameter
 from ...codegen.properties import FieldBasePtr, FieldShape, FieldStride
@@ -23,7 +24,6 @@ from .cpujit import ExtensionModuleBuilderBase
 from ..error import JitError
 
 import numpy as np
-
 
 _module_template = Path(__file__).parent / "cpu_kernel_module.tmpl.cpp"
 
@@ -63,7 +63,7 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             }
 
         def add_array_for_field(self, ptr_param: Parameter):
-            field: Field = ptr_param.fields[0]
+            field: Field | IField = ptr_param.fields[0]
 
             ptr_type = ptr_param.dtype
             assert isinstance(ptr_type, PsPointerType)
@@ -74,7 +74,12 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
                 elem_type = field.dtype
 
             parg_name = self.add_kwarg(field.name)
-            self._init_array_proxy(field.name, elem_type, len(field.shape), parg_name)
+            rank = (
+                len(field.shape)
+                if isinstance(field, Field)
+                else field.get_buffer_spec().rank
+            )
+            self._init_array_proxy(field.name, elem_type, rank, parg_name)
 
         def add_pointer_param(self, ptr_param: Parameter):
             ptr_type = ptr_param.dtype
@@ -173,30 +178,50 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
                 f"{proxy_name}.stride< {stype.c_string()} > ({stride_prop.coordinate})",
             )
 
-        def check_same_shape(self, fields: Sequence[Field]):
+        def check_same_shape(self, fields: Sequence[Field | IField]):
             if len(fields) > 1:
-                check_args = ", ".join("&" + self._array_proxy_name(f.name) for f in fields)
-                rank = fields[0].spatial_dimensions
+                check_args = ", ".join(
+                    "&" + self._array_proxy_name(f.name) for f in fields
+                )
+                rep_field = fields[0]
+                if isinstance(rep_field, Field):
+                    rank = rep_field.spatial_dimensions
+                else:
+                    rank = rep_field.get_iteration_limits().rank
+
                 self.precondition_checks.append(
                     f"checkSameShape({{ {check_args} }}, {rank});"
                 )
 
-        def check_fixed_shape_and_strides(self, field: Field):
+        def check_fixed_shape_and_strides(self, field: Field | IField):
             proxy_name = self._array_proxy_name(field.name)
+            if isinstance(field, Field):
+                field_shape = field.spatial_shape
+
+                #   Scalar fields may omit their trivial index dimension
+                if field.index_shape not in ((), (1,)):
+                    field_shape += field.index_shape
+                    scalar_field = False
+                else:
+                    scalar_field = True
+
+                field_strides = field.strides[: len(field_shape)]
+            else:
+                bspec = field.get_buffer_spec()
+                field_shape = bspec.shape
+                field_strides = bspec.strides
+
+                #   New-style fields cannot have trivial index shape by design
+                #   -> can omit scalar-field check
+                scalar_field = False
+
             expect_shape = (
                 "("
                 + ", ".join(
-                    (str(s) if isinstance(s, int) else "*") for s in field.shape
+                    (str(s) if isinstance(s, int) else "*") for s in field_shape
                 )
                 + ")"
             )
-            field_shape = field.spatial_shape
-            #   Scalar fields may omit their trivial index dimension
-            if field.index_shape not in ((), (1,)):
-                field_shape += field.index_shape
-                scalar_field = False
-            else:
-                scalar_field = True
 
             for coord, size in enumerate(field_shape):
                 if isinstance(size, int):
@@ -212,11 +237,11 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
             expect_strides = (
                 "("
                 + ", ".join(
-                    (str(s) if isinstance(s, int) else "*") for s in field.strides
+                    (str(s) if isinstance(s, int) else "*") for s in field_strides
                 )
                 + ")"
             )
-            for coord, stride in enumerate(field.strides[: len(field_shape)]):
+            for coord, stride in enumerate(field_strides):
                 if isinstance(stride, int):
                     self.precondition_checks.append(
                         f'checkFieldStride("{expect_strides}", {proxy_name}, {coord}, {stride});'
@@ -292,7 +317,13 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
         for f in fields:
             extr.check_fixed_shape_and_strides(f)
 
-        extr.check_same_shape([f for f in fields if f.field_type == FieldType.GENERIC])
+        extr.check_same_shape(
+            [
+                f
+                for f in fields
+                if isinstance(f, IField) or f.field_type == FieldType.GENERIC
+            ]
+        )
 
         return extr
 
