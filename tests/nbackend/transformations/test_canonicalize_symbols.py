@@ -1,4 +1,4 @@
-#  type: ignore
+# type: ignore
 import sympy as sp
 
 from pystencils import (
@@ -111,9 +111,7 @@ def test_loop_counters():
 
     f = Field.create_generic("f", 2, index_shape=(1,))
     g = Field.create_generic("g", 2, index_shape=(1,))
-    ispace = FullIterationSpace.create_from_slice(
-        ctx, make_slice[:, :], archetype_field=f
-    )
+    ispace = FullIterationSpace.create_from_slice(ctx, make_slice[:, :], f)
     ctx.set_iteration_space(ispace)
 
     asm = Assignment(f.center(0), 2 * g.center(0))

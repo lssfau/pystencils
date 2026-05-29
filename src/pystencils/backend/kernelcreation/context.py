@@ -10,6 +10,7 @@ from ..ast.expressions import PsExpression, PsConstantExpr, PsCall
 from ..functions import PsConstantFunction, ConstantFunctions
 from ...defaults import DEFAULTS
 from ...field import Field, FieldType
+from ...grids.protocols import IField, FieldBufferSpec
 from ...sympyextensions import ReductionOp
 from ...sympyextensions.typed_sympy import TypedSymbol, DynamicType
 
@@ -30,19 +31,22 @@ from .iteration_space import IterationSpace, FullIterationSpace, SparseIteration
 
 class FieldsInKernel:
     def __init__(self) -> None:
+        #   Legacy Fields
         self.domain_fields: set[Field] = set()
         self.index_fields: set[Field] = set()
         self.custom_fields: set[Field] = set()
         self.buffer_fields: set[Field] = set()
 
-        self.archetype_field: Field | None = None
+        #   New-style fields
+        self.ifields: set[IField] = set()
 
-    def __iter__(self) -> Iterator[Field]:
+    def __iter__(self) -> Iterator[Field | IField]:
         return chain(
             self.domain_fields,
             self.index_fields,
             self.custom_fields,
             self.buffer_fields,
+            self.ifields,
         )
 
 
@@ -246,9 +250,13 @@ class KernelCreationContext:
             case ReductionOp.Mul:
                 init_val = PsConstantExpr(PsConstant(1, lhs_dtype))
             case ReductionOp.Min:
-                init_val = PsCall(PsConstantFunction(ConstantFunctions.PosInfinity, lhs_dtype), [])
+                init_val = PsCall(
+                    PsConstantFunction(ConstantFunctions.PosInfinity, lhs_dtype), []
+                )
             case ReductionOp.Max:
-                init_val = PsCall(PsConstantFunction(ConstantFunctions.NegInfinity, lhs_dtype), [])
+                init_val = PsCall(
+                    PsConstantFunction(ConstantFunctions.NegInfinity, lhs_dtype), []
+                )
             case _:
                 raise PsInternalCompilerError(
                     f"Unsupported kind of reduction assignment: {reduction_op}."
@@ -315,7 +323,7 @@ class KernelCreationContext:
         """Collection of fields that occured during the current kernel translation."""
         return self._fields_collection
 
-    def add_field(self, field: Field, const: bool = False):
+    def add_field(self, field: Field | IField, const: bool = False):
         """Add the given field to the context's fields collection.
 
         This method adds the passed ``field`` to the context's field collection, which is
@@ -344,30 +352,38 @@ class KernelCreationContext:
                 return
 
         #   Check field constraints, create buffer, and add them to the collection
-        match field.field_type:
-            case FieldType.GENERIC | FieldType.STAGGERED | FieldType.STAGGERED_FLUX:
-                buf = self._create_regular_field_buffer(field, const)
-                self._fields_collection.domain_fields.add(field)
+        if isinstance(field, Field):
+            #   Legacy fields
+            match field.field_type:
+                case FieldType.GENERIC | FieldType.STAGGERED | FieldType.STAGGERED_FLUX:
+                    buf = self._create_regular_field_buffer(field, const)
+                    self._fields_collection.domain_fields.add(field)
 
-            case FieldType.BUFFER:
-                buf = self._create_buffer_field_buffer(field, const)
-                self._fields_collection.buffer_fields.add(field)
+                case FieldType.BUFFER:
+                    buf = self._create_buffer_field_buffer(field, const)
+                    self._fields_collection.buffer_fields.add(field)
 
-            case FieldType.INDEXED:
-                if field.spatial_dimensions != 1:
-                    raise KernelConstraintsError(
-                        f"Invalid spatial shape of index field {field.name}: {field.spatial_dimensions}. "
-                        "Index fields must be one-dimensional."
-                    )
-                buf = self._create_regular_field_buffer(field, const)
-                self._fields_collection.index_fields.add(field)
+                case FieldType.INDEXED:
+                    if field.spatial_dimensions != 1:
+                        raise KernelConstraintsError(
+                            f"Invalid spatial shape of index field {field.name}: {field.spatial_dimensions}. "
+                            "Index fields must be one-dimensional."
+                        )
+                    buf = self._create_regular_field_buffer(field, const)
+                    self._fields_collection.index_fields.add(field)
 
-            case FieldType.CUSTOM:
-                buf = self._create_regular_field_buffer(field, const)
-                self._fields_collection.custom_fields.add(field)
+                case FieldType.CUSTOM:
+                    buf = self._create_regular_field_buffer(field, const)
+                    self._fields_collection.custom_fields.add(field)
 
-            case _:
-                assert False, "unreachable code"
+                case _:
+                    assert False, "unreachable code"
+        elif isinstance(field, IField):
+            #   New-style fields
+            buf = self._create_buffer_from_spec(field, field.get_buffer_spec(), const)
+            self._fields_collection.ifields.add(field)
+        else:
+            raise PsInternalCompilerError(f"Unexpected type of field: {type(field)}")
 
         self._fields_and_buffers[field.name] = FieldBufferPair(field, buf)
 
@@ -376,7 +392,7 @@ class KernelCreationContext:
         # return self._fields_and_arrays.values()
         yield from (item.buffer for item in self._fields_and_buffers.values())
 
-    def get_buffer(self, field: Field) -> PsBuffer:
+    def get_buffer(self, field: Field | IField) -> PsBuffer:
         """Retrieve the underlying array for a given field.
 
         If the given field was not previously registered using `add_field`,
@@ -451,19 +467,38 @@ class KernelCreationContext:
                 )
 
     def _create_regular_field_buffer(self, field: Field, const: bool) -> PsBuffer:
+        shape = field.shape
+        strides = field.strides
+
+        # The legacy frontend doesn't quite agree with itself on how to model
+        # fields with trivial index dimensions. Sometimes the index_shape is empty,
+        # sometimes its (1,). This is canonicalized here.
+        if not field.index_shape:
+            shape += (1,)
+            strides += (1,)
+
+        bspec = FieldBufferSpec(
+            field.dtype, DEFAULTS.field_pointer_name(field.name), shape, strides
+        )
+
+        return self._create_buffer_from_spec(field, bspec, const)
+
+    def _create_buffer_from_spec(
+        self, field: Field | IField, bspec: FieldBufferSpec, const: bool
+    ):
         idx_types = set(
             self._normalize_type(s)
-            for s in chain(field.shape, field.strides)
+            for s in chain(bspec.shape, bspec.strides)
             if isinstance(s, TypedSymbol)
         )
 
-        entry_type = self.resolve_dynamic_type(field.dtype)
+        entry_type = self.resolve_dynamic_type(bspec.dtype)
         if const:
             entry_type = constify(entry_type)
 
         if len(idx_types) > 1:
             raise KernelConstraintsError(
-                f"Multiple incompatible types found in index symbols of field {field}: "
+                f"Multiple incompatible types found in index symbols of field {field.name}: "
                 f"{idx_types}"
             )
 
@@ -475,15 +510,8 @@ class KernelCreationContext:
             else:
                 return PsConstant(s, idx_type)
 
-        buf_shape = [convert_size(s) for s in field.shape]
-        buf_strides = [convert_size(s) for s in field.strides]
-
-        # The frontend doesn't quite agree with itself on how to model
-        # fields with trivial index dimensions. Sometimes the index_shape is empty,
-        # sometimes its (1,). This is canonicalized here.
-        if not field.index_shape:
-            buf_shape += [convert_size(1)]
-            buf_strides += [convert_size(1)]
+        buf_shape = [convert_size(s) for s in bspec.shape]
+        buf_strides = [convert_size(s) for s in bspec.strides]
 
         from ...codegen.properties import FieldShape, FieldStride
 
@@ -496,7 +524,7 @@ class KernelCreationContext:
                 stride.add_property(FieldStride(field, i))
 
         base_ptr = self.get_symbol(
-            DEFAULTS.field_pointer_name(field.name),
+            bspec.base_ptr_name,
             PsPointerType(entry_type, restrict=True),
         )
 

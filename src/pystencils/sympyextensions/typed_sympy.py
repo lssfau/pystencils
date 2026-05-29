@@ -10,6 +10,8 @@ from sympy.logic.boolalg import Boolean
 
 from warnings import warn
 
+from .atom_proxy import AtomProxy
+
 
 def is_loop_counter_symbol(symbol):
     from ..defaults import DEFAULTS
@@ -39,28 +41,20 @@ class DynamicType(Enum):
             case DynamicType.INDEX_TYPE:
                 return "ps::index_t"
 
+    def _latexname(self) -> str:
+        match self:
+            case DynamicType.NUMERIC_TYPE:
+                return r"\mathbb{R}"
+            case DynamicType.INDEX_TYPE:
+                return r"\mathbb{Z}"
 
-class TypeAtom(sp.Atom):
+
+real_t = DynamicType.NUMERIC_TYPE
+index_t = DynamicType.INDEX_TYPE
+
+
+class TypeAtom(AtomProxy[PsType | DynamicType]):
     """Wrapper around a type to disguise it as a SymPy atom."""
-
-    _dtype: PsType | DynamicType
-
-    def __new__(cls, dtype: PsType | DynamicType):
-        obj = super().__new__(cls)
-        obj._dtype = dtype
-        return obj
-
-    def _sympystr(self, *args, **kwargs):
-        return str(self._dtype)
-
-    def get(self) -> PsType | DynamicType:
-        return self._dtype
-
-    def _hashable_content(self):
-        return (self._dtype,)
-
-    def __getnewargs__(self):
-        return (self._dtype,)
 
 
 def assumptions_from_dtype(dtype: PsType | DynamicType):

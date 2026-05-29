@@ -497,7 +497,7 @@ def test_vectorize_buffer_acc():
     vectorize = AstVectorizer(ctx)
 
     field = fields("f(3): [3D]", layout="fzyx")
-    ispace = FullIterationSpace.create_with_ghost_layers(ctx, 0, archetype_field=field)
+    ispace = FullIterationSpace.create_with_ghost_layers(ctx, 0, field)
     ctx.set_iteration_space(ispace)
 
     ctr = ispace.dimensions_in_loop_order()[-1].counter
@@ -733,7 +733,7 @@ def test_invalid_multiple_induction_vars():
     for decl in [
         factory.parse_sympy(Assignment(i, ctr + 1)),
         factory.parse_sympy(Assignment(j, 2 * i + 1)),
-        factory.parse_sympy(Assignment(y, i**2))
+        factory.parse_sympy(Assignment(y, i**2)),
     ]:
         vectorize(decl, vc)
 
@@ -749,7 +749,7 @@ def test_invalid_multiple_induction_vars():
 
     with pytest.raises(VectorizationError):
         _ = vectorize(factory.parse_sympy(Assignment(x, mem_acc(ptr, i * 2 * j))), vc)
-    
+
     with pytest.raises(VectorizationError):
         _ = vectorize(factory.parse_sympy(Assignment(x, mem_acc(ptr, ctr * j))), vc)
 

@@ -8,6 +8,7 @@ from functools import cache
 import sympy as sp
 
 from ..field import Field
+from ..grids.protocols import IField, IFieldAccess
 from ..sympyextensions.typed_sympy import TypedSymbol
 from ..sympyextensions.pointers import mem_acc
 from ..sympyextensions.reduction import ReductionOp
@@ -70,15 +71,15 @@ class Flowgraph:
         return self._effects
 
     @property
-    def fields(self) -> frozenset[Field]:
+    def fields(self) -> frozenset[Field | IField]:
         return self._fields_read | self._fields_written
 
     @property
-    def fields_read(self) -> frozenset[Field]:
+    def fields_read(self) -> frozenset[Field | IField]:
         return self._fields_read
 
     @property
-    def fields_written(self) -> frozenset[Field]:
+    def fields_written(self) -> frozenset[Field | IField]:
         return self._fields_written
 
     def atoms(self, *types) -> set[sp.Basic]:
@@ -239,11 +240,11 @@ class Export(FlowgraphAssignment[sp.Symbol | TypedSymbol]):
             )
 
 
-SymbolicMemoryLoc = Field.Access | mem_acc
+SymbolicMemoryLoc = Field.Access | mem_acc | IFieldAccess
 """Expression types that are valid memory locations and can be used on the LHS of `Store`."""
 
 
-class Store(FlowgraphAssignment[SymbolicMemoryLoc]):
+class Store(FlowgraphAssignment[SymbolicMemoryLoc]):  # type: ignore
     """`Store` assignments represent writing a value to an abstract memory location.
 
     Stores act as exports to the bottom node (:math:`\\bot`),

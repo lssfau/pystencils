@@ -3,17 +3,14 @@ import sympy as sp
 import pystencils as ps
 
 from pystencils import fields, TypedSymbol
-from pystencils.sympyextensions.reduction import ReductionOp
 from pystencils.flow.flowgraph import (
     EquationsBlock,
     Top,
     Bottom,
     Let,
     Export,
-    Store,
-    Reduce,
-    Cases,
 )
+from pystencils.grids import TensorField
 from pystencils.flow.canonicalize_flowgraph import CanonicalizeFlowgraph, CanonicalizationError
 
 
@@ -131,6 +128,52 @@ def test_free_symbols():
 def test_field_collection():
     x, y, z, w = sp.symbols("x, y, z, w")
     f, g, h = fields("f(2), g, h(3): [2D]")
+
+    canon = CanonicalizeFlowgraph()
+
+    @ps.flow.block
+    def block1(_b):
+        _b.let[x] = f(1)
+        _b.export[y] = x + 1
+
+    @ps.flow.block(preds=[block1])
+    def block2(_b):
+        _b.store[f(0)] = y
+        _b.export[z] = g()
+
+    @ps.flow.block(preds=[block2])
+    def block3(_b):
+        _b.store[h(1)] = z
+        _b.store[h(2)] = z + 1
+
+    bot = Bottom([block2, block3])
+
+    canon_result = canon(bot)
+
+    assert canon_result.fields_read == {f, g}
+    assert canon_result.fields_written == {f, h}
+
+    @ps.flow.cases
+    def cs(cases):
+        @cases.case(f(0) > 0)
+        def _(_c):
+            _c.store[h(1)] = g()
+
+        @cases.case(f(0) < 0)
+        def _(_c):
+            _c.store[h(1)] = 3.2
+
+    canon_result = canon(cs)
+
+    assert canon_result.fields_read == {f, g}
+    assert canon_result.fields_written == {h}
+
+
+def test_field_collection_new_fields():
+    x, y, z, w = sp.symbols("x, y, z, w")
+    f = TensorField("f", 2, (2,))
+    g = TensorField("g", 2)
+    h = TensorField("h", 2, (3,))
 
     canon = CanonicalizeFlowgraph()
 

@@ -7,6 +7,7 @@ from operator import mul
 
 from ...simp import AssignmentCollection
 from ...flow.flowgraph import Flowgraph
+from ...grids.protocols import IterationLimits, IField
 
 from ...defaults import DEFAULTS
 from ...field import Field, FieldType
@@ -82,12 +83,17 @@ class FullIterationSpace(IterationSpace):
     def create_with_ghost_layers(
         ctx: KernelCreationContext,
         ghost_layers: int | Sequence[int | tuple[int, int]],
-        archetype_field: Field,
+        ilimits: IterationLimits | Field,
     ) -> FullIterationSpace:
         """Create an iteration space over an archetype field with ghost layers."""
+        from .ast_factory import AstFactory
 
-        archetype_array = ctx.get_buffer(archetype_field)
-        dim = archetype_field.spatial_dimensions
+        factory = AstFactory(ctx)
+
+        if isinstance(ilimits, Field):
+            ilimits = IterationLimits.from_legacy_field(ilimits)
+
+        dim = ilimits.rank
 
         counters = [
             ctx.get_symbol(name, ctx.index_dtype)
@@ -107,13 +113,11 @@ class FullIterationSpace(IterationSpace):
 
         ghost_layer_exprs = [
             (
-                PsConstantExpr(PsConstant(gl_left, ctx.index_dtype)),
-                PsConstantExpr(PsConstant(gl_right, ctx.index_dtype)),
+                factory.parse_index(gl_left),
+                factory.parse_index(gl_right),
             )
             for (gl_left, gl_right) in ghost_layers_spec
         ]
-
-        spatial_shape = archetype_array.shape[:dim]
 
         from .typification import Typifier
 
@@ -121,20 +125,20 @@ class FullIterationSpace(IterationSpace):
 
         dimensions = [
             FullIterationSpace.Dimension(
-                gl_left, typify(PsExpression.make(shape) - gl_right), one, ctr
+                gl_left, typify(factory.parse_index(shape) - gl_right), one, ctr
             )
             for (gl_left, gl_right), shape, ctr in zip(
-                ghost_layer_exprs, spatial_shape, counters, strict=True
+                ghost_layer_exprs, ilimits.bounds, counters, strict=True
             )
         ]
 
-        return FullIterationSpace(ctx, dimensions, archetype_field=archetype_field)
+        return FullIterationSpace(ctx, dimensions, ilimits.loop_order)
 
     @staticmethod
     def create_from_slice(
         ctx: KernelCreationContext,
         iteration_slice: int | slice | tuple[int | slice, ...],
-        archetype_field: Field | None = None,
+        ilimits: IterationLimits | Field | None = None,
     ):
         """Create an iteration space from a sequence of slices, optionally over an archetype field.
 
@@ -143,6 +147,13 @@ class FullIterationSpace(IterationSpace):
             iteration_slice: The iteration slices for each dimension; for valid formats, see `AstFactory.parse_slice`
             archetype_field: Optionally, an archetype field that dictates the upper slice limits and loop order.
         """
+        from .ast_factory import AstFactory
+
+        factory = AstFactory(ctx)
+
+        if isinstance(ilimits, Field):
+            ilimits = IterationLimits.from_legacy_field(ilimits)
+
         if not isinstance(iteration_slice, tuple):
             iteration_slice = (iteration_slice,)
 
@@ -152,17 +163,15 @@ class FullIterationSpace(IterationSpace):
                 "At least one slice must be specified to create an iteration space"
             )
 
-        archetype_size: tuple[PsSymbol | PsConstant | None, ...]
-        if archetype_field is not None:
-            archetype_array = ctx.get_buffer(archetype_field)
-
-            if archetype_field.spatial_dimensions != dim:
+        archetype_size: tuple[PsExpression | None, ...]
+        if ilimits is not None:
+            if ilimits.rank != dim:
                 raise ValueError(
                     f"Number of dimensions in slice ({len(iteration_slice)}) "
                     f" did not equal iteration space dimensionality ({dim})"
                 )
 
-            archetype_size = tuple(archetype_array.shape[:dim])
+            archetype_size = tuple(factory.parse_index(b) for b in ilimits.bounds)
         else:
             archetype_size = (None,) * dim
 
@@ -171,13 +180,7 @@ class FullIterationSpace(IterationSpace):
             for name in DEFAULTS.spatial_counter_names[:dim]
         ]
 
-        from .ast_factory import AstFactory
-
-        factory = AstFactory(ctx)
-
-        def to_dim(
-            slic: int | slice, size: PsSymbol | PsConstant | None, ctr: PsSymbol
-        ):
+        def to_dim(slic: int | slice, size: PsExpression | None, ctr: PsSymbol):
             start, stop, step = factory.parse_slice(slic, size)
             return FullIterationSpace.Dimension(start, stop, step, ctr)
 
@@ -188,20 +191,26 @@ class FullIterationSpace(IterationSpace):
             )
         ]
 
-        return FullIterationSpace(ctx, dimensions, archetype_field=archetype_field)
+        return FullIterationSpace(
+            ctx,
+            dimensions,
+            loop_order=ilimits.loop_order if ilimits is not None else None,
+        )
 
     def __init__(
         self,
         ctx: KernelCreationContext,
         dimensions: Sequence[FullIterationSpace.Dimension],
-        archetype_field: Field | None = None,
+        loop_order: tuple[int, ...] | None = None,
     ):
         super().__init__(tuple(dim.counter for dim in dimensions))
 
         self._ctx = ctx
         self._dimensions = dimensions
 
-        self._archetype_field = archetype_field
+        if loop_order is None:
+            loop_order = tuple(range(len(dimensions)))
+        self._loop_order = loop_order
 
     @property
     def dimensions(self):
@@ -228,24 +237,12 @@ class FullIterationSpace(IterationSpace):
         return tuple(dim.step for dim in self._dimensions)
 
     @property
-    def archetype_field(self) -> Field | None:
-        """Field whose shape and memory layout act as archetypes for this iteration space's dimensions."""
-        return self._archetype_field
-
-    @property
     def loop_order(self) -> tuple[int, ...]:
         """Return the loop order of this iteration space, ordered from slowest to fastest coordinate."""
-        if self._archetype_field is not None:
-            return self._archetype_field.layout
-        else:
-            return tuple(range(len(self.dimensions)))
+        return self._loop_order
 
     def dimensions_in_loop_order(self) -> Sequence[FullIterationSpace.Dimension]:
         """Return the dimensions of this iteration space ordered from the slowest to the fastest coordinate.
-
-        If this iteration space has an `archetype field <FullIterationSpace.archetype_field>` set,
-        its field layout is used to determine the ideal loop order;
-        otherwise, the dimensions are returned as they are
         """
         return [self._dimensions[i] for i in self.loop_order]
 
@@ -367,8 +364,8 @@ class SparseIterationSpace(IterationSpace):
         return decls
 
 
-def get_archetype_field(
-    fields: set[Field],
+def infer_iteration_limits(
+    fields: Iterable[Field | IField],
     check_compatible_shapes: bool = True,
     check_same_layouts: bool = True,
     check_same_dimensions: bool = True,
@@ -378,33 +375,52 @@ def get_archetype_field(
     Raises:
         KernelConstrainsError: If any two fields with conflicting properties are encountered.
     """
+    from ...sympyextensions import is_integer_sequence
 
-    shapes = set(f.spatial_shape for f in fields)
-    fixed_shapes = set(f.spatial_shape for f in fields if f.has_fixed_shape)
-    layouts = set(f.layout for f in fields)
-    dimensionalities = set(f.spatial_dimensions for f in fields)
+    old_fields = [f for f in fields if isinstance(f, Field)]
+
+    bounds = set(f.spatial_shape for f in old_fields)
+    fixed_bounds = set(f.spatial_shape for f in old_fields if f.has_fixed_shape)
+    loop_orders = set(f.layout for f in old_fields)
+    dimensionalities = set(f.spatial_dimensions for f in old_fields)
+
+    new_field_ilimits = [
+        f.get_iteration_limits() for f in fields if isinstance(f, IField)
+    ]
+
+    bounds |= set(ilim.bounds for ilim in new_field_ilimits)
+    fixed_bounds |= set(
+        ilim.bounds for ilim in new_field_ilimits if is_integer_sequence(ilim.bounds)
+    )
+    loop_orders |= set(ilim.loop_order for ilim in new_field_ilimits)
+    dimensionalities |= set(ilim.rank for ilim in new_field_ilimits)
 
     if check_same_dimensions and len(dimensionalities) != 1:
         raise KernelConstraintsError(
             "All fields must have the same number of spatial dimensions."
         )
 
-    if check_same_layouts and len(layouts) != 1:
-        raise KernelConstraintsError("All fields must have the same memory layout.")
+    if check_same_layouts and len(loop_orders) != 1:
+        raise KernelConstraintsError(
+            "Ambiguous loop order: All fields must prescribe the same loop order to the kernel."
+        )
 
     if check_compatible_shapes:
-        if len(fixed_shapes) > 0:
-            if len(fixed_shapes) != len(shapes):
+        if len(fixed_bounds) > 0:
+            if len(fixed_bounds) != len(bounds):
                 raise KernelConstraintsError(
                     "Cannot mix fixed- and variable-shape fields."
                 )
-            if len(fixed_shapes) > 1:
+            if len(fixed_bounds) > 1:
                 raise KernelConstraintsError(
                     "Fixed-shape fields of different sizes encountered."
                 )
 
     archetype_field = sorted(fields, key=lambda f: str(f))[0]
-    return archetype_field
+    if isinstance(archetype_field, IField):
+        return archetype_field.get_iteration_limits()
+    else:
+        return IterationLimits(archetype_field.spatial_shape, archetype_field.layout)
 
 
 def create_sparse_iteration_space(
@@ -413,14 +429,14 @@ def create_sparse_iteration_space(
 ) -> IterationSpace:
     #   All domain and custom fields must have the same spatial dimensions
     #   TODO: Must all domain fields have the same shape?
-    archetype_field = get_archetype_field(
-        ctx.fields.domain_fields | ctx.fields.custom_fields,
+    ilimits = infer_iteration_limits(
+        ctx.fields.domain_fields | ctx.fields.custom_fields | ctx.fields.ifields,
         check_compatible_shapes=False,
         check_same_layouts=False,
         check_same_dimensions=True,
     )
 
-    dim = archetype_field.spatial_dimensions
+    dim = ilimits.rank
     coord_members = [
         PsStructType.Member(name, ctx.index_dtype)
         for name in DEFAULTS.index_struct_coordinate_names[:dim]
@@ -496,7 +512,7 @@ def create_full_iteration_space(
     ctx: KernelCreationContext,
     ghost_layers: None | int | Sequence[int | tuple[int, int]] = None,
     iteration_slice: None | int | slice | tuple[int | slice, ...] = None,
-) -> IterationSpace:
+) -> FullIterationSpace:
     """Create a dense iteration space from a sequence of assignments and iteration slice information.
 
     This function finds all accesses to fields in the given assignment collection,
@@ -524,7 +540,6 @@ def create_full_iteration_space(
 
     .. attention::
         The ``ghost_layers`` and ``iteration_slice`` arguments are mutually exclusive.
-        Also, if ``infer_ghost_layers=True``, none of them may be set.
     """
 
     if ctx.fields.index_fields:
@@ -542,11 +557,11 @@ def create_full_iteration_space(
     # - We have no domain fields, but at least one custom field -> determine common field from custom fields
     # - We have neither domain nor custom fields -> Error
 
-    if ctx.fields.domain_fields:
-        archetype_field = get_archetype_field(ctx.fields.domain_fields)
+    if ctx.fields.domain_fields | ctx.fields.ifields:
+        ilimits = infer_iteration_limits(ctx.fields.domain_fields | ctx.fields.ifields)
     elif ctx.fields.custom_fields:
         #   TODO: Warn about inferring iteration space from custom fields
-        archetype_field = get_archetype_field(ctx.fields.custom_fields)
+        ilimits = infer_iteration_limits(ctx.fields.custom_fields)
     else:
         raise PsInputError(
             "Unable to construct iteration space: The kernel contains no accesses to domain or custom fields."
@@ -554,12 +569,8 @@ def create_full_iteration_space(
 
     if ghost_layers is not None:
         ctx.metadata["ghost_layers"] = ghost_layers
-        return FullIterationSpace.create_with_ghost_layers(
-            ctx, ghost_layers, archetype_field
-        )
+        return FullIterationSpace.create_with_ghost_layers(ctx, ghost_layers, ilimits)
     elif iteration_slice is not None:
-        return FullIterationSpace.create_from_slice(
-            ctx, iteration_slice, archetype_field
-        )
+        return FullIterationSpace.create_from_slice(ctx, iteration_slice, ilimits)
     else:
         assert False, "unreachable code"

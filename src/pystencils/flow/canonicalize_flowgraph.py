@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import sympy as sp
 
 from ..field import Field
+from ..grids.protocols import IField, IFieldAccess
 from .flowgraph import (
     FlowgraphNode,
     Bottom,
@@ -34,8 +35,8 @@ class CanonicalizationResult:
     free_symbols: frozenset[sp.Symbol]
     exports: frozenset[sp.Symbol]
     effects: frozenset[Effect]
-    fields_written: frozenset[Field]
-    fields_read: frozenset[Field]
+    fields_written: frozenset[Field | IField]
+    fields_read: frozenset[Field | IField]
 
 
 @dataclass
@@ -93,7 +94,9 @@ class CanonicalizeFlowgraph:
         )
 
         fields_written = frozenset(
-            ef.lhs.field for ef in effects if isinstance(ef.lhs, Field.Access)
+            ef.lhs.field
+            for ef in effects
+            if isinstance(ef.lhs, Field.Access | IFieldAccess)
         )
 
         return CanonicalizationResult(
@@ -163,28 +166,36 @@ class CanonicalizeFlowgraph:
 
     def _collect_field_reads(
         self, node: FlowgraphNode | FlowgraphAssignment
-    ) -> frozenset[Field]:
+    ) -> frozenset[Field | IField]:
         match node:
             case EquationsBlock(assignments):
                 return frozenset().union(
                     *(self._collect_field_reads(asm) for asm in assignments)
                 )
             case FlowgraphAssignment(lhs, rhs):
-                accesses: set[Field.Access] = lhs.atoms(Field.Access) | rhs.atoms(
-                    Field.Access
+                accesses: set[Field.Access | IFieldAccess] = (
+                    lhs.atoms(Field.Access)
+                    | lhs.atoms(IFieldAccess)
+                    | rhs.atoms(Field.Access)
+                    | rhs.atoms(IFieldAccess)
                 )
-                if isinstance(lhs, Field.Access):
+                if isinstance(lhs, Field.Access | IFieldAccess):
                     accesses.remove(lhs)
                 return frozenset(a.field for a in accesses)
             case Cases():
-                conds_accesses: frozenset[Field.Access] = frozenset().union(
-                    *(cond.atoms(Field.Access) for cond in node.conditions)
+                conds_accesses: frozenset[
+                    Field.Access | IFieldAccess
+                ] = frozenset().union(
+                    *(
+                        cond.atoms(Field.Access) | cond.atoms(IFieldAccess)
+                        for cond in node.conditions
+                    )
                 )
 
-                conds_fields: frozenset[Field] = frozenset(
+                conds_fields: frozenset[Field | IField] = frozenset(
                     a.field for a in conds_accesses
                 )
-                subgrs_fields: frozenset[Field] = frozenset().union(
+                subgrs_fields: frozenset[Field | IField] = frozenset().union(
                     *(
                         chain.from_iterable(
                             self._collect_field_reads(node) for node in subgr.walk()

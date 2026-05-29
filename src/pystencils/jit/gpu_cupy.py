@@ -10,7 +10,7 @@ except ImportError:
     HAVE_CUPY = False
 
 from ..codegen import Target
-from ..field import FieldType
+from ..field import FieldType, Field
 
 from .jit import JitBase, JitError, KernelWrapper
 from ..codegen import (
@@ -105,49 +105,59 @@ class CupyKernelWrapper(KernelWrapper):
         def check_shape(field_ptr: Parameter, arr: cp.ndarray):
             field = field_ptr.fields[0]
 
-            if field.has_fixed_shape:
-                expected_shape = tuple(int(s) for s in field.shape)
-                if isinstance(field.dtype, PsStructType):
-                    assert expected_shape[-1] == 1
-                    expected_shape = expected_shape[:-1]
+            if isinstance(field, Field):
+                if field.has_fixed_shape:
+                    expected_shape = tuple(int(s) for s in field.shape)
+                    if isinstance(field.dtype, PsStructType):
+                        assert expected_shape[-1] == 1
+                        expected_shape = expected_shape[:-1]
 
-                actual_shape = arr.shape
-                if expected_shape != actual_shape:
-                    raise ValueError(
-                        f"Array kernel argument {field.name} had unexpected shape:\n"
-                        f"   Expected {expected_shape}, but got {actual_shape}"
-                    )
-
-                expected_strides = tuple(int(s) for s in field.strides)
-                if isinstance(field.dtype, PsStructType):
-                    assert expected_strides[-1] == 1
-                    expected_strides = expected_strides[:-1]
-
-                actual_strides = tuple(s // arr.dtype.itemsize for s in arr.strides)
-                if expected_strides != actual_strides:
-                    raise ValueError(
-                        f"Array kernel argument {field.name} had unexpected strides:\n"
-                        f"   Expected {expected_strides}, but got {actual_strides}"
-                    )
-
-            match field.field_type:
-                case FieldType.GENERIC:
-                    field_shapes.add(arr.shape[: field.spatial_dimensions])
-
-                    if len(field_shapes) > 1:
+                    actual_shape = arr.shape
+                    if expected_shape != actual_shape:
                         raise ValueError(
-                            "Incompatible array shapes:"
-                            "All arrays passed for generic fields to a kernel must have the same shape."
+                            f"Array kernel argument {field.name} had unexpected shape:\n"
+                            f"   Expected {expected_shape}, but got {actual_shape}"
                         )
 
-                case FieldType.INDEXED:
-                    index_shapes.add(arr.shape)
+                    expected_strides = tuple(int(s) for s in field.strides)
+                    if isinstance(field.dtype, PsStructType):
+                        assert expected_strides[-1] == 1
+                        expected_strides = expected_strides[:-1]
 
-                    if len(index_shapes) > 1:
+                    actual_strides = tuple(s // arr.dtype.itemsize for s in arr.strides)
+                    if expected_strides != actual_strides:
                         raise ValueError(
-                            "Incompatible array shapes:"
-                            "All arrays passed for index fields to a kernel must have the same shape."
+                            f"Array kernel argument {field.name} had unexpected strides:\n"
+                            f"   Expected {expected_strides}, but got {actual_strides}"
                         )
+
+                match field.field_type:
+                    case FieldType.GENERIC:
+                        field_shapes.add(arr.shape[: field.spatial_dimensions])
+
+                        if len(field_shapes) > 1:
+                            raise ValueError(
+                                "Incompatible array shapes:"
+                                "All arrays passed for generic fields to a kernel must have the same shape."
+                            )
+
+                    case FieldType.INDEXED:
+                        index_shapes.add(arr.shape)
+
+                        if len(index_shapes) > 1:
+                            raise ValueError(
+                                "Incompatible array shapes:"
+                                "All arrays passed for index fields to a kernel must have the same shape."
+                            )
+            else:
+                rank = field.get_iteration_limits().rank
+                field_shapes.add(arr.shape[:rank])
+
+                if len(field_shapes) > 1:
+                    raise ValueError(
+                        "Incompatible array shapes:"
+                        "All arrays passed for generic fields to a kernel must have the same shape."
+                    )
 
         #   Collect parameter values
 

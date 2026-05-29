@@ -7,4 +7,5 @@ sympy_features
 field
 assignments
 sympyextensions
+grids
 :::

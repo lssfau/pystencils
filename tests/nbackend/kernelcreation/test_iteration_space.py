@@ -1,7 +1,8 @@
 import pytest
 import numpy as np
 
-from pystencils import make_slice, Field, create_type
+from pystencils import make_slice, Field, create_type, DEFAULTS
+from pystencils.grids import TensorField
 from pystencils.sympyextensions.typed_sympy import TypedSymbol
 
 from pystencils.backend.constants import PsConstant
@@ -9,9 +10,10 @@ from pystencils.backend.kernelcreation import (
     KernelCreationContext,
     FullIterationSpace,
     AstFactory,
+    create_full_iteration_space,
 )
 from pystencils.backend.ast.expressions import PsAdd, PsConstantExpr, PsExpression
-from pystencils.backend.kernelcreation.typification import TypificationError
+from pystencils.backend.exceptions import TypificationError, KernelConstraintsError
 
 
 def test_slices_over_field():
@@ -154,9 +156,7 @@ def test_negative_singular_slices():
         PsExpression.make(archetype_arr.shape[1]) + factory.parse_index(-1)
     )
 
-    assert dims[1].stop.structurally_equal(
-        PsExpression.make(archetype_arr.shape[1])
-    )
+    assert dims[1].stop.structurally_equal(PsExpression.make(archetype_arr.shape[1]))
 
 
 def test_field_independent_slices():
@@ -222,3 +222,49 @@ def test_iteration_count():
     iters = [empty_ispace.actual_iterations(coord) for coord in range(2)]
     assert iters[0].structurally_equal(zero)
     assert iters[1].structurally_equal(zero)
+
+
+def test_ispace_from_tensor_fields():
+    ctx = KernelCreationContext()
+
+    ctx.add_field(TensorField("f", 3, (3,), layout="fzyx"))
+    ctx.add_field(TensorField("g", 3, (), layout="fzyx"))
+
+    ispace = create_full_iteration_space(ctx, ghost_layers=0)
+    assert ispace.rank == 3
+    assert ispace.loop_order == (2, 1, 0)
+    assert (
+        tuple(d.counter.name for d in ispace.dimensions)
+        == DEFAULTS.spatial_counter_names[:3]
+    )
+
+    ctx = KernelCreationContext()
+
+    ctx.add_field(TensorField("f", 2, (2, 2), layout="numpy"))
+    ctx.add_field(TensorField("g", 2, (), layout="C"))
+
+    ispace = create_full_iteration_space(ctx, ghost_layers=0)
+    assert ispace.rank == 2
+    assert ispace.loop_order == (0, 1)
+    assert (
+        tuple(d.counter.name for d in ispace.dimensions)
+        == DEFAULTS.spatial_counter_names[:2]
+    )
+
+    with pytest.raises(KernelConstraintsError):
+        #   Non-matching dimensionalities
+        ctx = KernelCreationContext()
+
+        ctx.add_field(TensorField("f", 1, (2, 2), layout="numpy"))
+        ctx.add_field(TensorField("g", 2, (), layout="C"))
+
+        _ = create_full_iteration_space(ctx, ghost_layers=0)
+
+    with pytest.raises(KernelConstraintsError):
+        #   Non-matching loop orders
+        ctx = KernelCreationContext()
+
+        ctx.add_field(TensorField("f", 3, (3,), layout="fzyx"))
+        ctx.add_field(TensorField("g", 3, (), layout="C"))
+
+        _ = create_full_iteration_space(ctx, ghost_layers=0)

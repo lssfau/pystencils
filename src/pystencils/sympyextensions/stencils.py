@@ -14,10 +14,8 @@ def convolve(mask, field: Field) -> sp.Expr:
     expr = 0
     offset = tuple(s // 2 for s in mask.shape)
 
-    fa = field.center()
-
     for index, factor in np.ndenumerate(mask):
         shift = tuple(i - o for i, o in zip(index, offset))
-        expr += factor * fa.get_shifted(*shift)
+        expr += factor * field[shift]()
 
     return expr

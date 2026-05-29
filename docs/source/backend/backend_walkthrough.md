@@ -76,9 +76,10 @@ from pystencils.backend.kernelcreation import (
     KernelCreationContext,
     FullIterationSpace
 )
+from pystencils.grids import IterationLimits
 
 ctx = KernelCreationContext()
-ispace = FullIterationSpace.create_with_ghost_layers(ctx, 0, f)
+ispace = FullIterationSpace.create_with_ghost_layers(ctx, 0, IterationLimits.from_legacy_field(f))
 ctx.set_iteration_space(ispace)
 ```
 

@@ -24,9 +24,7 @@ def test_insert_pragmas():
     factory = AstFactory(ctx)
 
     f, g = fields("f, g: [3D]")
-    ispace = FullIterationSpace.create_from_slice(
-        ctx, make_slice[:, :, :], archetype_field=f
-    )
+    ispace = FullIterationSpace.create_from_slice(ctx, make_slice[:, :, :], f)
     ctx.set_iteration_space(ispace)
 
     stencil = list(product([-1, 0, 1], [-1, 0, 1], [-1, 0, 1]))

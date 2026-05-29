@@ -25,7 +25,7 @@ def test_loop_cutting():
     x, y, z = sp.symbols("x, y, z")
 
     f = Field.create_generic("f", 1, index_shape=(2,))
-    ispace = FullIterationSpace.create_from_slice(ctx, make_slice[:], archetype_field=f)
+    ispace = FullIterationSpace.create_from_slice(ctx, make_slice[:], f)
     ctx.set_iteration_space(ispace)
 
     loop_body = PsBlock(
@@ -76,9 +76,7 @@ def test_loop_peeling():
     x, y, z = sp.symbols("x, y, z")
 
     f = Field.create_generic("f", 1, index_shape=(2,))
-    ispace = FullIterationSpace.create_from_slice(
-        ctx, slice(2, 11, 3), archetype_field=f
-    )
+    ispace = FullIterationSpace.create_from_slice(ctx, slice(2, 11, 3), f)
     ctx.set_iteration_space(ispace)
 
     loop_body = PsBlock(
@@ -124,7 +122,7 @@ def test_loop_peeling_back():
     x, y, z = sp.symbols("x, y, z")
 
     f = Field.create_generic("f", 1, index_shape=(2,))
-    ispace = FullIterationSpace.create_from_slice(ctx, make_slice[:], archetype_field=f)
+    ispace = FullIterationSpace.create_from_slice(ctx, make_slice[:], f)
     ctx.set_iteration_space(ispace)
 
     loop_body = PsBlock(

@@ -13,8 +13,15 @@ from pystencils.jit.jit import KernelWrapper
 
 from ...codegen import GpuKernel, Kernel, Parameter
 from ...codegen.gpu_indexing import GpuLaunchConfiguration, HardwareProperties
-from ...codegen.properties import FieldBasePtr, FieldShape, FieldStride, SYCLItem, SYCLNDItem
+from ...codegen.properties import (
+    FieldBasePtr,
+    FieldShape,
+    FieldStride,
+    SYCLItem,
+    SYCLNDItem,
+)
 from ...field import Field, FieldType
+from ...grids import IField
 from ...sympyextensions import DynamicType
 from ...types import PsPointerType, PsType, deconstify
 from ..cpu.compiler_info import CompilerInfo
@@ -77,7 +84,7 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
             }
 
         def add_array_for_field(self, ptr_param: Parameter):
-            field: Field = ptr_param.fields[0]
+            field: Field | IField = ptr_param.fields[0]
 
             ptr_type = ptr_param.dtype
             assert isinstance(ptr_type, PsPointerType)
@@ -88,7 +95,12 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
                 elem_type = field.dtype
 
             parg_name = self.add_kwarg(field.name)
-            self._init_array_proxy(field.name, elem_type, len(field.shape), parg_name)
+            rank = (
+                len(field.shape)
+                if isinstance(field, Field)
+                else field.get_buffer_spec().rank
+            )
+            self._init_array_proxy(field.name, elem_type, rank, parg_name)
 
         def add_pointer_param(self, ptr_param: Parameter):
             ptr_type = ptr_param.dtype
@@ -129,9 +141,7 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
             self.array_proxy_defs.append(
                 f"ArrayProxy {proxy_name} = ArrayProxy::fromPyObject( {', '.join(proxy_ctor_args)} ) ;"
             )
-            self.queue_checks.append(
-                f"checkQueue( q, {proxy_name}.get_queue() );"
-            )
+            self.queue_checks.append(f"checkQueue( q, {proxy_name}.get_queue() );")
             if "array_queue" not in self.extra_substitutions:
                 self.extra_substitutions["array_queue"] = f"{proxy_name}.get_queue()"
             return proxy_name
@@ -147,7 +157,9 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
             self.argstruct_members.append(
                 f"{deconstify(param.dtype).c_string()} {param.name};"
             )
-            self.kernel_lambda_caption.append(f"{param.name} = kernel_args.{param.name}")
+            self.kernel_lambda_caption.append(
+                f"{param.name} = kernel_args.{param.name}"
+            )
             self.kernel_invocation_args.append(f"{param.name}")
             self.extract_kernel_args.append(f"{param.name} = {extraction};")
 
@@ -163,21 +175,31 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
                 param, f"{proxy_name}.data< {elem_type.c_string()} >()"
             )
 
-        def add_sycl_range_args(self, field: Field, ghost_layers):
+        def add_sycl_range_args(self, field: Field | IField, ghost_layers):
+            match field:
+                case Field():
+                    rank = field.spatial_dimensions
+                    spatial_bounds = field.spatial_shape
+                case IField():
+                    ilimits = field.get_iteration_limits()
+                    rank = ilimits.rank
+                    spatial_bounds = ilimits.bounds
+
             if isinstance(ghost_layers, int):
-                gl = (ghost_layers, ) * field.ndim
+                gl = (ghost_layers,) * rank
             else:
                 gl = ghost_layers
 
             if "sycl_range_arg" not in self.extra_substitutions:
-                field_shape = field.spatial_shape
+                shape_str = [
+                    f"{s}" if isinstance(s, sp.Symbol) else f"{s}"
+                    for s in spatial_bounds
+                ]
 
-                shape_str = [f"{s}" if isinstance(s, sp.Symbol) else f"{s}" for s in field_shape]
-
-                shape_args = [f'static_cast<size_t>({s} - {g})' for s, g in zip(shape_str, gl)]
-                self.extra_substitutions["sycl_range_arg"] = (
-                    f"{', '.join(shape_args)}"
-                )
+                shape_args = [
+                    f"static_cast<size_t>({s} - {g})" for s, g in zip(shape_str, gl)
+                ]
+                self.extra_substitutions["sycl_range_arg"] = f"{', '.join(shape_args)}"
 
         def add_scalar_param(self, param: Parameter):
             parg_name = self.add_kwarg(param.name)
@@ -232,32 +254,50 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
             self.kernel_lambda_caption.append("grid")
             self.kernel_lambda_caption.append("block")
 
-        def check_same_shape(self, fields: Sequence[Field]):
+        def check_same_shape(self, fields: Sequence[Field | IField]):
             if len(fields) > 1:
                 check_args = ", ".join(
                     "&" + self._array_proxy_name(f.name) for f in fields
                 )
-                rank = fields[0].spatial_dimensions
+                rep_field = fields[0]
+                if isinstance(rep_field, Field):
+                    rank = rep_field.spatial_dimensions
+                else:
+                    rank = rep_field.get_iteration_limits().rank
+
                 self.precondition_checks.append(
                     f"checkSameShape({{ {check_args} }}, {rank});"
                 )
 
-        def check_fixed_shape_and_strides(self, field: Field):
+        def check_fixed_shape_and_strides(self, field: Field | IField):
             proxy_name = self._array_proxy_name(field.name)
+            if isinstance(field, Field):
+                field_shape = field.spatial_shape
+
+                #   Scalar fields may omit their trivial index dimension
+                if field.index_shape not in ((), (1,)):
+                    field_shape += field.index_shape
+                    scalar_field = False
+                else:
+                    scalar_field = True
+
+                field_strides = field.strides[: len(field_shape)]
+            else:
+                bspec = field.get_buffer_spec()
+                field_shape = bspec.shape
+                field_strides = bspec.strides
+
+                #   New-style fields cannot have trivial index shape by design
+                #   -> can omit scalar-field check
+                scalar_field = False
+
             expect_shape = (
                 "("
                 + ", ".join(
-                    (str(s) if isinstance(s, int) else "*") for s in field.shape
+                    (str(s) if isinstance(s, int) else "*") for s in field_shape
                 )
                 + ")"
             )
-            field_shape = field.spatial_shape
-            #   Scalar fields may omit their trivial index dimension
-            if field.index_shape not in ((), (1,)):
-                field_shape += field.index_shape
-                scalar_field = False
-            else:
-                scalar_field = True
 
             for coord, size in enumerate(field_shape):
                 if isinstance(size, int):
@@ -273,11 +313,11 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
             expect_strides = (
                 "("
                 + ", ".join(
-                    (str(s) if isinstance(s, int) else "*") for s in field.strides
+                    (str(s) if isinstance(s, int) else "*") for s in field_strides
                 )
                 + ")"
             )
-            for coord, stride in enumerate(field.strides[: len(field_shape)]):
+            for coord, stride in enumerate(field_strides):
                 if isinstance(stride, int):
                     self.precondition_checks.append(
                         f'checkFieldStride("{expect_strides}", {proxy_name}, {coord}, {stride});'
@@ -347,7 +387,9 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
         for param in parameters:
             if param.get_properties(FieldBasePtr):
                 extr.add_array_for_field(param)
-                extr.add_sycl_range_args(param.fields[0], kernel.metadata.get("ghost_layers", 0))
+                extr.add_sycl_range_args(
+                    param.fields[0], kernel.metadata.get("ghost_layers", 0)
+                )
 
         for param in parameters:
             if ptr_props := param.get_properties(FieldBasePtr):
@@ -369,7 +411,13 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
         for f in fields:
             extr.check_fixed_shape_and_strides(f)
 
-        extr.check_same_shape([f for f in fields if f.field_type == FieldType.GENERIC])
+        extr.check_same_shape(
+            [
+                f
+                for f in fields
+                if isinstance(f, IField) or f.field_type == FieldType.GENERIC
+            ]
+        )
 
         return extr
 
@@ -403,7 +451,9 @@ class SyclKernelWrapper(KernelWrapper):
 
     @staticmethod
     def get_hardware_properties(device: dpctl.SyclDevice) -> HardwareProperties:
-        return HardwareProperties(None, device.max_work_group_size, device.max_work_item_sizes3d)
+        return HardwareProperties(
+            None, device.max_work_group_size, device.max_work_item_sizes3d
+        )
 
     def __call__(self, **kwargs) -> None:
         if self._launch_config:

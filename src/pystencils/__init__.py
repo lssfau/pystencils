@@ -5,6 +5,7 @@ from .defaults import DEFAULTS
 from . import fd
 from . import stencil as stencil
 from . import flow
+from . import grids
 from .display_utils import get_code_str, show_code, to_dot
 from .inspection import inspect
 from .field import Field, FieldType, fields
@@ -28,7 +29,7 @@ from .spatial_coordinates import (
 )
 from .assignment import Assignment, AddAugmentedAssignment, assignment_from_stencil
 from .simp import AssignmentCollection
-from .sympyextensions.typed_sympy import TypedSymbol, DynamicType
+from .sympyextensions.typed_sympy import TypedSymbol, DynamicType, real_t, index_t
 from .sympyextensions import SymbolCreator, tcast
 from .sympyextensions import random
 from .datahandling import create_data_handling
@@ -87,7 +88,10 @@ __all__ = [
     "fd",
     "stencil",
     "flow",
+    "grids",
     "tcast",
+    "real_t",
+    "index_t",
     "random",
     "inspect_ast",
 ]
