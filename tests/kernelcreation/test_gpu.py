@@ -12,7 +12,6 @@ from pystencils import (
     create_kernel,
     Target,
 )
-from pystencils.codegen.gpu_indexing import GpuIndexing, HardwareProperties
 
 from pystencils.slicing import (
     add_ghost_layers,
@@ -30,7 +29,11 @@ except ImportError:
     pytest.skip(reason="CuPy is not available", allow_module_level=True)
 
 
-@pytest.mark.parametrize("indexing_scheme", ["linear3d", "gridstrided_linear3d", "blockwise4d"])
+@pytest.mark.parametrize("indexing_scheme", [
+    "linear1d", "gridstrided_linear1d",
+    "linear3d", "gridstrided_linear3d",
+    "blockwise4d"
+])
 @pytest.mark.parametrize("manual_grid", [False, True])
 @pytest.mark.parametrize("assume_warp_aligned_block_size", [False, True])
 def test_indexing_options_3d(
@@ -62,6 +65,20 @@ def test_indexing_options_3d(
 
     if manual_grid:
         match indexing_scheme:
+            case "linear1d":
+                if assume_warp_aligned_block_size:
+                    kernel.launch_config.block_size = (1024, 1, 1)
+                    kernel.launch_config.grid_size = (30, 1, 1)
+                else:
+                    kernel.launch_config.block_size = (612, 1, 1)
+                    kernel.launch_config.grid_size = (42, 1, 1)
+            case "gridstrided_linear1d":
+                if assume_warp_aligned_block_size:
+                    kernel.launch_config.block_size = (512, 1, 1)
+                    kernel.launch_config.grid_size = (8, 1, 1)
+                else:
+                    kernel.launch_config.block_size = (612, 1, 1)
+                    kernel.launch_config.grid_size = (6, 1, 1)
             case "linear3d":
                 if assume_warp_aligned_block_size:
                     kernel.launch_config.block_size = (8, 10, 8)
@@ -83,6 +100,12 @@ def test_indexing_options_3d(
                 else:
                     kernel.launch_config.block_size = (40, 1, 1)
                     kernel.launch_config.grid_size = (32, 16, 1)
+
+    elif indexing_scheme == "linear1d" or "gridstrided_linear1d":
+        if assume_warp_aligned_block_size:
+            kernel.launch_config.block_size = (1024, 1, 1)
+        else:
+            kernel.launch_config.block_size = (612, 1, 1)
 
     elif indexing_scheme == "linear3d" or "gridstrided_linear3d":
         if assume_warp_aligned_block_size:
@@ -192,7 +215,11 @@ def test_block_size_adaptations(
     cp.testing.assert_allclose(dst_arr, expected)
 
 
-@pytest.mark.parametrize("indexing_scheme", ["linear3d", "gridstrided_linear3d", "blockwise4d"])
+@pytest.mark.parametrize("indexing_scheme", [
+    "linear1d", "gridstrided_linear1d",
+    "linear3d", "gridstrided_linear3d",
+    "blockwise4d"
+])
 @pytest.mark.parametrize("manual_grid", [False, True])
 @pytest.mark.parametrize("assume_warp_aligned_block_size", [False, True])
 def test_indexing_options_2d(
@@ -214,6 +241,20 @@ def test_indexing_options_2d(
 
     if manual_grid:
         match indexing_scheme:
+            case "linear1d":
+                if assume_warp_aligned_block_size:
+                    kernel.launch_config.block_size = (256, 1, 1)
+                    kernel.launch_config.grid_size = (3, 1, 1)
+                else:
+                    kernel.launch_config.block_size = (18, 1, 1)
+                    kernel.launch_config.grid_size = (42, 1, 1)
+            case "gridstrided_linear1d":
+                if assume_warp_aligned_block_size:
+                    kernel.launch_config.block_size = (32, 1, 1)
+                    kernel.launch_config.grid_size = (1, 1, 1)
+                else:
+                    kernel.launch_config.block_size = (42, 1, 1)
+                    kernel.launch_config.grid_size = (1, 1, 1)
             case "linear3d":
                 if assume_warp_aligned_block_size:
                     kernel.launch_config.block_size = (8, 8, 1)
@@ -236,6 +277,12 @@ def test_indexing_options_2d(
                     kernel.launch_config.block_size = (40, 1, 1)
                     kernel.launch_config.grid_size = (16, 1, 1)
 
+    elif indexing_scheme == "linear1d" or "gridstrided_linear1d":
+        if assume_warp_aligned_block_size:
+            kernel.launch_config.block_size = (128, 1, 1)
+        else:
+            kernel.launch_config.block_size = (40, 1, 1)
+
     elif indexing_scheme == "linear3d" or indexing_scheme == "gridstrided_linear3d":
         if assume_warp_aligned_block_size:
             kernel.launch_config.block_size = (8, 8, 1)
@@ -250,7 +297,10 @@ def test_indexing_options_2d(
     cp.testing.assert_allclose(dst_arr, expected)
 
 
-@pytest.mark.parametrize("invalid_indexing_scheme", ["linear3d", "gridstrided_linear3d"])
+@pytest.mark.parametrize("invalid_indexing_scheme", [
+    "linear1d", "gridstrided_linear1d",
+    "linear3d", "gridstrided_linear3d",
+])
 def test_invalid_indexing_schemes(
     invalid_indexing_scheme: str,
 ):
@@ -262,6 +312,27 @@ def test_invalid_indexing_schemes(
 
     with pytest.raises(Exception):
         create_kernel(asm, cfg)
+
+
+@pytest.mark.parametrize("invalid_indexing_scheme", [
+    "linear1d", "gridstrided_linear1d",
+])
+@pytest.mark.parametrize("dims", range(1, 4))
+def test_invalid_stepsizes_for_linear1d_indexing_schemes(
+    invalid_indexing_scheme: str, dims: int,
+):
+    src, dst = fields(f"src, dst: [{dims}D]")
+    asm = Assignment(src.center(0), dst.center(0))
+
+    invalid_slice = (slice(None, None, 1),) * (dims - 1) + (slice(None, None, 2),)
+
+    cfg = CreateKernelConfig(target=Target.CurrentGPU)
+    cfg.gpu.indexing_scheme = invalid_indexing_scheme
+    cfg.iteration_slice = invalid_slice
+
+    with pytest.raises(ValueError):
+        code = create_kernel(asm, config=cfg)
+        _ = code.compile()
 
 
 def test_averaging_kernel():

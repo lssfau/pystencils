@@ -313,6 +313,23 @@ class CpuOptions(ConfigBase):
 class GpuIndexingScheme(Enum):
     """Available index translation schemes for GPU kernels."""
 
+    Linear1D = auto()
+    """Extract coordinates from a one-dimensional global thread index.
+
+    Supports up to three-dimensional iteration spaces.
+    For each dimension (with known start, stop and step values), compute the current
+    iteration point with the de-linearized thread index ``delinear_tid`` as
+    ``start + step * delinear_tid.c`` (where c :math:`\\in` (x, y, z)).
+    """
+
+    GridstridedLinear1D = auto()
+    """Extension to `GpuIndexingScheme.Linear1D` scheme which introduces additional loops with strides over
+    the execution configuration's grid size.
+
+    This increases the workload per thread as it now performs multiple iterations and thus opens up the possibility
+    to handle iteration spaces that are larger than the span of the execution configuration.
+    """
+
     Linear3D = auto()
     """Map coordinates to global thread indices.
 
@@ -406,6 +423,10 @@ class GpuOptions(ConfigBase):
                     "Use `Blockwise4D` instead."
                 )
                 return GpuIndexingScheme.Blockwise4D
+            case "linear1d":
+                return GpuIndexingScheme.Linear1D
+            case "gridstrided_linear1d":
+                return GpuIndexingScheme.GridstridedLinear1D
             case "linear3d":
                 return GpuIndexingScheme.Linear3D
             case "gridstrided_linear3d":

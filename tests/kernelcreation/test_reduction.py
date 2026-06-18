@@ -116,6 +116,10 @@ def test_reduction_cpu(
 @pytest.mark.parametrize("assume_warp_aligned_block_size", [True, False])
 @pytest.mark.parametrize("use_block_fitting", [True, False])
 @pytest.mark.parametrize("warp_size", [32, None])
+@pytest.mark.parametrize("indexing_scheme", [
+    "linear1d", "gridstrided_linear1d",
+    "linear3d", "gridstrided_linear3d",
+])
 @pytest.mark.skipif(
     Target.CUDA not in Target.available_targets(), reason="CUDA is not available"
 )
@@ -126,10 +130,12 @@ def test_reduction_gpu(
     assume_warp_aligned_block_size: bool,
     use_block_fitting: bool,
     warp_size: int | None,
+    indexing_scheme: str
 ):
     import cupy as cp
 
     cfg = ps.CreateKernelConfig(target=ps.Target.GPU)
+    cfg.gpu.indexing_scheme = indexing_scheme
     cfg.gpu.assume_warp_aligned_block_size = assume_warp_aligned_block_size
     if warp_size:
         cfg.gpu.warp_size = warp_size
