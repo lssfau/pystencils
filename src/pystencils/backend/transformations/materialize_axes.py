@@ -305,22 +305,30 @@ class MaterializeAxes:
         body = nested_axes[-1].body
         return nested_axes, body
 
-    def _gpu_axis_ctr_and_guard(
-        self, axis: PsGpuIndexingAxis
-    ) -> tuple[PsDeclaration, PsExpression]:
-        gpu_idx: PsExpression
+    @staticmethod
+    def get_gpu_index(axis: PsGpuIndexingAxis) -> PsExpression:
         match axis:
             case PsGpuBlockAxis(gpu_dim):
-                gpu_idx = PsGpuIndexingFunction(GpuGridScope.blockIdx, gpu_dim)()
+                return PsGpuIndexingFunction(GpuGridScope.blockIdx, gpu_dim)()
 
             case PsGpuThreadAxis(gpu_dim):
-                gpu_idx = PsGpuIndexingFunction(GpuGridScope.threadIdx, gpu_dim)()
+                return PsGpuIndexingFunction(GpuGridScope.threadIdx, gpu_dim)()
 
             case PsGpuBlockXThreadAxis(gpu_dim):
                 blockIdx = PsGpuIndexingFunction(GpuGridScope.blockIdx, gpu_dim)
                 blockDim = PsGpuIndexingFunction(GpuGridScope.blockDim, gpu_dim)
                 threadIdx = PsGpuIndexingFunction(GpuGridScope.threadIdx, gpu_dim)
-                gpu_idx = blockIdx() * blockDim() + threadIdx()
+                return blockIdx() * blockDim() + threadIdx()
+
+            case _:
+                raise NotImplementedError(
+                    f"Don't know how to materialize axis of type {type(axis)}"
+                )
+
+    def _gpu_axis_ctr_and_guard(
+        self, axis: PsGpuIndexingAxis
+    ) -> tuple[PsDeclaration, PsExpression]:
+        gpu_idx = self.get_gpu_index(axis)
 
         xrange = axis.range
 

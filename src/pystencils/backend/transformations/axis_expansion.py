@@ -474,18 +474,24 @@ class AxisExpansion:
                 * PsGpuIndexingFunction(GpuGridScope.blockDim, gpu_dim)()
             )
 
+            # offset grid-strided loop by current GPU block
+            block_offset = self._type_fold(
+                PsGpuIndexingFunction(GpuGridScope.blockIdx, gpu_dim)()
+                * PsGpuIndexingFunction(GpuGridScope.blockDim, gpu_dim)()
+            )
+
             # create new axis range with duplicated ctr symbol, adapt stride to grid stride
             blocked_ctr_symb = self._ctx.duplicate_symbol(my_range.counter.symbol)
             blocked_step = self._type_fold(my_range.step.clone() * gridstride)
             blocked_range = PsAxisRange(
                 PsExpression.make(blocked_ctr_symb),
-                my_range.start,
+                block_offset,
                 my_range.stop,
                 blocked_step,
             )
 
             # offset axr start with ctr of grid-strided loop, stop & step remain the same
-            my_range.start = PsExpression.make(blocked_ctr_symb)
+            my_range.start = my_range.start + PsExpression.make(blocked_ctr_symb)
 
             return PsLoopAxis(blocked_range, PsBlock([cube]))
 

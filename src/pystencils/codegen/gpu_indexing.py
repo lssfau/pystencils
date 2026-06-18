@@ -2,18 +2,40 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import reduce
 from itertools import chain
 from math import prod
 from typing import Any, Callable, cast
 from warnings import warn
 
-from ..backend.ast.axes import PsAxesCube
-from ..backend.ast.expressions import PsExpression, PsIntDiv
-from ..backend.ast.structural import PsBlock
+from ..backend.ast.axes import PsAxesCube, PsAxisRange
+from ..backend.ast.expressions import (
+    PsExpression,
+    PsIntDiv,
+    PsMul,
+    PsAnd,
+    PsLt,
+    PsSymbolExpr,
+    PsConstantExpr,
+    PsDiv,
+    PsRem,
+)
+from ..backend.ast.structural import PsBlock, PsConditional, PsDeclaration
+from ..backend.constants import PsConstant
 from ..backend.kernelcreation import (
-    AstFactory, FullIterationSpace, IterationSpace, KernelCreationContext, SparseIterationSpace)
-from ..backend.transformations import CanonicalizeSymbols
-from ..backend.transformations.axis_expansion import AxisExpansion, AxisExpansionStrategy
+    AstFactory,
+    FullIterationSpace,
+    IterationSpace,
+    KernelCreationContext,
+    SparseIterationSpace,
+    Typifier,
+)
+from ..backend.memory import PsSymbol
+from ..backend.transformations import CanonicalizeSymbols, TypifyAndFold
+from ..backend.transformations.axis_expansion import (
+    AxisExpansion,
+    AxisExpansionStrategy,
+)
 from ..utils import ceil_to_multiple
 from .config import GpuIndexingScheme, GpuOptions
 from .errors import CodegenError
@@ -178,7 +200,7 @@ class ManualLaunchConfiguration(GpuLaunchConfiguration):
     def __init__(
         self,
         hw_props: HardwareProperties | None,
-        assume_warp_aligned_block_size: bool = False
+        assume_warp_aligned_block_size: bool = False,
     ) -> None:
         super().__init__(hw_props)
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
@@ -498,6 +520,7 @@ class GpuIndexMappingStrategy:
         self._ctx = ctx
         self._scheme: GpuIndexingScheme = gpu_options.get_option("indexing_scheme")
         self._factory = AstFactory(ctx)
+        self._type_fold = TypifyAndFold(ctx)
 
     def create_axes(self, body: PsBlock, ispace: IterationSpace) -> PsBlock:
         match ispace:
@@ -511,7 +534,25 @@ class GpuIndexMappingStrategy:
         return kernel_ast
 
     def _dense_ispace_axes(self, body: PsBlock, ispace: FullIterationSpace) -> PsBlock:
-        cube = self._factory.cube_from_ispace(ispace, body)
+        if self._scheme in (
+            GpuIndexingScheme.Linear1D,
+            GpuIndexingScheme.GridstridedLinear1D,
+        ):
+            ctr_symb = self._ctx.get_new_symbol(
+                "ctr_1d", ispace.dimensions[0].counter.dtype
+            )
+            wrapped_body = PsConditional(
+                reduce(PsAnd, [PsLt(PsSymbolExpr(d.counter), d.stop) for d in ispace.dimensions]),  # type: ignore
+                PsBlock(body.statements),
+            )
+            body.statements = GpuIndexing.get_linear1d_counter_declarations(
+                self._ctx, ispace, ctr_symb
+            ) + [wrapped_body]
+            cube = GpuIndexing.linear1d_cube_from_ispace(
+                self._ctx, ispace, ctr_symb, body
+            )
+        else:
+            cube = self._factory.cube_from_ispace(ispace, body)
 
         canonicalize = CanonicalizeSymbols(self._ctx, True)
         cube = cast(PsAxesCube, canonicalize(cube))
@@ -525,7 +566,10 @@ class GpuIndexMappingStrategy:
         ae = AxisExpansion(self._ctx)
 
         match self._scheme:
-            case GpuIndexingScheme.Linear3D:
+            case GpuIndexingScheme.Linear1D | GpuIndexingScheme.Linear3D:
+                effective_rank = (
+                    1 if self._scheme == GpuIndexingScheme.Linear1D else ispace.rank
+                )
                 if ispace.rank > 3:
                     raise CodegenError(
                         f"Cannot handle {ispace.rank}-dimensional iteration space using the Linear3D indexing scheme"
@@ -534,25 +578,34 @@ class GpuIndexMappingStrategy:
                 return ae.create_strategy(
                     [
                         ae.gpu_block_x_thread(dim)
-                        for dim in ["x", "y", "z"][: ispace.rank]
+                        for dim in ["x", "y", "z"][:effective_rank]
                     ][::-1]
                 )
 
-            case GpuIndexingScheme.GridstridedLinear3D:
+            case (
+                GpuIndexingScheme.GridstridedLinear1D
+                | GpuIndexingScheme.GridstridedLinear3D
+            ):
+                effective_rank = (
+                    1
+                    if self._scheme == GpuIndexingScheme.GridstridedLinear1D
+                    else ispace.rank
+                )
                 if ispace.rank > 3:
                     raise CodegenError(
                         f"Cannot handle {ispace.rank}-dimensional iteration space "
                         f"using the GridstridedLinear3D indexing scheme"
                     )
 
+                # grid-strided loop start already incorporates offset to actual gpu block
                 return ae.create_strategy(
                     [
-                        ae.gridstrided_loop(dim, ispace.rank - i - 1)
-                        for i, dim in enumerate(["x", "y", "z"][: ispace.rank])
-                    ][::-1] + [
-                        ae.gpu_block_x_thread(dim)
-                        for dim in ["x", "y", "z"][: ispace.rank]
+                        ae.gridstrided_loop(dim, effective_rank - i - 1)
+                        for i, dim in enumerate(["x", "y", "z"][:effective_rank])
                     ][::-1]
+                    + [ae.gpu_thread(dim) for dim in ["x", "y", "z"][:effective_rank]][
+                        ::-1
+                    ]
                 )
 
             case GpuIndexingScheme.Blockwise4D:
@@ -599,7 +652,9 @@ class GpuIndexMappingStrategy:
                 return ae.create_strategy([ae.gpu_thread("x")])
 
             case GpuIndexingScheme.GridstridedLinear3D:
-                return ae.create_strategy([ae.gridstrided_loop("x"), ae.gpu_thread("x")])
+                return ae.create_strategy(
+                    [ae.gridstrided_loop("x"), ae.gpu_thread("x")]
+                )
 
             case _:
                 raise ValueError(f"Unknown indexing scheme: {self._scheme}")
@@ -640,27 +695,50 @@ class BaseIndexing:
             return factory
 
         match self._scheme:
+            case GpuIndexingScheme.Linear1D | GpuIndexingScheme.GridstridedLinear1D:
+                return self._get_linear_config_factory(indexing_rank=1)
             case GpuIndexingScheme.Linear3D | GpuIndexingScheme.GridstridedLinear3D:
-                return self._get_linear3d_config_factory()
+                return self._get_linear_config_factory()
             case GpuIndexingScheme.Blockwise4D:
                 return self._get_blockwise4d_config_factory()
 
-    def _get_linear3d_config_factory(
+    def _get_linear_config_factory(
         self,
+        indexing_rank: int | None = None,
     ) -> Callable[[], DynamicBlockSizeLaunchConfiguration]:
         work_items_expr = self._get_work_items()
-        rank = len(work_items_expr)
+        work_rank = len(work_items_expr)
 
-        if rank > 3:
+        if work_rank > 3:
             raise CodegenError(
-                "Cannot create a launch grid configuration using the Linear3D indexing scheme"
-                f" for a {rank}-dimensional kernel."
+                "Cannot create a launch grid configuration using the Linear1D/3D"
+                f" indexing scheme for a {work_rank}-dimensional kernel."
             )
 
-        work_items_expr += tuple(
-            self._ast_factory.parse_index(1) for _ in range(3 - rank)
-        )
+        effective_rank = work_rank if indexing_rank is None else indexing_rank
 
+        if not (1 <= effective_rank <= 3):
+            raise CodegenError(
+                f"indexing_rank must be between 1 and 3; got {effective_rank}."
+            )
+        if effective_rank > work_rank:
+            raise CodegenError(
+                f"indexing_rank ({effective_rank}) must not exceed the"
+                f" kernel's work rank ({work_rank})."
+            )
+
+        # fold dimensions for 1D indexing scheme
+        dims_to_fold = work_rank - effective_rank
+        if dims_to_fold > 0:
+            folded = self._ast_factory.parse_index(1)
+            for wit in work_items_expr[: dims_to_fold + 1]:
+                folded = self._ast_factory.parse_index(PsMul(folded, wit))
+            work_items_expr = (folded,) + work_items_expr[dims_to_fold + 1:]
+
+        # pad to 3D
+        work_items_expr += tuple(
+            self._ast_factory.parse_index(1) for _ in range(3 - effective_rank)
+        )
         num_work_items = cast(
             _Dim3Lambda,
             tuple(self._kernel_factory.create_lambda(wit) for wit in work_items_expr),
@@ -668,7 +746,7 @@ class BaseIndexing:
 
         def factory():
             return DynamicBlockSizeLaunchConfiguration(
-                rank,
+                effective_rank,
                 num_work_items,
                 self._hw_props,
                 self._assume_warp_aligned_block_size,
@@ -688,10 +766,7 @@ class BaseIndexing:
         # impossible to use block size determination function since the iteration space is unknown
         # -> round block size in fastest moving dimension up to multiple of warp size
         rounded_block_size: PsExpression
-        if (
-            self._assume_warp_aligned_block_size
-            and self._warp_size is not None
-        ):
+        if self._assume_warp_aligned_block_size and self._warp_size is not None:
             warp_size = self._ast_factory.parse_index(self._warp_size)
             rounded_block_size = self._ast_factory.parse_index(
                 PsIntDiv(
@@ -761,7 +836,14 @@ class GpuIndexing(BaseIndexing):
     ) -> None:
 
         hw_props = self.get_hardware_properties(target, warp_size)
-        super().__init__(ctx, scheme, warp_size, manual_launch_grid, assume_warp_aligned_block_size, hw_props)
+        super().__init__(
+            ctx,
+            scheme,
+            warp_size,
+            manual_launch_grid,
+            assume_warp_aligned_block_size,
+            hw_props,
+        )
 
     @staticmethod
     def get_max_block_sizes(target: Target):
@@ -792,6 +874,71 @@ class GpuIndexing(BaseIndexing):
             GpuIndexing.get_max_threads_per_block(target),
             GpuIndexing.get_max_block_sizes(target),
         )
+
+    @staticmethod
+    def get_linear1d_counter_declarations(
+        ctx: KernelCreationContext, ispace: FullIterationSpace, ctr: PsSymbol
+    ) -> list[PsDeclaration]:
+        dimensions = ispace.dimensions
+
+        if not all(
+            [
+                isinstance(d.step, PsConstantExpr) and d.step.constant.value == 1
+                for d in dimensions
+            ]
+        ):
+            raise ValueError(
+                f"Linear1D gpu indexing schemes are only supported for equal step sizes of 1. "
+                f"Got ({','.join([d.step.__str__() for d in dimensions])}) instead."
+            )
+
+        strides = [d.stop - d.start for d in dimensions]
+        linearized_strides: list[PsExpression] = [
+            PsExpression.make(PsConstant(1, ctx.index_dtype))
+        ]
+        for s in strides[:-1]:
+            ls = reduce(PsMul, linearized_strides)  # type: ignore
+            linearized_strides += [ls * s]
+
+        delinearized_indices: list[PsExpression] = []
+        for i, d in enumerate(dimensions):
+            val = PsDiv(PsSymbolExpr(ctr), linearized_strides[i])
+
+            # omit PsRem for the last axis
+            if i != len(dimensions) - 1:
+                delinearized_indices += [PsRem(val, strides[i])]
+            else:
+                delinearized_indices += [val]
+
+        typify = Typifier(ctx)
+        ast_factory = AstFactory(ctx)
+
+        decls = [
+            typify(
+                PsDeclaration(
+                    PsSymbolExpr(d.counter),
+                    ast_factory.parse_index(d.start + delinearized_indices[i]),
+                )
+            )
+            for i, d in enumerate(dimensions)
+        ]
+
+        return decls
+
+    @staticmethod
+    def linear1d_cube_from_ispace(
+        ctx: KernelCreationContext,
+        ispace: FullIterationSpace,
+        ctr_symb: PsSymbol,
+        body: PsBlock,
+    ) -> PsAxesCube:
+        xrange = PsAxisRange(
+            PsExpression.make(ctr_symb),
+            PsExpression.make(PsConstant(0, ctx.index_dtype)),
+            ispace.actual_iterations(),
+            PsExpression.make(PsConstant(1, ctx.index_dtype)),
+        )
+        return PsAxesCube((xrange,), body)
 
     def _get_work_items(self) -> tuple[PsExpression, ...]:
         """Return a tuple of expressions representing the number of work items

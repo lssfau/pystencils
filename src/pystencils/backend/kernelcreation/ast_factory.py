@@ -19,7 +19,6 @@ from .freeze import FreezeExpressions, ExprLike
 from .typification import Typifier
 from .iteration_space import IterationSpace, FullIterationSpace, SparseIterationSpace
 
-
 IndexParsable: TypeAlias = (
     PsExpression | PsSymbol | PsConstant | sp.Expr | int | np.integer
 )
