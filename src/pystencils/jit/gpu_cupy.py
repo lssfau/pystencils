@@ -253,7 +253,7 @@ class CupyJit(JitBase):
         code = prelude + kernel_code
 
         raw_kernel = cp.RawKernel(
-            code, kernel.name, options=options, backend="nvrtc", jitify=True
+            code, kernel.name, options=options, backend="nvrtc"
         )
         return CupyKernelWrapper(kernel, raw_kernel)
 
@@ -268,7 +268,7 @@ class CupyJit(JitBase):
         if cp.cuda.runtime.is_hip:
             headers = set()
         else:
-            headers = {"<cstdint>"}
+            headers = {"<cuda/std/cstdint>"}
 
         headers |= kfunc.required_headers
 

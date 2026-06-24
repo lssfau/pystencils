@@ -49,7 +49,7 @@ def install_cupy(
                 return
 
         cuda_major = cuda_version[0]
-        cupy_package = f"cupy-cuda{cuda_major}x=={cupy_version}"
+        cupy_package = f"cupy-cuda{cuda_major}x~={cupy_version}"
         session.install(cupy_package)
 
 
@@ -145,7 +145,7 @@ def typecheck(session: nox.Session):
 
 
 @nox.session(python=["3.10", "3.11", "3.12", "3.13"], tags=["test"])
-@nox.parametrize("device_interface", ["cpu", "cupy12", "cupy13", "dpctl"], ids=["cpu", "cupy12", "cupy13", "dpctl"])
+@nox.parametrize("device_interface", ["cpu", "cupy", "dpctl"], ids=["cpu", "cupy", "dpctl"])
 def testsuite(session: nox.Session, device_interface: str):
     """Run the pystencils test suite.
 
@@ -154,7 +154,7 @@ def testsuite(session: nox.Session, device_interface: str):
     """
 
     if device_interface.startswith("cupy"):
-        cupy_version = device_interface.removeprefix("cupy")
+        cupy_version = "14.0"
         install_cupy(session, cupy_version, skip_if_no_cuda=True)
 
     if device_interface == "dpctl":
@@ -229,7 +229,7 @@ def minitest_simd(session: nox.Session, target: str):
 def docs(session: nox.Session):
     """Build the documentation pages"""
     check_external_doc_dependencies(session)
-    install_cupy(session, "12.3")
+    install_cupy(session, "14.0")
     install_dpctl(session)
     editable_install(session, ["doc"])
 
