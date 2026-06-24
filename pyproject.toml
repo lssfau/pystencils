@@ -15,7 +15,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "sympy~=1.14",
-    "numpy>=1.8.0",
+    "numpy>=2.0",
     "appdirs",
     "joblib",
     "pyyaml",
@@ -47,7 +47,7 @@ interactive = [
     'rich',
     'graphviz',
 ]
-use_cython = ['Cython']
+use_cython = ["Cython", "setuptools; python_version >= '3.12'"]
 dev = ["flake8", "mypy", "black"]
 doc = [
     'sphinx',

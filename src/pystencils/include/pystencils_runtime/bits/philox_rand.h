@@ -102,8 +102,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "opencl_stdint.h"
 typedef uint32_t uint32;
 typedef uint64_t uint64;
+#elif defined(__CUDA_ARCH__)
+#include <cuda/std/cstdint>
+typedef uint32_t uint32;
+typedef uint64_t uint64;
 #else
-#ifndef __HIPCC_RTC__
+#if !defined(__HIPCC_RTC__)
 #include <cstdint>
 #endif
 typedef std::uint32_t uint32;

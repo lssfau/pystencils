@@ -48,7 +48,7 @@ typecheck:
   extends: .testsuite-base
   image: i10git.cs.fau.de:5005/pycodegen/pycodegen/nox:ubuntu24.04-cuda12.6
   script:
-    - nox -s "testsuite-3.10(cupy12)"
+    - nox -s "testsuite-3.10(cupy)"
   tags:
     - docker
     - cuda
