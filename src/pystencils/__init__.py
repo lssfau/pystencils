@@ -29,7 +29,14 @@ from .spatial_coordinates import (
 )
 from .assignment import Assignment, AddAugmentedAssignment, assignment_from_stencil
 from .simp import AssignmentCollection
-from .sympyextensions.typed_sympy import TypedSymbol, DynamicType, real_t, index_t
+from .sympyextensions.typed_sympy import (
+    TypedSymbol,
+    DynamicType,
+    numeric_t,
+    index_t,
+    symbols,
+    typed_symbols,
+)
 from .sympyextensions import SymbolCreator, tcast
 from .sympyextensions import random
 from .datahandling import create_data_handling
@@ -90,10 +97,11 @@ __all__ = [
     "flow",
     "grids",
     "tcast",
-    "real_t",
+    "numeric_t",
     "index_t",
+    "symbols",
+    "typed_symbols",
     "random",
-    "inspect_ast",
 ]
 
 from . import _version

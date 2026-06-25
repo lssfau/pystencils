@@ -28,6 +28,7 @@ Its features include:
 :caption: Getting Started
 
 installation
+The pycodegen Tutorial <https://pycodegen.pages.i10git.cs.fau.de/pycodegen-tutorial/>
 tutorials/index
 :::
 

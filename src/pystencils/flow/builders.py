@@ -31,18 +31,76 @@ class let_export_adaptor:
         self._builder = builder
         self._asm_class = assignment_class
 
-    def __setitem__(self, lhs: str | sp.Symbol | slice, rhs: sp.Basic):
-        self._builder._add_assignment(
-            self._asm_class(self._builder._parse_symbol(lhs), rhs)
-        )
+    @overload
+    def __setitem__(
+        self,
+        lhs: str | sp.Symbol | slice,
+        rhs: sp.Basic,
+    ): ...
+
+    @overload
+    def __setitem__(
+        self,
+        lhs: tuple[str | sp.Symbol | slice, ...],
+        rhs: Iterable[sp.Basic],
+    ): ...
+
+    def __setitem__(
+        self,
+        lhs: str | sp.Symbol | slice | tuple[str | sp.Symbol | slice, ...],
+        rhs: sp.Basic | Iterable[sp.Basic],
+    ):
+        if isinstance(lhs, tuple):
+            rhs = tuple(cast(Iterable[sp.Basic], rhs))
+            if len(rhs) != len(rhs):
+                raise ValueError(
+                    "Wrong number of elements on multi-assignment right-hand side"
+                )
+            for s, e in zip(lhs, rhs, strict=True):
+                self._builder._add_assignment(
+                    self._asm_class(self._builder._parse_symbol(s), e)
+                )
+        else:
+            self._builder._add_assignment(
+                self._asm_class(self._builder._parse_symbol(lhs), sp.sympify(rhs))
+            )
 
 
 class store_adaptor:
     def __init__(self, builder: EquationsBlockBuilder):
         self._builder = builder
 
-    def __setitem__(self, mem_loc: SymbolicMemoryLoc, rhs: sp.Basic):
-        self._builder._add_assignment(Store(mem_loc, rhs))
+    @overload
+    def __setitem__(
+        self,
+        mem_loc: SymbolicMemoryLoc,
+        rhs: sp.Basic,
+    ): ...
+
+    @overload
+    def __setitem__(
+        self,
+        mem_loc: tuple[SymbolicMemoryLoc, ...],
+        rhs: Iterable[sp.Basic],
+    ): ...
+
+    def __setitem__(
+        self,
+        mem_loc: SymbolicMemoryLoc | tuple[SymbolicMemoryLoc, ...],
+        rhs: sp.Basic | Iterable[sp.Basic],
+    ):
+        if isinstance(mem_loc, tuple):
+            rhs = tuple(cast(Iterable[sp.Basic], rhs))
+
+            if len(mem_loc) != len(rhs):
+                raise ValueError(
+                    "Wrong number of elements on assignment right-hand side"
+                )
+
+            for loc, expr in zip(mem_loc, rhs, strict=True):
+                self._builder._add_assignment(Store(loc, expr))
+        else:
+            self._builder._add_assignment(Store(mem_loc, sp.sympify(rhs)))
 
 
 class reduce_adaptor:
@@ -273,6 +331,34 @@ def cases(
         return decorate(func)
     else:
         return decorate
+
+
+def guarded_block(
+    cond: sp.Basic,
+    *,
+    preds: Iterable[FlowgraphNode] | None = None,
+    name: str | None = None,
+) -> Callable[[Callable[[EquationsBlockBuilder], None]], Cases]:
+    """Define a guarded block that is protected by a condition."""
+    outer_predecessors = set() if preds is None else set(preds)
+
+    def decorator(func: Callable[[EquationsBlockBuilder], None]) -> Cases:
+        gblock = block(func)
+
+        if gblock.exports:
+            raise ValueError(
+                f"A guarded block cannnot export symbols. Exports encountered: {gblock.exports}"
+            )
+
+        # move all preds added via `connect()` to the outside
+        all_predecessors = outer_predecessors | gblock.predecessors
+        gblock = gblock.replace_predecessors([])
+
+        return Cases(
+            [(cond, tie(gblock, name=func.__name__))], all_predecessors, name=name
+        )
+
+    return decorator
 
 
 def tie(*nodes: FlowgraphNode, name: str | None = None) -> Flowgraph:

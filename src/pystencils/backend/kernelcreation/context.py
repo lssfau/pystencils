@@ -6,8 +6,7 @@ from itertools import chain, count
 from collections import namedtuple, defaultdict
 import re
 
-from ..ast.expressions import PsExpression, PsConstantExpr, PsCall
-from ..functions import PsConstantFunction, ConstantFunctions
+from ..ast.expressions import PsExpression
 from ...defaults import DEFAULTS
 from ...field import Field, FieldType
 from ...grids.protocols import IField, FieldBufferSpec
@@ -240,27 +239,16 @@ class KernelCreationContext:
         # create kernel-local copy of lhs symbol
         local_symb = self.get_new_symbol(f"{lhs_name}_local", lhs_dtype)
 
-        # match for reduction operation and set neutral init_val
-        init_val: PsExpression
-        match reduction_op:
-            case ReductionOp.Add:
-                init_val = PsConstantExpr(PsConstant(0, lhs_dtype))
-            case ReductionOp.Sub:
-                init_val = PsConstantExpr(PsConstant(0, lhs_dtype))
-            case ReductionOp.Mul:
-                init_val = PsConstantExpr(PsConstant(1, lhs_dtype))
-            case ReductionOp.Min:
-                init_val = PsCall(
-                    PsConstantFunction(ConstantFunctions.PosInfinity, lhs_dtype), []
-                )
-            case ReductionOp.Max:
-                init_val = PsCall(
-                    PsConstantFunction(ConstantFunctions.NegInfinity, lhs_dtype), []
-                )
-            case _:
-                raise PsInternalCompilerError(
-                    f"Unsupported kind of reduction assignment: {reduction_op}."
-                )
+        # set init_val to neutral element
+        from .freeze import FreezeExpressions
+        from .typification import Typifier
+
+        freeze = FreezeExpressions(self)
+        typify = Typifier(self)
+
+        init_val: PsExpression = typify.typify_expression(
+            freeze(reduction_op.neutral_element), lhs_dtype
+        )[0]
 
         # create reduction info and add to set
         reduction_info = ReductionInfo(reduction_op, init_val, local_symb, pointer_symb)

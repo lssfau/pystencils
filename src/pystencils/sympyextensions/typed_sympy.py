@@ -49,7 +49,7 @@ class DynamicType(Enum):
                 return r"\mathbb{Z}"
 
 
-real_t = DynamicType.NUMERIC_TYPE
+numeric_t = DynamicType.NUMERIC_TYPE
 index_t = DynamicType.INDEX_TYPE
 
 
@@ -84,6 +84,12 @@ def assumptions_from_dtype(dtype: PsType | DynamicType):
 
 
 class TypedSymbol(sp.Symbol):
+    """A symbol annotated with a data type.
+
+    Args:
+        name (`str`): Name of the symbol
+        dtype (`UserTypeSpec` | `DynamicType`): The symbol's data type
+    """
 
     _dtype: PsType | DynamicType
 
@@ -91,10 +97,7 @@ class TypedSymbol(sp.Symbol):
         obj = TypedSymbol.__xnew_cached_(cls, *args, **kwds)
         return obj
 
-    def __new_stage2__(
-        cls, name: str, dtype: UserTypeSpec | DynamicType, **kwargs
-    ):  # TODO does not match signature of sp.Symbol???
-        # TODO: also Symbol should be allowed  ---> see sympy Variable
+    def __new_stage2__(cls, name: str, dtype: UserTypeSpec | DynamicType, **kwargs):
         if not isinstance(dtype, DynamicType):
             dtype = create_type(dtype)
 
@@ -137,6 +140,21 @@ class TypedSymbol(sp.Symbol):
         return self.dtype.required_headers if isinstance(self.dtype, PsType) else set()
 
 
+def typed_symbols(names: str, dtype: UserTypeSpec | DynamicType, **args):
+    """Wrapper around `sp.symbols <sympy.core.symbol.symbols>` that creates
+    `TypedSymbol` instances with the given data type"""
+    return sp.symbols(names, cls=TypedSymbol, dtype=dtype, **args)
+
+
+def symbols(names: str, dtype: UserTypeSpec | DynamicType | None = None, **args):
+    """Wrapper around `sp.symbols <sympy.core.symbol.symbols>` that creates
+    `TypedSymbol` instances if a data type is given"""
+    if dtype is not None:
+        return typed_symbols(names, dtype, **args)
+    else:
+        return sp.symbols(names, **args)
+
+
 class TypeCast(sp.Function):
     """Explicitly cast an expression to a data type."""
 
@@ -147,6 +165,10 @@ class TypeCast(sp.Function):
     @staticmethod
     def as_index(expr):
         return TypeCast(expr, DynamicType.INDEX_TYPE)
+
+    @staticmethod
+    def auto(expr):
+        return AutoCast(expr)
 
     @property
     def expr(self) -> sp.Basic:
@@ -194,9 +216,29 @@ class TypeCast(sp.Function):
         if isinstance(self.dtype, PsNumericType) and self.dtype.is_uint():
             return True
 
+    def _sympystr(self, printer):
+        expr = printer._print(self.expr)
+        dtype = str(self.dtype)
+        return f"cast< {dtype} >({expr})"
+
 
 class BoolCast(TypeCast, Boolean):
     pass
+
+
+class AutoCast(sp.Function):
+    """Automatic cast; convert expression type to match the surrounding context."""
+
+    @classmethod
+    def eval(cls, expr: sp.Basic) -> sp.Basic | None:
+        if isinstance(expr, sp.Number):
+            return expr
+
+        return None
+
+    def _sympystr(self, printer):
+        expr = printer._print(self.args[0])
+        return f"autocast({expr})"
 
 
 tcast = TypeCast

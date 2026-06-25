@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from typing import SupportsIndex, cast
+from types import ModuleType
 from enum import Enum, auto
 
 import sympy as sp
+import numpy as np
 
 from sympy.printing import StrPrinter
 from sympy.printing.latex import LatexPrinter
@@ -13,7 +15,11 @@ from .protocols import (
     IFieldAccess,
     FieldBufferSpec,
     IterationLimits,
+    CreateNdArray,
+    ViewNdArray,
+    TArray,
 )
+from .patch import PatchGrid
 
 from ..types import UserTypeSpec, create_numeric_type, PsNumericType
 from ..sympyextensions import TypedSymbol, DynamicType
@@ -88,7 +94,7 @@ class MemoryLayout(Enum):
                 assert False, "unreachable code"
 
 
-class TensorField(IField):
+class TensorField(CreateNdArray, ViewNdArray, IField):
     """Tensor field mapping each point of a :math:`d`-dimensional index space to a rank :math:`n` tensor.
 
     A tensor field is a function
@@ -130,7 +136,7 @@ class TensorField(IField):
 
     Args:
         name: Name of the tensor field
-        spatial_rank: Dimensionality of the index space :math:`I`
+        rank_or_grid: Dimensionality of the index space :math:`I`, or a patch grid defining the index space
         tensor_shape: Shape of the field's tensors
         dtype: Data type of the field's tensor entries
         layout: Memory layout of the field's memory buffers at runtime
@@ -139,12 +145,22 @@ class TensorField(IField):
     def __init__(
         self,
         name: str,
-        spatial_rank: int,
+        rank_or_grid: int | PatchGrid,
         tensor_shape: tuple[int, ...] = (),
         *,
         dtype: UserTypeSpec | DynamicType = DynamicType.NUMERIC_TYPE,
         layout: str | MemoryLayout = MemoryLayout.NUMPY,
+        ghost_layers: int = 0,
     ) -> None:
+        spatial_rank: int
+        patch_grid: PatchGrid | None = None
+
+        if isinstance(rank_or_grid, PatchGrid):
+            patch_grid = rank_or_grid
+            spatial_rank = patch_grid.patch.dimensionality
+        else:
+            spatial_rank = rank_or_grid
+
         if spatial_rank < 1:
             raise ValueError(f"Invalid spatial rank: {spatial_rank}")
 
@@ -154,29 +170,24 @@ class TensorField(IField):
                 "Trivial tensor dimensions (with extent = 1) are not permitted."
             )
 
+        if ghost_layers < 0:
+            raise ValueError(f"Invalid number of ghost layers: {ghost_layers}")
+
         self._name = name
         self._dtype = (
             dtype if isinstance(dtype, DynamicType) else create_numeric_type(dtype)
         )
+        self._grid = patch_grid
         self._spatial_rank = spatial_rank
         self._tensor_shape = tensor_shape
         self._layout = (
             layout if isinstance(layout, MemoryLayout) else MemoryLayout[layout.upper()]
         )
+        self._ghost_layers = ghost_layers
 
         self._buffer_rank = spatial_rank + len(tensor_shape)
         self._buffer_spec = self._create_buffer_spec()
         self._iteration_limits = self._create_iteration_limits()
-
-    @property
-    def name(self) -> str:
-        """The field's name"""
-        return self._name
-
-    @property
-    def dtype(self) -> PsNumericType | DynamicType:
-        """Data type of tensor entries"""
-        return self._dtype
 
     @property
     def layout(self) -> MemoryLayout:
@@ -198,13 +209,89 @@ class TensorField(IField):
         """Rank of the field's tensors"""
         return len(self._tensor_shape)
 
+    @property
+    def ghost_layers(self) -> int:
+        """Number of ghost layers of this field"""
+        return self._ghost_layers
+
     #   IField
+
+    @property
+    def name(self) -> str:
+        """The field's name"""
+        return self._name
+
+    @property
+    def dtype(self) -> PsNumericType | DynamicType:
+        """Data type of tensor entries"""
+        return self._dtype
+
+    @property
+    def grid(self) -> PatchGrid | None:
+        """This field's parent patch grid"""
+        return self._grid
 
     def get_buffer_spec(self) -> FieldBufferSpec:
         return self._buffer_spec
 
     def get_iteration_limits(self) -> IterationLimits:
         return self._iteration_limits
+
+    #   CreateNdArray
+
+    def create_ndarray(
+        self,
+        array_module: ModuleType,
+        spatial_shape: tuple[int, ...],
+        *,
+        dtype: np.dtype | None = None,
+        **kwargs,
+    ):
+        if len(spatial_shape) != self._spatial_rank:
+            raise ValueError(
+                f"Invalid spatial shape: Must have length {self._spatial_rank}"
+            )
+
+        if dtype is None:
+            if isinstance(self._dtype, DynamicType):
+                raise ValueError(
+                    "Argument dtype missing: Can't create array for a dynamically typed field"
+                )
+            if self._dtype.numpy_dtype is None:
+                raise ValueError(
+                    "Argument dtype missing: Can't infer NumPy data type from field element type"
+                )
+            dtype = self._dtype.numpy_dtype
+
+        shape = (
+            tuple(ni + 2 * self._ghost_layers for ni in spatial_shape)
+            + self._tensor_shape
+        )
+
+        permute_axes = self._layout.linearization_order(
+            self.spatial_rank + self.tensor_rank, self.spatial_rank
+        )[::-1]
+        permute_axes_inverse = tuple(permute_axes.index(i) for i in range(len(permute_axes)))
+
+        shape_perm = tuple(shape[j] for j in permute_axes)
+
+        arr = array_module.zeros(shape_perm, dtype=dtype, **kwargs)
+        arr = arr.transpose(permute_axes_inverse)
+
+        return arr
+
+    #   ViewNdArray
+
+    def view_ndarray(self, arr: TArray) -> TArray:
+        if self._ghost_layers == 0:
+            return arr
+        else:
+            idx = (
+                slice(self._ghost_layers, -self._ghost_layers),
+            ) * self.spatial_rank + (
+                slice(0, None),
+            ) * self.tensor_rank
+            return arr[idx]  # type: ignore
 
     #   Access
 
@@ -260,7 +347,13 @@ class TensorField(IField):
         else:
             image = typename
 
-        return rf"${self._latexname()} : \mathbb{{Z}}^{self._spatial_rank} \to {image}$"
+        if self._grid is not None:
+            loc = self._grid.placement.name.lower()
+            domain = rf"\mathsf{{{loc}}} \left({self._grid.patch.name}\right)"
+        else:
+            domain = rf"\mathbb{{Z}}^{self._spatial_rank}"
+
+        return rf"${self._latexname()} : {domain} \to {image}$"
 
     #   PRIVATE
 
@@ -268,9 +361,11 @@ class TensorField(IField):
         return (
             self._name,
             self._dtype,
+            self._grid,
             self._spatial_rank,
             self._tensor_shape,
             self._layout,
+            self._ghost_layers,
         )
 
     def __eq__(self, other: object) -> bool:

@@ -1,5 +1,6 @@
 from enum import Enum
 
+import sympy as sp
 from sympy.codegen.ast import AssignmentBase
 
 from . import TypedSymbol
@@ -12,6 +13,20 @@ class ReductionOp(Enum):
     Div = "/"
     Min = "min"
     Max = "max"
+
+    @property
+    def neutral_element(self) -> sp.Number:
+        match self:
+            case ReductionOp.Add | ReductionOp.Sub:
+                return sp.Integer(0)
+            case ReductionOp.Mul:
+                return sp.Integer(1)
+            case ReductionOp.Min:
+                return sp.core.numbers.Infinity()
+            case ReductionOp.Max:
+                return sp.core.numbers.NegativeInfinity()
+            case _:
+                raise ValueError(f"No neutral element for reduction: {self}")
 
 
 class ReductionAssignment(AssignmentBase):
@@ -40,7 +55,9 @@ class ReductionAssignment(AssignmentBase):
         super()._check_args(lhs, rhs)
 
         if not isinstance(lhs, TypedSymbol):
-            raise TypeError(f"lhs of needs to be a TypedSymbol. Got {type(lhs)} instead.")
+            raise TypeError(
+                f"lhs of needs to be a TypedSymbol. Got {type(lhs)} instead."
+            )
 
 
 class AddReductionAssignment(ReductionAssignment):

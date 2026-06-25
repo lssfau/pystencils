@@ -330,9 +330,6 @@ class DefaultExtensionModuleBuilder(ExtensionModuleBuilderBase):
 
 class DefaultCpuKernelWrapper(KernelWrapper):
     def __init__(self, kernel: Kernel, jit_module: ModuleType):
-        super().__init__(kernel)
         self._module = jit_module
-        self._invoke = getattr(jit_module, "invoke")
-
-    def __call__(self, **kwargs) -> None:
-        return self._invoke(**kwargs)
+        invoke = getattr(jit_module, "invoke")
+        super().__init__(kernel, invoke)

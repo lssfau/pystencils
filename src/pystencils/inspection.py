@@ -2,9 +2,12 @@ from .backend.ast import PsAstNode
 from .backend.emission import CAstPrinter, IRAstPrinter
 from .codegen import Kernel
 from .jit import KernelWrapper
+from .flow import Operator
 
 
-def inspect(obj: PsAstNode | Kernel | KernelWrapper, *, show_cpp: bool = False):
+def inspect(
+    obj: PsAstNode | Kernel | KernelWrapper | Operator, *, show_cpp: bool = False
+):
     """Print the IR or C++ code of an abstract syntax tree or kernel object,
     if possible with syntax highlighting."""
 
@@ -27,5 +30,10 @@ def inspect(obj: PsAstNode | Kernel | KernelWrapper, *, show_cpp: bool = False):
             do_print(obj.get_c_code() if show_cpp else obj.get_ir_code())
         case KernelWrapper(ker):
             do_print(ker.get_c_code() if show_cpp else ker.get_ir_code())
+        case Operator():
+            if obj.kernel is None:
+                obj.generate_code()
+            assert obj.kernel is not None
+            do_print(obj.kernel.get_c_code() if show_cpp else obj.kernel.get_ir_code())
         case _:
             raise ValueError(f"Cannot inspect object of type {type(obj)}")

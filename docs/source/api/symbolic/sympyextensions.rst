@@ -68,11 +68,17 @@ Typed Expressions
 
 .. autoclass:: pystencils.TypedSymbol
 
+.. autofunction:: pystencils.symbols
+
+.. autofunction:: pystencils.typed_symbols
+
 .. autoclass:: pystencils.DynamicType
     :members:
 
 .. autoclass:: pystencils.sympyextensions.typed_sympy.TypeCast
     :members:
+
+.. autoclass:: pystencils.sympyextensions.typed_sympy.AutoCast
 
 .. autoclass:: pystencils.sympyextensions.tcast
 

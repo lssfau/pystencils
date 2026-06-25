@@ -91,6 +91,57 @@ def test_invalid_setters():
     assert "Duplicate assignment left-hand side" in str(exc.value)
 
 
+def test_multi_assignment():
+    x, y, z, v, w = sp.symbols("x, y, z, v, w")
+    f = ps.grids.TensorField("f", 3, (3,))
+    g = ps.grids.TensorField("g", 3, ())
+    h = ps.grids.TensorField("h", 3, (3,))
+    r = ps.symbols("r", "float32")
+    arr1, arr2 = ps.symbols(
+        "arr1, arr2",
+        ps.types.PsNamedArrayType(
+            "std::array< float64, 3 >", ps.create_type("float64"), (3,)
+        ),
+    )
+
+    @ps.flow.block
+    def block1(_eq):
+        _eq[x, y, z] = 1, 2, 3
+        _eq.export[v, "r":"float32"] = sp.ImmutableMatrix([4, w + 1])
+        _eq.store[f(1), g()] = x, y + f(0)
+        #   LHS is symbol, RHS is tuple -> create an array
+        _eq.let[arr1] = 4, 5, 6
+        _eq.export[arr2] = 7, 8, 9
+
+        with pytest.raises(TypeError):
+            #   RHS not iterable
+            _eq["s1", "s2"] = x
+
+        with pytest.raises(TypeError):
+            #   RHS not iterable
+            _eq[h(0), h(1)] = x
+
+        with pytest.raises(ValueError):
+            #   Too few items on RHS
+            _eq.store[h(0), h(1), h(2)] = sp.Matrix([x, y])
+
+    assert block1 == EquationsBlock(
+        [
+            Let(x, 1),
+            Let(y, 2),
+            Let(z, 3),
+            Export(v, 4),
+            Export(r, w + 1),
+            Store(f(1), x),
+            Store(g(), y + f(0)),
+            Let(arr1, sp.Tuple(4, 5, 6)),
+            Export(arr2, sp.Tuple(7, 8, 9)),
+        ],
+        predecessors=[],
+        name="block1",
+    )
+
+
 def test_predecessors():
     x, y, z, w = sp.symbols("x, y, z, w")
     f, g = fields("f(3), g(1) : [2D]")
@@ -318,3 +369,65 @@ def test_tie_errors():
         _ = ps.flow.tie(block5, Bottom([]))
 
     assert "Cannot tie a Bottom node into a subgraph with other nodes" in str(exc.value)
+
+
+def test_guarded_block():
+    x, y, z = sp.symbols("x, y, z")
+    f, g = ps.fields("f, g: [2D]")
+
+    @ps.flow.guarded_block(x < 0)
+    def myblock(_eq):
+        _eq.store[f()] = x + g()
+
+    assert isinstance(myblock, Cases)
+    assert myblock.conditions == (x < 0,)
+    assert myblock.subgraphs == (
+        tie(
+            EquationsBlock([Store(f(), x + g())], predecessors=[], name="myblock"),
+            name="myblock",
+        ),
+    )
+    assert not myblock.predecessors
+
+    @ps.flow.block
+    def block1(_eq):
+        _eq.export[x] = y
+
+    @ps.flow.guarded_block(x < 0, preds=[block1])
+    def block2(_eq):
+        _eq.store[f()] = x + g()
+
+    assert isinstance(block2, Cases)
+    assert block2.conditions == (x < 0,)
+    assert block2.subgraphs == (
+        tie(
+            EquationsBlock([Store(f(), x + g())], predecessors=[], name="block2"),
+            name="block2",
+        ),
+    )
+    assert block2.predecessors == {block1}
+
+    @ps.flow.block
+    def block3(_eq):
+        _eq.export[z] = 3
+
+    @ps.flow.guarded_block(x < 0, preds=[block1])
+    def block4(_eq):
+        _eq.connect(block3)
+        _eq.store[f()] = x + z
+
+    assert isinstance(block4, Cases)
+    assert block4.conditions == (x < 0,)
+    assert block4.subgraphs == (
+        tie(
+            EquationsBlock([Store(f(), x + z)], predecessors=[], name="block4"),
+            name="block4",
+        ),
+    )
+    assert block4.predecessors == {block1, block3}
+
+    with pytest.raises(ValueError):
+
+        @ps.flow.guarded_block(x < 0)
+        def invalid(_eq):
+            _eq.export[z] = 2

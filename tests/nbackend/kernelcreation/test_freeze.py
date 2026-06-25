@@ -347,7 +347,7 @@ def test_dynamic_types():
     assert ctx.get_symbol("q").dtype == ctx.index_dtype
 
 
-def test_cast_func():
+def test_type_casts():
     ctx = KernelCreationContext(
         default_dtype=create_numeric_type("float16"), index_dtype=create_type("int16")
     )
@@ -367,6 +367,9 @@ def test_cast_func():
 
     expr = freeze(tcast.as_index(z))
     assert expr.structurally_equal(PsCast(ctx.index_dtype, z2))
+
+    expr = freeze(tcast.auto(z))
+    assert expr.structurally_equal(PsCast(None, z2))
 
     expr = freeze(tcast(42, create_type("int16")))
     assert expr.structurally_equal(PsConstantExpr(PsConstant(42, create_type("int16"))))

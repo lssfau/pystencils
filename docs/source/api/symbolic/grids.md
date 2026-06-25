@@ -1,4 +1,4 @@
-# New-Style Algebraic Fields [Experimental]
+# Patches and Algebraic Fields [Experimental]
 
 :::{caution}
 The `pystencils.grids` module is meant to replace the legacy fields module (`pystencils.field`) in the near future.
@@ -7,6 +7,30 @@ It is still under active development and considered *experimental*.
 
 ```{eval-rst}
 .. module:: pystencils.grids
+```
+
+## Patches and Patch Data
+
+```{eval-rst}
+.. module:: pystencils.grids.patch
+
+.. autosummary::
+  :toctree: generated
+  :nosignatures:
+  :template: autosummary/entire_class.rst
+
+  Patch
+  PatchGrid
+  VariablePlacement
+
+.. module:: pystencils.grids.patch_data
+
+.. autosummary::
+  :toctree: generated
+  :nosignatures:
+  :template: autosummary/entire_class.rst
+
+  PatchData
 ```
 
 ## Tensor Fields
@@ -49,4 +73,6 @@ It is still under active development and considered *experimental*.
   IFieldAccess
   FieldBufferSpec
   IterationLimits
+  CreateNdArray
+  ViewNdArray
 ```
