@@ -21,14 +21,14 @@ def set_cpu_queue(func):
 class TestingNamespace:
     @staticmethod
     def assert_array_equal(x, y, *args, **kwargs):
-        x_np = dpt.asnumpy(x)
-        y_np = dpt.asnumpy(y)
+        x_np = dpt.asnumpy(x) if isinstance(x, usm_ndarray) else x
+        y_np = dpt.asnumpy(y) if isinstance(y, usm_ndarray) else y
         np.testing.assert_array_equal(x_np, y_np, *args, **kwargs)
 
     @staticmethod
     def assert_allclose(x, y, *args, **kwargs):
-        x_np = dpt.asnumpy(x)
-        y_np = dpt.asnumpy(y)
+        x_np = dpt.asnumpy(x) if isinstance(x, usm_ndarray) else x
+        y_np = dpt.asnumpy(y) if isinstance(y, usm_ndarray) else y
         np.testing.assert_allclose(x_np, y_np, *args, **kwargs)
 
 

@@ -8,6 +8,7 @@ from operator import mul
 from ...simp import AssignmentCollection
 from ...flow.flowgraph import Flowgraph
 from ...grids.protocols import IterationLimits, IField
+from ...grids.patch import PatchGrid
 
 from ...defaults import DEFAULTS
 from ...field import Field, FieldType
@@ -242,8 +243,7 @@ class FullIterationSpace(IterationSpace):
         return self._loop_order
 
     def dimensions_in_loop_order(self) -> Sequence[FullIterationSpace.Dimension]:
-        """Return the dimensions of this iteration space ordered from the slowest to the fastest coordinate.
-        """
+        """Return the dimensions of this iteration space ordered from the slowest to the fastest coordinate."""
         return [self._dimensions[i] for i in self.loop_order]
 
     def actual_iterations(
@@ -364,6 +364,15 @@ class SparseIterationSpace(IterationSpace):
         return decls
 
 
+def _get_unique_grid(fields: Iterable[IField]) -> PatchGrid | None:
+    pgrids = set(f.grid for f in fields)
+    if len(pgrids) > 1:
+        raise KernelConstraintsError(
+            "Encountered algebraic fields defined on multiple different grids."
+        )
+    return pgrids.pop() if pgrids else None
+
+
 def infer_iteration_limits(
     fields: Iterable[Field | IField],
     check_compatible_shapes: bool = True,
@@ -384,9 +393,10 @@ def infer_iteration_limits(
     loop_orders = set(f.layout for f in old_fields)
     dimensionalities = set(f.spatial_dimensions for f in old_fields)
 
-    new_field_ilimits = [
-        f.get_iteration_limits() for f in fields if isinstance(f, IField)
-    ]
+    new_fields = tuple(f for f in fields if isinstance(f, IField))
+    _ = _get_unique_grid(new_fields)
+
+    new_field_ilimits = [f.get_iteration_limits() for f in new_fields]
 
     bounds |= set(ilim.bounds for ilim in new_field_ilimits)
     fixed_bounds |= set(

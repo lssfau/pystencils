@@ -6,7 +6,11 @@
 
 .. module:: pystencils.flow
 
+.. autofunction:: operator
+
 .. autofunction:: block
+
+.. autofunction:: guarded_block
 
 .. autofunction:: cases
 
@@ -49,6 +53,16 @@
   EquationsBlock
   Subgraph
   Cases
+
+.. module:: pystencils.flow.operator
+  :no-index:
+
+.. autosummary::
+  :toctree: generated
+  :nosignatures:
+  :template: autosummary/entire_class.rst
+
+  Operator
 ```
 
 ## Builders

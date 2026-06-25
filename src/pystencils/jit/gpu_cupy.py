@@ -37,10 +37,11 @@ class CupyKernelWrapper(KernelWrapper):
         ker: GpuKernel,
         raw_kernel: Any,
     ):
-        super().__init__(ker)
         self._launch_config = ker.get_launch_configuration()
         self._raw_kernel = raw_kernel
         self._args_cache: dict[Any, tuple] = dict()
+
+        super().__init__(ker, self._invoke)
 
     @property
     def kernel(self) -> GpuKernel:
@@ -54,7 +55,7 @@ class CupyKernelWrapper(KernelWrapper):
     def raw_kernel(self):
         return self._raw_kernel
 
-    def __call__(self, **kwargs: Any):
+    def _invoke(self, **kwargs: Any):
         kernel_args, launch_grid = self._get_cached_args(**kwargs)
         device = self._get_device(kernel_args)
         with cp.cuda.Device(device):

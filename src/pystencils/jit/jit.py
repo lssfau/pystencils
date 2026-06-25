@@ -1,8 +1,10 @@
 from __future__ import annotations
-from typing import Sequence, TYPE_CHECKING
+from typing import Sequence, TYPE_CHECKING, Callable
 from abc import ABC, abstractmethod
 
 from .error import JitError
+
+from ..grids.protocols import ViewNdArray
 
 if TYPE_CHECKING:
     from ..codegen import Kernel, Parameter, Target
@@ -13,12 +15,18 @@ class KernelWrapper(ABC):
 
     __match_args__ = ("kernel",)
 
-    def __init__(self, ker: Kernel) -> None:
+    def __init__(self, ker: Kernel, invocable: Callable) -> None:
         self._kernel = ker
+        self._invocable = invocable
 
-    @abstractmethod
+        self._view_mappings: dict[str, ViewNdArray] = {
+            f.name: f for f in self._kernel.get_fields() if isinstance(f, ViewNdArray)
+        }
+
     def __call__(self, **kwargs) -> None:
-        pass
+        for name, mapper in self._view_mappings.items():
+            kwargs[name] = mapper.view_ndarray(kwargs[name])
+        self._invocable(**kwargs)
 
     @property
     def kernel(self) -> Kernel:

@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 
 from pystencils import make_slice, Field, create_type, DEFAULTS
-from pystencils.grids import TensorField
+from pystencils.grids import TensorField, Patch
 from pystencils.sympyextensions.typed_sympy import TypedSymbol
 
 from pystencils.backend.constants import PsConstant
@@ -266,5 +266,39 @@ def test_ispace_from_tensor_fields():
 
         ctx.add_field(TensorField("f", 3, (3,), layout="fzyx"))
         ctx.add_field(TensorField("g", 3, (), layout="C"))
+
+        _ = create_full_iteration_space(ctx, ghost_layers=0)
+
+    with pytest.raises(KernelConstraintsError):
+        #   Conflicting patch grids
+        ctx = KernelCreationContext()
+
+        patch = Patch("P", (1, 1, 1))
+
+        ctx.add_field(TensorField("f", patch.cells, ()))
+        ctx.add_field(TensorField("g", patch.vertices, ()))
+
+        _ = create_full_iteration_space(ctx, ghost_layers=0)
+
+    with pytest.raises(KernelConstraintsError):
+        #   Conflicting patches
+        ctx = KernelCreationContext()
+
+        patch1 = Patch("P", (1, 1, 1))
+        ctx.add_field(TensorField("f", patch1.cells, ()))
+
+        patch2 = Patch("Q", (1, 1, 1))
+        ctx.add_field(TensorField("g", patch2.cells, ()))
+
+        _ = create_full_iteration_space(ctx, ghost_layers=0)
+
+    with pytest.raises(KernelConstraintsError):
+        #   Patch-bound vs. free-standing field
+        ctx = KernelCreationContext()
+
+        patch1 = Patch("P", (1, 1, 1))
+        ctx.add_field(TensorField("f", patch1.vertices, ()))
+
+        ctx.add_field(TensorField("g", 3, ()))
 
         _ = create_full_iteration_space(ctx, ghost_layers=0)

@@ -41,7 +41,7 @@ struct KernelModuleError {
 struct ArrayProxy {
 private:
     PyUSMArrayObject *arr_ { nullptr };
-    npy_intp itemsize_;
+    [[maybe_unused]] npy_intp itemsize_;
     std::string name_;
 
     ArrayProxy(PyUSMArrayObject * array, npy_intp itemsize, const std::string& name) : arr_{array}, itemsize_{itemsize}, name_{name} {}
@@ -93,7 +93,7 @@ public:
         Py_ssize_t *strides = UsmNDArray_GetStrides(arr_);
         // returns null if c-or f-contiguous
         if (strides != NULL){
-            return static_cast< index_type >(strides[c]/itemsize_);
+            return static_cast< index_type >(strides[c]);
         }
         index_type ret {1};
         if (is_c_contiguous()) {

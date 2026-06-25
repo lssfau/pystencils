@@ -1,11 +1,15 @@
 .. _page_tutorials:
 
-Tutorials
-=========
+Legacy Tutorials
+================
 
-These tutorials are a good place to start if you are new to pystencils.
-All tutorials and demos listed here are based on Jupyter notebooks that you can find in the pystencils repository.
-It is a good idea to download them and run them directly to be able to play around with the code.
+.. attention::
+
+   These tutorials were written for pystencils 1.0; they no longer represent the state of the art for pystencils.
+
+   To get started with pystencils 2.0, check out the brand-new
+   interactive `pycodegen Tutorial <https://pycodegen.pages.i10git.cs.fau.de/pycodegen-tutorial/>`_ instead.
+
 
 .. toctree::
    :maxdepth: 1

@@ -17,7 +17,7 @@ from ...sympyextensions import (
     ConditionalFieldAccess,
 )
 from ..reduction_op_mapping import reduction_op_to_expr
-from ...sympyextensions.typed_sympy import TypedSymbol, TypeCast, DynamicType
+from ...sympyextensions.typed_sympy import TypedSymbol, TypeCast, DynamicType, AutoCast
 from ...sympyextensions.pointers import AddressOf, mem_acc
 from ...sympyextensions.reduction import ReductionAssignment, ReductionOp
 from ...sympyextensions.bit_masks import bit_conditional
@@ -661,6 +661,9 @@ class FreezeExpressions:
             return PsConstantExpr(arg.constant.interpret_as(dtype))
         else:
             return PsCast(dtype, arg)
+
+    def map_AutoCast(self, cast_expr: AutoCast) -> PsCast:
+        return PsCast(None, self.visit_expr(cast_expr.args[0]))
 
     def map_Relational(self, rel: sympy.core.relational.Relational) -> PsRel:
         arg1, arg2 = [self.visit_expr(arg) for arg in rel.args]

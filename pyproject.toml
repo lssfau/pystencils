@@ -46,6 +46,7 @@ interactive = [
     'pyevtk',
     'rich',
     'graphviz',
+    "pyvista",
 ]
 use_cython = ["Cython", "setuptools; python_version >= '3.12'"]
 dev = ["flake8", "mypy", "black"]
@@ -171,10 +172,7 @@ omit = [
 
 [tool.coverage.report]
 include = ["src/pystencils/**/*.py", "tests/**/*.py"]
-exclude_lines = [
-    # Have to re-enable the standard pragma
-    "pragma: no cover",
-
+exclude_also = [
     "def __repr__",
     "def _repr_html_",
 

@@ -171,7 +171,7 @@ class VectorizationContext:
         return PsVectorType(scalar_type, self._lanes)
 
     def axis_ctr_dependees(self, symbols: set[PsSymbol]) -> set[PsSymbol]:
-        """Returns all symbols in `symbols` that depend on the axis counter."""
+        """Returns all symbols in ``symbols`` that depend on the axis counter."""
         return symbols & (self.vectorized_symbols.keys() | {self.axis.counter})
 
 

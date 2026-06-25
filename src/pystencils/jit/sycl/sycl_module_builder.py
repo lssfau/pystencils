@@ -424,12 +424,13 @@ class SyclExtensionModuleBuilder(ExtensionModuleBuilderBase):
 
 class SyclKernelWrapper(KernelWrapper):
     def __init__(self, kernel: Kernel, jit_module: ModuleType):
-        super().__init__(kernel)
         self._module = jit_module
-        self._invoke = getattr(jit_module, "invoke")
+        self._invoke_impl = getattr(jit_module, "invoke")
         self._launch_config: GpuLaunchConfiguration | None = None
         if isinstance(kernel, GpuKernel):
             self._launch_config = kernel.get_launch_configuration()
+
+        super().__init__(kernel, self._invoke)
 
     @property
     def launch_config(self) -> GpuLaunchConfiguration:
@@ -455,12 +456,12 @@ class SyclKernelWrapper(KernelWrapper):
             None, device.max_work_group_size, device.max_work_item_sizes3d
         )
 
-    def __call__(self, **kwargs) -> None:
+    def _invoke(self, **kwargs) -> None:
         if self._launch_config:
             device = self._find_queue(**kwargs)
             hw_props = self.get_hardware_properties(device)
             self._launch_config.hardware_properties = hw_props
             block, grid = self._launch_config.evaluate()
-            return self._invoke(block=block, grid=grid, **kwargs)
+            return self._invoke_impl(block=block, grid=grid, **kwargs)
         else:
-            return self._invoke(**kwargs)
+            return self._invoke_impl(**kwargs)

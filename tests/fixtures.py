@@ -16,6 +16,8 @@ from types import ModuleType
 
 import pytest
 
+import numpy as np
+
 import pystencils as ps
 from pystencils.jit import CpuJit, NoJit, JitBase
 from pystencils.jit.cpu import CompilerInfo
@@ -57,23 +59,14 @@ def jit(target: ps.Target, compiler_info, tmp_path) -> JitBase:
     if target.is_cpu():
         #   Set target in compiler info such that `-march` is set accordingly
         return CpuJit(
-            compiler_info=compiler_info,
-            objcache=tmp_path,
-            emit_warnings=True
+            compiler_info=compiler_info, objcache=tmp_path, emit_warnings=True
         )
 
     elif target == ps.Target.SYCL:
         cinfo = SYCLIcpxInfo(optlevel="3")
-        cinfo.extra_cxxflags = [
-            "-Wall",
-            "-Wconversion",
-            "-Werror",
-            "-fp-model=precise"
-        ]
+        cinfo.extra_cxxflags = ["-Wall", "-Wconversion", "-Werror", "-fp-model=precise"]
         try:
-            return SYCLJit(compiler_info=cinfo,
-                           objcache=tmp_path,
-                           emit_warnings=True)
+            return SYCLJit(compiler_info=cinfo, objcache=tmp_path, emit_warnings=True)
         except JitError:
             return NoJit()
     else:
@@ -122,3 +115,25 @@ def xp(target: ps.Target) -> ModuleType:
         import numpy as np
 
         return np
+
+
+array_modules = [(np, "numpy")]
+
+try:
+    import cupy as cp
+
+    array_modules.append((cp, "cupy"))
+except ImportError:
+    ...
+
+try:
+    import tests.dpctl_compat as dpnp
+
+    array_modules.append((dpnp, "dpnp"))
+except ImportError:
+    ...
+
+
+@pytest.fixture(params=[t[0] for t in array_modules], ids=[t[1] for t in array_modules])
+def array_module(request: pytest.FixtureRequest) -> ModuleType:
+    return request.param

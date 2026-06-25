@@ -31,6 +31,7 @@ tests/kerncraft_inputs/.3d-7pt.c_kerncraft/
 report.xml
 coverage_report/
 
+*.bkp
 
 # macOS
 **/.DS_Store

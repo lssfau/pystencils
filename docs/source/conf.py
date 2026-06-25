@@ -43,6 +43,8 @@ exclude_patterns = []
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"
 
+numfig = True
+
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3.8", None),
     "numpy": ("https://docs.scipy.org/doc/numpy/", None),
