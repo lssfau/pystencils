@@ -169,8 +169,9 @@ class BasePrinter(ABC):
     and in `IRAstPrinter` for debug-printing the entire IR.
     """
 
-    def __init__(self, indent_width=3):
+    def __init__(self, indent_width=3, func_prefix: str | None = None):
         self._indent_width = indent_width
+        self._func_prefix = func_prefix
 
     def __call__(self, obj: PsAstNode | Kernel) -> str:
         from ...codegen import Kernel
@@ -388,6 +389,8 @@ class BasePrinter(ABC):
         sig_parts = ["void", func.name, f"({params_str})"]
         if func.func_prefix:
             sig_parts = [func.func_prefix] + sig_parts
+        if self._func_prefix:
+            sig_parts = [self._func_prefix] + sig_parts
         signature = " ".join(sig_parts)
         return signature
 
