@@ -170,9 +170,16 @@ Let's use the CUDA platform in this case:
 
 ```{code-cell} ipython3
 from pystencils.backend.platforms import CudaPlatform
+from pystencils.codegen.config import GpuOptions, GpuIndexingScheme
+from pystencils.codegen.gpu_indexing import GpuIndexing
+
+indexing_scheme = GpuIndexingScheme.Linear3D
+indexing_rank   = GpuIndexing.get_indexing_rank(indexing_scheme)
 
 platform = CudaPlatform(
   ctx,
+  indexing_rank,
+  GpuOptions.get_default_block_size(ispace.rank),
   assume_warp_aligned_block_size=True,
   warp_size=32
 )

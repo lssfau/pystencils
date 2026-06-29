@@ -18,6 +18,7 @@ class SyclIndexing(BaseIndexing):
         super().__init__(ctx,
                          scheme,
                          warp_size,
+                         None,
                          manual_launch_grid,
                          assume_warp_aligned_block_size,
                          None)

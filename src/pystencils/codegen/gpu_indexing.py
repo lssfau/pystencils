@@ -80,18 +80,6 @@ class GpuLaunchConfiguration(ABC):
 
     @property
     @abstractmethod
-    def block_size(self) -> dim3 | None:
-        """Returns desired block size if available."""
-        pass
-
-    @block_size.setter
-    @abstractmethod
-    def block_size(self, val: dim3):
-        """Sets desired block size if possible."""
-        pass
-
-    @property
-    @abstractmethod
     def parameters(self) -> frozenset[Parameter]:
         """Parameters of this launch configuration"""
 
@@ -108,20 +96,6 @@ class GpuLaunchConfiguration(ABC):
         """Return a hashable object that represents any user-configurable options of
         this launch configuration, such that when the configuration changes, the JIT parameter
         cache is invalidated."""
-
-    @staticmethod
-    def get_default_block_size(rank: int) -> dim3:
-        """Returns the default block size configuration used by the generator."""
-
-        match rank:
-            case 1:
-                return (256, 1, 1)
-            case 2:
-                return (16, 16, 1)
-            case 3:
-                return (8, 8, 4)
-            case _:
-                assert False, "unreachable code"
 
     @staticmethod
     def _excessive_block_size_error_msg(block_size: tuple[int, ...]):
@@ -284,7 +258,7 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
 
     - otherwise: the default block size is taken i.e.
 
-        ``block_size.c = get_default_block_size(rank=3).c``
+        ``block_size.c = default_block_size.c``
 
     The actual launch grid size is then computed as follows.
 
@@ -293,19 +267,18 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
 
     def __init__(
         self,
-        rank: int,
         num_work_items: _Dim3Lambda,
         hw_props: HardwareProperties | None,
         assume_warp_aligned_block_size: bool,
+        default_block_size: dim3,
     ) -> None:
         super().__init__(hw_props)
         self._num_work_items = num_work_items
 
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
 
-        default_bs = GpuLaunchConfiguration.get_default_block_size(rank)
-        self._default_block_size = default_bs
-        self._init_block_size: dim3 = default_bs
+        self._default_block_size = default_block_size
+        self._init_block_size: dim3 = default_block_size
         self._compute_block_size: (
             Callable[[dim3, dim3, HardwareProperties], tuple[int, ...]] | None
         ) = None
@@ -327,18 +300,9 @@ class DynamicBlockSizeLaunchConfiguration(GpuLaunchConfiguration):
 
     @property
     def default_block_size(self) -> dim3:
+        """Default block size for this launch configuration.
+        This value may differ from actually used block size."""
         return self._default_block_size
-
-    @property
-    def block_size(self) -> dim3 | None:
-        """Block size is only available when `evaluate` is called."""
-        return None
-
-    @block_size.setter
-    def block_size(self, val: dim3):
-        AttributeError(
-            "Setting `block_size` on an dynamic launch configuration has no effect."
-        )
 
     @staticmethod
     def _round_block_sizes_to_warp_size(
@@ -586,11 +550,11 @@ class GpuIndexMappingStrategy:
                 GpuIndexingScheme.GridstridedLinear1D
                 | GpuIndexingScheme.GridstridedLinear3D
             ):
-                effective_rank = (
-                    1
-                    if self._scheme == GpuIndexingScheme.GridstridedLinear1D
-                    else ispace.rank
+                indexing_rank = GpuIndexing.get_indexing_rank(self._scheme)
+                effective_rank = GpuIndexing.get_effective_rank(
+                    indexing_rank, ispace.rank
                 )
+
                 if ispace.rank > 3:
                     raise CodegenError(
                         f"Cannot handle {ispace.rank}-dimensional iteration space "
@@ -666,6 +630,7 @@ class BaseIndexing:
         ctx: KernelCreationContext,
         scheme: GpuIndexingScheme,
         warp_size: int | None,
+        default_block_size: dim3 | None,
         manual_launch_grid: bool = False,
         assume_warp_aligned_block_size: bool = False,
         hardware_properties: HardwareProperties | None = None,
@@ -673,6 +638,7 @@ class BaseIndexing:
         self._ctx = ctx
         self._scheme = scheme
         self._warp_size = warp_size
+        self._default_block_size = default_block_size
         self._manual_launch_grid = manual_launch_grid
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
         self._hw_props = hardware_properties
@@ -685,27 +651,62 @@ class BaseIndexing:
 
     def get_launch_config_factory(self) -> Callable[[], GpuLaunchConfiguration]:
         """Retrieve a factory for the launch configuration for later consumption by the runtime system"""
-        if self._manual_launch_grid:
+        if bool(self._ctx.reduction_data):
+            return self._get_linear_reduction_config_factory()
+
+        elif self._manual_launch_grid:
 
             def factory():
-                return ManualLaunchConfiguration(
+                mlc = ManualLaunchConfiguration(
                     self._hw_props, self._assume_warp_aligned_block_size
                 )
+                if self._default_block_size is not None:
+                    mlc.block_size = self._default_block_size
+
+                return mlc
 
             return factory
 
-        match self._scheme:
-            case GpuIndexingScheme.Linear1D | GpuIndexingScheme.GridstridedLinear1D:
-                return self._get_linear_config_factory(indexing_rank=1)
-            case GpuIndexingScheme.Linear3D | GpuIndexingScheme.GridstridedLinear3D:
-                return self._get_linear_config_factory()
-            case GpuIndexingScheme.Blockwise4D:
-                return self._get_blockwise4d_config_factory()
+        else:
+            match self._scheme:
+                case (
+                    GpuIndexingScheme.Linear1D
+                    | GpuIndexingScheme.GridstridedLinear1D
+                    | GpuIndexingScheme.Linear3D
+                    | GpuIndexingScheme.GridstridedLinear3D
+                ):
+                    return self._get_linear_config_factory()
+                case GpuIndexingScheme.Blockwise4D:
+                    return self._get_blockwise4d_config_factory()
+                case _:
+                    raise ValueError(f"Unknown indexing scheme: {self._scheme}")
 
-    def _get_linear_config_factory(
-        self,
-        indexing_rank: int | None = None,
-    ) -> Callable[[], DynamicBlockSizeLaunchConfiguration]:
+    @staticmethod
+    def get_indexing_rank(scheme: GpuIndexingScheme):
+        match scheme:
+            case GpuIndexingScheme.Linear1D | GpuIndexingScheme.GridstridedLinear1D:
+                return 1
+            case (
+                GpuIndexingScheme.Linear3D
+                | GpuIndexingScheme.GridstridedLinear3D
+                | GpuIndexingScheme.Blockwise4D
+            ):
+                return 3
+            case _:
+                raise ValueError(
+                    f"Could not extract indexing rank for scheme: {scheme}"
+                )
+
+    @staticmethod
+    def get_effective_rank(indexing_rank: int, dims: int):
+        return min(indexing_rank, dims)
+
+    def _get_effective_rank(self) -> int:
+        return self.get_effective_rank(
+            self.get_indexing_rank(self._scheme), len(self._get_work_items())
+        )
+
+    def _get_linear_work_items(self, effective_rank: int) -> tuple[PsExpression, ...]:
         work_items_expr = self._get_work_items()
         work_rank = len(work_items_expr)
 
@@ -714,8 +715,6 @@ class BaseIndexing:
                 "Cannot create a launch grid configuration using the Linear1D/3D"
                 f" indexing scheme for a {work_rank}-dimensional kernel."
             )
-
-        effective_rank = work_rank if indexing_rank is None else indexing_rank
 
         if not (1 <= effective_rank <= 3):
             raise CodegenError(
@@ -739,17 +738,32 @@ class BaseIndexing:
         work_items_expr += tuple(
             self._ast_factory.parse_index(1) for _ in range(3 - effective_rank)
         )
-        num_work_items = cast(
+
+        return work_items_expr
+
+    def _get_linear_config_factory(
+        self,
+    ) -> Callable[[], DynamicBlockSizeLaunchConfiguration]:
+        effective_rank = self._get_effective_rank()
+
+        work_items_expr = self._get_linear_work_items(effective_rank)
+        work_items_lambda = cast(
             _Dim3Lambda,
             tuple(self._kernel_factory.create_lambda(wit) for wit in work_items_expr),
         )
 
+        default_bs = (
+            self._default_block_size
+            if self._default_block_size is not None
+            else GpuOptions.get_default_block_size(effective_rank)
+        )
+
         def factory():
             return DynamicBlockSizeLaunchConfiguration(
-                effective_rank,
-                num_work_items,
+                work_items_lambda,
                 self._hw_props,
                 self._assume_warp_aligned_block_size,
+                default_bs,
             )
 
         return factory
@@ -803,6 +817,48 @@ class BaseIndexing:
 
         return factory
 
+    def _get_linear_reduction_config_factory(
+        self,
+    ) -> Callable[[], AutomaticLaunchConfiguration]:
+        effective_rank = self._get_effective_rank()
+
+        work_items_expr = self._get_linear_work_items(effective_rank)
+
+        default_bs = (
+            self._default_block_size
+            if self._default_block_size is not None
+            else GpuOptions.get_default_block_size(effective_rank)
+        )
+
+        block_size = tuple(
+            self._kernel_factory.create_lambda(self._ast_factory.parse_index(bs))
+            for bs in default_bs
+        )
+
+        grid_size = tuple(
+            self._kernel_factory.create_lambda(
+                self._ast_factory.parse_index(
+                    PsIntDiv(
+                        wit
+                        + self._ast_factory.parse_index(reduction_bs)
+                        - self._ast_factory.parse_index(1),
+                        self._ast_factory.parse_index(reduction_bs),
+                    )
+                )
+            )
+            for wit, reduction_bs in zip(work_items_expr, default_bs)
+        )
+
+        def factory():
+            return AutomaticLaunchConfiguration(
+                cast(_Dim3Lambda, block_size),
+                cast(_Dim3Lambda, grid_size),
+                self._hw_props,
+                self._assume_warp_aligned_block_size,
+            )
+
+        return factory
+
     @abstractmethod
     def _get_work_items(self) -> tuple[PsExpression, ...]:
         """Return a tuple of expressions representing the number of work items
@@ -831,6 +887,7 @@ class GpuIndexing(BaseIndexing):
         target: Target,
         scheme: GpuIndexingScheme,
         warp_size: int | None,
+        default_block_size: dim3 | None,
         manual_launch_grid: bool = False,
         assume_warp_aligned_block_size: bool = False,
     ) -> None:
@@ -840,6 +897,7 @@ class GpuIndexing(BaseIndexing):
             ctx,
             scheme,
             warp_size,
+            default_block_size,
             manual_launch_grid,
             assume_warp_aligned_block_size,
             hw_props,
