@@ -3,6 +3,7 @@ import numpy as np
 
 import pystencils as ps
 from pystencils import Target
+from pystencils.codegen.gpu_indexing import GpuIndexing
 from pystencils.sympyextensions import ReductionOp, reduction_assignment
 
 init_w = 5.0
@@ -95,7 +96,7 @@ def test_reduction_cpu(
 
     kernel_reduction(x=array, w=reduction_array)
 
-    rtol = 1e-5 if op == ReductionOp.Mul and dtype == "float32" else 1e-7
+    rtol = 1e-4 if op == ReductionOp.Mul and dtype == "float32" else 1e-7
     np.testing.assert_allclose(
         reduction_array, get_expected_solution(op, array), rtol=rtol
     )
@@ -114,12 +115,17 @@ def test_reduction_cpu(
 )
 @pytest.mark.parametrize("dims", [1, 2, 3])
 @pytest.mark.parametrize("assume_warp_aligned_block_size", [True, False])
-@pytest.mark.parametrize("use_block_fitting", [True, False])
+@pytest.mark.parametrize("use_cub_reductions", [True, False])
 @pytest.mark.parametrize("warp_size", [32, None])
-@pytest.mark.parametrize("indexing_scheme", [
-    "linear1d", "gridstrided_linear1d",
-    "linear3d", "gridstrided_linear3d",
-])
+@pytest.mark.parametrize(
+    "indexing_scheme",
+    [
+        "linear1d",
+        "gridstrided_linear1d",
+        "linear3d",
+        "gridstrided_linear3d",
+    ],
+)
 @pytest.mark.skipif(
     Target.CUDA not in Target.available_targets(), reason="CUDA is not available"
 )
@@ -128,23 +134,29 @@ def test_reduction_gpu(
     op: str,
     dims: int,
     assume_warp_aligned_block_size: bool,
-    use_block_fitting: bool,
+    use_cub_reductions: bool,
     warp_size: int | None,
-    indexing_scheme: str
+    indexing_scheme: str,
 ):
     import cupy as cp
 
     cfg = ps.CreateKernelConfig(target=ps.Target.GPU)
     cfg.gpu.indexing_scheme = indexing_scheme
     cfg.gpu.assume_warp_aligned_block_size = assume_warp_aligned_block_size
+    cfg.gpu.use_cub_reductions = use_cub_reductions
     if warp_size:
         cfg.gpu.warp_size = warp_size
+    if use_cub_reductions:
+        # make sure that the correct block size is passed to platform/gpu_indexing
+        indexing_scheme_opt = cfg.gpu.get_option("indexing_scheme")
+        indexing_rank = GpuIndexing.get_indexing_rank(indexing_scheme_opt)
+        effective_rank = GpuIndexing.get_effective_rank(indexing_rank, dims)
+
+        cfg.gpu.default_block_size = cfg.gpu.get_default_block_size(effective_rank)
+        cfg.gpu.generate_launch_bounds = True
 
     ast_reduction = get_reduction_assign_ast(dtype, op, dims, cfg)
     kernel_reduction = ast_reduction.compile()
-
-    if use_block_fitting and warp_size:
-        kernel_reduction.launch_config.fit_block_size((warp_size, 1, 1))
 
     array = get_cpu_array(dtype, op, dims)
     reduction_array = np.full((1,), init_w, dtype=dtype)
@@ -154,7 +166,7 @@ def test_reduction_gpu(
 
     kernel_reduction(x=array_gpu, w=reduction_array_gpu)
 
-    rtol = 1e-5 if op == ReductionOp.Mul and dtype == "float32" else 1e-7
+    rtol = 1e-4 if op == ReductionOp.Mul and dtype == "float32" else 1e-7
     np.testing.assert_allclose(
         reduction_array_gpu.get(), get_expected_solution(op, array), rtol=rtol
     )

@@ -385,12 +385,39 @@ class GpuOptions(ConfigBase):
     If this option is not set the default value for the given target will be automatically used.
     """
 
+    default_block_size: BasicOption[tuple[int, int, int]] = BasicOption()
+    """Specifies the default block size used for generating the kernels. Note that, even though this value is set,
+    it may be overwritten or adjusted based on the launch configuration that is employed:
+    * `DynamicBlockSizeLaunchConfiguration`: potentially trims or fits this value
+    on the iteration space and warp size
+    * `AutomaticLaunchConfiguration`: directly uses this value for reductions.
+    * `ManualLaunchConfiguration`: may be directly overwritten by the user.
+
+    This configuration option is completely independent from `GpuIndexingScheme.Blockwise4D` schemes.
+    """
+
     assume_warp_aligned_block_size: BasicOption[bool] = BasicOption(False)
     """Specifies whether block sizes are divisible by the hardware's warp size.
 
     If set to `True`, the code generator can employ optimizations that require this assumption,
     e.g. warp-level reductions.
     The pystencils Cupy runtime also checks if user-provided block sizes fulfill this criterion.
+    """
+
+    use_cub_reductions: BasicOption[bool] = BasicOption(False)
+    """Specifies if CUB is used as a reduction back-end (CUDA/HIP).
+    Its back-end platforms depend on the block size used, i.e. `default_block_size`,
+    requiring it to match the launch configuration's block size.
+
+    If this option is not set, warp reductions or pure atomics are used.
+    """
+
+    generate_launch_bounds: BasicOption[bool] = BasicOption(False)
+    """Specifies if generated kernels are augmented with the
+    __launch_bounds__(...) function qualifier.
+    This requires:
+    1) the `default_block_size` to be set
+    and 2) matching with the launch configuration's block size.
     """
 
     @staticmethod
@@ -404,6 +431,20 @@ class GpuOptions(ConfigBase):
                 raise NotImplementedError(
                     f"No default warp/wavefront size known for target {target}"
                 )
+
+    @staticmethod
+    def get_default_block_size(rank: int) -> tuple[int, int, int]:
+        """Returns the default block size configuration used by the generator."""
+
+        match rank:
+            case 1:
+                return (256, 1, 1)
+            case 2:
+                return (16, 16, 1)
+            case 3:
+                return (8, 8, 4)
+            case _:
+                assert False, "unreachable code"
 
     @indexing_scheme.validate
     def _validate_idx_scheme(self, val: str | GpuIndexingScheme):

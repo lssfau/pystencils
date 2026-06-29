@@ -36,6 +36,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "./bits/gpu_infinities.h"
 #include "./bits/gpu_atomics.h"
+#include "./bits/gpu_operators.h"
 
 #ifdef __HIPCC_RTC__
 typedef __hip_uint8_t uint8_t;

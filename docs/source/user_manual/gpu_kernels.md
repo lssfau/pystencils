@@ -121,10 +121,25 @@ For most kernels with an at most three-dimensional iteration space,
 this behavior is sufficient and desired.
 It can be enforced by setting `gpu.indexing_scheme = "linear3D"`.
 
+### The "Linear1D" Indexing Scheme
+
+This indexing scheme also maps threads and iteration space points with a 1:1 ratio
+but does so by using a 1D GPU *super index* tid which is then de-linearized into spatial components,
+i.e. for a 3D kernel:
+
+```{code-block} C++
+tid = (blockSize.x * blockIdx.x + threadIdx.x)
+
+ctr_0 = start_0 + step_0 * ( tid % end_0 )
+ctr_1 = start_1 + step_1 * ( tid / end_0 % end_1 )
+ctr_2 = start_2 + step_2 * ( tid / ( end_0 * end_1 ) )
+```
+
 The GPU thread block size of a compiled kernel's wrapper object can only be directly modified
 for manual launch configurations, cf. the section for [manual launch configurations](#manual_launch_grids).
-Linear indexing schemes without manual launch configurations either employ default block sizes
-or compute block sizes using user-exposed member functions that adapt the initial block size that was
+Linear indexing schemes without manual launch configurations are based on default block sizes,
+that can be set via the `gpu.default_block_size` option containing a tuple of three integers.
+With these, we compute block sizes using user-exposed member functions that adapt the initial block size that was
 passed as an argument. The available functions are :meth:`fit_block_size` and :meth:`trim_block_size`.
 The :meth:`trim_block_size` function trims the user-defined initial block size with the iteration space.
 The :meth:`fit_block_size` employs a fitting algorithm that finds a suitable block configuration that is
@@ -167,13 +182,20 @@ and the final thread block size.
 There are, however, cases where the span of such a launch configuration may not cover the whole iteration space.
 This issue can be overcome with so-called grid-strided loops, where the underlying GPU kernel employs loops with
 a step size of the GPU grid, i.e. `GpuGridScope.gridDim` * `GpuGridScope.blockDim` for all dimensions.
-We expose this functionality as extension to the "Linear3D" indexing scheme,
-namely by setting `"gpu.indexing_scheme = "gridstrided_linear3d"`.
+We expose this functionality as extension to the "Linear3D" and "Linear1D" indexing schemes,
+namely by setting `gpu.indexing_scheme = "gridstrided_linear3d"` or `gpu.indexing_scheme = "gridstrided_linear1d"`.
 While this may increase the workload per thread, using the grid size as stride allows us to still retain the same
 memory coalescing properties.
 Moreover, when used with [manual launch grids](#manual_launch_grids), this allows for fine-grained control over 
 the number of GPU blocks being mapped on streaming multiprocessors (SMs) on NVIDIA GPUs or compute units (CUs) 
 on AMD GPUs for improving the hardware occupancy.
+
+Another automatic performance optimization is the generation of "__launch_bounds__(...)" function
+qualifiers for GPU kernels and can be activated via the `gpu.generate_launch_bounds` option.
+This flag is by default disabled and requires `gpu.default_block_size` to be set explicitly.
+Any direct modifications to the launch configurations block size, e.g. via manual launch configurations or
+block size trimming/fitting, cause discrepancies with the generated launch bounds in the kernel and thus
+leading to runtime errors.
 
 :::{attention}
 

@@ -169,9 +169,8 @@ class BasePrinter(ABC):
     and in `IRAstPrinter` for debug-printing the entire IR.
     """
 
-    def __init__(self, indent_width=3, func_prefix: str | None = None):
+    def __init__(self, indent_width=3):
         self._indent_width = indent_width
-        self._func_prefix = func_prefix
 
     def __call__(self, obj: PsAstNode | Kernel) -> str:
         from ...codegen import Kernel
@@ -386,12 +385,9 @@ class BasePrinter(ABC):
             f"{self._type_str(p.dtype)} {p.name}" for p in func.parameters
         )
 
-        from ...codegen import GpuKernel
-
-        sig_parts = [self._func_prefix] if self._func_prefix is not None else []
-        if isinstance(func, GpuKernel) and func.target.is_gpu():
-            sig_parts.append("__global__")
-        sig_parts += ["void", func.name, f"({params_str})"]
+        sig_parts = ["void", func.name, f"({params_str})"]
+        if func.func_prefix:
+            sig_parts = [func.func_prefix] + sig_parts
         signature = " ".join(sig_parts)
         return signature
 

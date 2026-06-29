@@ -32,6 +32,7 @@ class Kernel:
         parameters: Sequence[Parameter],
         required_headers: set[str],
         jit: JitBase,
+        func_prefix: str | None,
     ):
         self._body: PsBlock = body
         self._target = target
@@ -39,7 +40,12 @@ class Kernel:
         self._params = tuple(parameters)
         self._required_headers = required_headers
         self._jit = jit
+        self._func_prefix = func_prefix
         self._metadata: dict[str, Any] = dict()
+
+    @property
+    def func_prefix(self) -> str | None:
+        return self._func_prefix
 
     @property
     def metadata(self) -> dict[str, Any]:
@@ -127,9 +133,10 @@ class GpuKernel(Kernel):
         parameters: Sequence[Parameter],
         required_headers: set[str],
         jit: JitBase,
+        func_prefix: str | None,
         launch_config_factory: Callable[[], GpuLaunchConfiguration],
     ):
-        super().__init__(body, target, name, parameters, required_headers, jit)
+        super().__init__(body, target, name, parameters, required_headers, jit, func_prefix)
         self._launch_config_factory = launch_config_factory
 
     def get_launch_configuration(self) -> GpuLaunchConfiguration:

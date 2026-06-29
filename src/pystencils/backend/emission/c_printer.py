@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
 
 from pystencils.backend.ast.astnode import PsAstNode
 from pystencils.backend.constants import PsConstant
@@ -11,8 +10,7 @@ from ...types import PsType, PsArrayType, PsScalarType, PsTypeError
 from ..ast.expressions import PsBufferAcc, PsUndefined
 from ..ast.vector import PsVecMemAcc
 
-if TYPE_CHECKING:
-    from ...codegen import Kernel
+from ...codegen import Kernel
 
 
 def emit_code(ast: PsAstNode | Kernel):
@@ -21,6 +19,9 @@ def emit_code(ast: PsAstNode | Kernel):
 
 
 class CAstPrinter(BasePrinter):
+    def __init__(self, indent_width=3):
+        super().__init__(indent_width)
+
     def visit(self, node: PsAstNode, pc: PrinterCtx) -> str:
         match node:
             case PsVecMemAcc():

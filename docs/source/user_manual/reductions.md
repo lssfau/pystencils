@@ -178,26 +178,55 @@ ps.inspect(kernel_cpu_opt)
 
 As evident from the generated kernel for the base variant, atomic operations are employed 
 for updating the pointer holding the reduction result.
+
+The following subsections show avenues one can take to mitigate atomic pressure on GPU systems:
+
+#### Warp-level reductions
+
 Using the *explicit warp-level instructions* provided by CUDA allows us to achieve higher performance compared to
 only using atomic operations.
 To generate kernels with warp-level reductions, the generator expects that CUDA block sizes are divisible by 
 the hardware's warp size.
 **Similar to the SIMD configuration, we assure the code generator that the configured block size fulfills this
 criterion by enabling `assume_warp_aligned_block_size`.**
-While the default block sizes provided by the code generator already fulfill this criterion,
-we employ a block fitting algorithm to obtain a block size that is also optimized for the kernel's iteration space.
+We also enable the generation of launch bounds function qualifiers as shown below.
+
+Please note that reduction kernels are launched with instances of {any}`AutomaticLaunchConfiguration`,
+which directly take the default block size without any modifications, making manual launch configurations
+or block size trimming/fitting not possible. However, this ensures consistency between the generated kernel
+and the launch configuration, which is especially relevant for [](cub_reductions).
 
 You can find more detailed information about warp size alignment in {ref}`gpu_codegen`.
 
 ```{code-cell} ipython3
 gpu_cfg_opt = ps.CreateKernelConfig(target=ps.Target.CUDA)
+gpu_cfg_opt.gpu.default_block_size = (32, 8, 4)
+gpu_cfg_opt.gpu.generate_launch_bounds = True
 gpu_cfg_opt.gpu.assume_warp_aligned_block_size = True
 gpu_cfg_opt.gpu.warp_size = 32
 
 kernel_gpu_opt = ps.create_kernel(assign_sum, gpu_cfg_opt)
 
 kernel_func = kernel_gpu_opt.compile()
-kernel_func.launch_config.fit_block_size((32, 1, 1))
+
+ps.inspect(kernel_gpu_opt)
+```
+
+(cub_reductions)=
+#### CUB Reductions
+
+Another prominent approach to improving the performance of reductions is the usage of
+[CUB block reductions](https://gevtushenko.github.io/cccl/cub/api/classcub_1_1BlockReduce.html),
+which leverage shared memory to further reduce atomic contention.
+They can be enabled as follows:
+
+```{code-cell} ipython3
+# ...
+gpu_cfg_opt.gpu.use_cub_reductions = True
+
+kernel_gpu_opt_cub = ps.create_kernel(assign_sum, gpu_cfg_opt)
+
+kernel_func = kernel_gpu_opt.compile()
 
 ps.inspect(kernel_gpu_opt)
 ```

@@ -1,17 +1,29 @@
 from __future__ import annotations
 
+import math
 import operator
 from functools import reduce
 import numpy as np
 
-from ...types import PsIntegerType
-from ...types.quick import SInt
+from ..ast.structural import (
+    PsStructuralNode,
+    PsBlock,
+    PsConditional,
+    PsStatement,
+    PsDeclaration,
+    PsAssignment,
+)
+from ..memory import PsSymbol
+from ..reduction_op_mapping import reduction_op_to_expr
+from ...codegen.gpu_indexing import dim3, GpuIndexing
+from ...sympyextensions import ReductionOp
+from ...types import PsIntegerType, PsCustomType, PsPointerType, PsScalarType
+from ...types.quick import UInt
 from ..exceptions import MaterializationError
 from .platform import Platform
 
 from ..kernelcreation import (
     Typifier,
-    IterationSpace,
 )
 
 from ..constants import PsConstant
@@ -21,10 +33,12 @@ from ..ast.expressions import (
     PsLiteralExpr,
     PsCast,
     PsCall,
-    PsConstantExpr,
     PsAdd,
     PsRem,
     PsEq,
+    PsSymbolExpr,
+    PsAnd,
+    PsNe,
 )
 from ...types import PsSignedIntegerType, PsIeeeFloatType
 from ..literals import PsLiteral
@@ -77,45 +91,98 @@ class GenericGpu(Platform):
 
     @property
     def required_headers(self) -> set[str]:
-        return {'"pystencils_runtime/generic_gpu.hpp"'}
+        headers = {'"pystencils_runtime/generic_gpu.hpp"'}
+
+        if self._use_cub_reductions:
+            headers |= {'"pystencils_runtime/bits/gpu_reductions.h"'}
+
+        return headers
 
     def __init__(
         self,
         ctx: KernelCreationContext,
+        indexing_rank: int,
+        default_block_size: dim3 | None,
         *,
         assume_warp_aligned_block_size: bool = False,
         warp_size: int | None = None,
+        use_cub_reductions: bool = False,
     ) -> None:
         super().__init__(ctx)
+
+        self._indexing_rank = indexing_rank
+
+        self._default_block_size = default_block_size
 
         self._assume_warp_aligned_block_size = assume_warp_aligned_block_size
         self._warp_size = warp_size
 
+        self._use_cub_reductions = use_cub_reductions
+
         self._typify = Typifier(ctx)
 
+    @property
+    def default_block_size(self) -> dim3 | None:
+        return self._default_block_size
+
     @staticmethod
-    def _block_local_thread_index_per_dim(
-        ispace: IterationSpace,
-    ) -> tuple[PsExpression, ...]:
+    def gen_warp_reduce(
+        symbol_expr: PsSymbolExpr, op: ReductionOp, warp_size: int, mask_size: int = 8
+    ) -> tuple[PsExpression, list[PsStructuralNode]]:
+        """Set up shuffle instructions for warp-level reduction"""
+
+        # perform local warp reduction for given offset
+        def gen_shuffle_instr(offset: int):
+            stype = symbol_expr.dtype
+            assert isinstance(stype, PsScalarType)
+
+            return PsCall(
+                CFunction("__shfl_xor_sync", [UInt(32), stype, UInt(32)], stype),
+                [
+                    PsExpression.make(PsLiteral(f"0x{'f' * mask_size}", UInt(32))),
+                    symbol_expr,
+                    PsExpression.make(PsConstant(offset, UInt(32))),
+                ],
+            )
+
+        target_lane_id = PsExpression.make(PsConstant(0, UInt(32)))
+
+        # get all shuffle statements for a given warp size
+        num_shuffles = math.frexp(warp_size)[1]
+        return (
+            target_lane_id,
+            list(
+                PsAssignment(
+                    symbol_expr,
+                    reduction_op_to_expr(
+                        op,
+                        symbol_expr,
+                        gen_shuffle_instr(pow(2, i - 1)),
+                    ),
+                )
+                for i in reversed(range(1, num_shuffles))
+            ),
+        )
+
+    @staticmethod
+    def _local_thread_index_per_dim(num_dims: int) -> tuple[PsExpression, ...]:
         """Returns thread indices multiplied with block dimension strides per dimension."""
 
         return tuple(
             idx * reduce(operator.mul, BLOCK_DIM[:i]) if i > 0 else idx
-            for i, idx in enumerate(THREAD_IDX[: ispace.rank])
+            for i, idx in enumerate(THREAD_IDX[:num_dims])
         )
 
-    def _first_thread_in_warp(self, ispace: IterationSpace) -> PsExpression:
-        """Returns expression that determines whether a thread is the first within a warp."""
+    @staticmethod
+    def _local_thread_id(num_dims: int) -> PsExpression:
+        """Returns sum of all local thread indices."""
 
-        tids_per_dim = GenericGpu._block_local_thread_index_per_dim(ispace)
+        tids_per_dim = GenericGpu._local_thread_index_per_dim(num_dims)
         tid: PsExpression = tids_per_dim[0]
         for t in tids_per_dim[1:]:
             tid = PsAdd(tid, t)
 
-        return PsEq(
-            PsRem(tid, PsConstantExpr(PsConstant(self._warp_size, SInt(32)))),
-            PsConstantExpr(PsConstant(0, SInt(32))),
-        )
+        return tid
 
     def select_function(self, call: PsCall) -> PsExpression:
         call_func = call.function
@@ -240,4 +307,142 @@ class GenericGpu(Platform):
 
         raise MaterializationError(
             f"No implementation available for function {call_func} on data type {dtype}"
+        )
+
+    def resolve_reduction(
+        self,
+        ptr_expr: PsExpression,
+        symbol_expr: PsExpression,
+        reduction_op: ReductionOp,
+    ) -> PsStructuralNode:
+        stype = symbol_expr.dtype
+        ptrtype = ptr_expr.dtype
+
+        assert isinstance(ptr_expr, PsSymbolExpr) and isinstance(ptrtype, PsPointerType)
+        assert isinstance(symbol_expr, PsSymbolExpr) and isinstance(stype, PsScalarType)
+
+        if not isinstance(stype, PsIeeeFloatType) or stype.width not in (32, 64):
+            raise MaterializationError(
+                "Cannot materialize reduction on GPU: "
+                "Atomics are only available for float32/64 datatypes"
+            )
+
+        # workaround for subtractions -> use additions for reducing intermediate results
+        # similar to OpenMP reductions: local copies (negative sign) are added at the end
+        actual_reduction_op: ReductionOp
+        match reduction_op:
+            case ReductionOp.Sub:
+                actual_reduction_op = ReductionOp.Add
+            case _:
+                actual_reduction_op = reduction_op
+
+        # determine atomic function from reduction operation and setup call
+        impl_namespace: str
+        match actual_reduction_op:
+            case ReductionOp.Min | ReductionOp.Max | ReductionOp.Mul:
+                impl_namespace = "pystencils::runtime::gpu::"
+            case _:
+                impl_namespace = ""
+
+        func = CFunction(
+            f"{impl_namespace}atomic{actual_reduction_op.name}",
+            [ptrtype, stype],
+            PsCustomType("void"),
+        )
+        func_args = (ptr_expr, symbol_expr)
+
+        # get neutral element for reduction op
+        init_val_expr = self._typify(
+            self._ctx.reduction_data[ptr_expr.symbol.name].init_val.clone()
+        )
+        neutral_elem_expr: PsExpression
+        if isinstance(init_val_expr, PsCall):
+            neutral_elem_expr = self.select_function(init_val_expr)
+        else:
+            neutral_elem_expr = init_val_expr
+
+        # check if thread is valid for performing reduction
+        ispace = self._ctx.get_iteration_space()
+        effective_rank = GpuIndexing.get_effective_rank(
+            self._indexing_rank, ispace.rank
+        )
+
+        def is_valid_thread(accum: PsExpression):
+            return PsNe(accum, neutral_elem_expr)
+
+        cond: PsExpression
+        reduction_stmts: list[PsStructuralNode]
+        if self._use_cub_reductions:
+            if self._default_block_size is None:
+                raise MaterializationError(
+                    "CUB reductions require the GPU default block size to be set."
+                )
+
+            cub_operator = f"pystencils::runtime::gpu::{actual_reduction_op.name}"
+            template_params = f"{stype.c_string()}, {cub_operator}"
+            for bs in self._default_block_size:
+                template_params += f", {bs}"
+
+            zero_expr = PsExpression.make(PsConstant(0, self._ctx.index_dtype))
+            first_thread_in_block = reduce(
+                PsAnd, (PsEq(idx, zero_expr) for idx in THREAD_IDX[:effective_rank])  # type: ignore
+            )
+
+            block_accum = PsSymbolExpr(PsSymbol("block_accum", stype))
+
+            return PsBlock(
+                [
+                    # perform block reduce
+                    PsDeclaration(
+                        block_accum,
+                        PsCall(
+                            CFunction(
+                                f"pystencils::runtime::gpu::cub::block_reduce < {template_params} >",
+                                [stype],
+                                stype,
+                            ),
+                            [symbol_expr],
+                        ),
+                    ),
+                    # last step: atomic operation on first thread
+                    PsConditional(
+                        PsAnd(is_valid_thread(block_accum), first_thread_in_block),
+                        PsBlock([PsStatement(PsCall(func, (ptr_expr, block_accum)))]),
+                    ),
+                ]
+            )
+        elif self._warp_size and self._assume_warp_aligned_block_size:
+            warp_size_expr = PsExpression.make(
+                PsConstant(self._warp_size, self._ctx.index_dtype)
+            )
+
+            # perform warp-level reduction on local symbol
+            target_lane_id, warp_reduce_stmts = self.gen_warp_reduce(
+                symbol_expr,
+                actual_reduction_op,
+                self._warp_size,
+            )
+
+            # declare symbols for thread and warp lane ids
+            thread_id = PsSymbolExpr(PsSymbol("thread_id", UInt(32)))
+            lane_id = PsSymbolExpr(PsSymbol("lane_id", UInt(32)))
+
+            symbol_decls: list[PsStructuralNode] = [
+                PsDeclaration(thread_id, self._local_thread_id(effective_rank)),
+                PsDeclaration(lane_id, PsRem(thread_id, warp_size_expr)),
+            ]
+
+            reduction_stmts = symbol_decls + warp_reduce_stmts
+
+            # set condition to only execute atomic operation on first valid thread in warp
+            cond = PsAnd(is_valid_thread(symbol_expr), PsEq(lane_id, target_lane_id))
+        else:
+            # no optimization: only execute atomic add on valid thread
+            reduction_stmts = []
+            cond = is_valid_thread(symbol_expr)
+
+        # assemble final reduction
+        return PsBlock(
+            reduction_stmts
+            + [PsConditional(cond, PsBlock([PsStatement(PsCall(func, func_args))]))]
         )

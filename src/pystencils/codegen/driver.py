@@ -1,4 +1,7 @@
 from __future__ import annotations
+
+import operator
+from functools import reduce
 from typing import (
     cast,
     Sequence,
@@ -66,7 +69,12 @@ from .config import (
 )
 from .cpu_loop_strategies import DefaultCpuLoopStrategies
 from .functions import Lambda
-from .gpu_indexing import GpuIndexing, GpuIndexMappingStrategy, GpuLaunchConfiguration
+from .gpu_indexing import (
+    GpuIndexing,
+    GpuIndexMappingStrategy,
+    GpuLaunchConfiguration,
+    dim3,
+)
 from .kernel import GpuKernel, Kernel
 from .parameters import Parameter
 from .properties import FieldBasePtr, PsSymbolProperty
@@ -352,6 +360,7 @@ class DefaultKernelCreationDriver:
                 self._target,
                 self._cfg.get_jit(),
                 self._gpu_indexing.get_launch_config_factory(),
+                self._cfg.gpu.get_option("generate_launch_bounds"),
             )
         else:
             assert False, "unexpected target"
@@ -369,6 +378,7 @@ class DefaultKernelCreationDriver:
             "assume_warp_aligned_block_size"
         )
         warp_size: int | None = self._cfg.gpu.get_option("warp_size")
+        default_block_size: dim3 | None = self._cfg.gpu.get_option("default_block_size")
 
         if warp_size is None:
             warp_size = GpuOptions.default_warp_size(self._target)
@@ -392,6 +402,7 @@ class DefaultKernelCreationDriver:
             self._target,
             idx_scheme,
             warp_size,
+            default_block_size,
             manual_launch_grid,
             assume_warp_aligned_block_size,
         )
@@ -432,10 +443,17 @@ class DefaultKernelCreationDriver:
                 )
 
         elif self._target.is_gpu():
+            idx_scheme: GpuIndexingScheme = self._cfg.gpu.get_option("indexing_scheme")
+            indexing_rank = GpuIndexing.get_indexing_rank(idx_scheme)
+
             assume_warp_aligned_block_size: bool = self._cfg.gpu.get_option(
                 "assume_warp_aligned_block_size"
             )
             warp_size: int | None = self._cfg.gpu.get_option("warp_size")
+            default_block_size: dim3 | None = self._cfg.gpu.get_option(
+                "default_block_size"
+            )
+            use_cub_reductions: bool = self._cfg.gpu.get_option("use_cub_reductions")
 
             GpuPlatform: type
             match self._target:
@@ -448,8 +466,11 @@ class DefaultKernelCreationDriver:
 
             return GpuPlatform(
                 self._ctx,
+                indexing_rank,
+                default_block_size,
                 assume_warp_aligned_block_size=assume_warp_aligned_block_size,
                 warp_size=warp_size,
+                use_cub_reductions=use_cub_reductions,
             )
 
         elif self._target == Target.SYCL:
@@ -501,7 +522,7 @@ class KernelFactory:
         params = self._get_function_params(body)
         req_headers = self._get_headers(platform, body)
 
-        kfunc = Kernel(body, target_spec, function_name, params, req_headers, jit)
+        kfunc = Kernel(body, target_spec, function_name, params, req_headers, jit, None)
         kfunc.metadata.update(self._ctx.metadata)
         return kfunc
 
@@ -513,10 +534,22 @@ class KernelFactory:
         target_spec: Target,
         jit: JitBase,
         launch_config_factory: Callable[[], GpuLaunchConfiguration],
+        generate_launch_bounds: bool = False,
     ) -> GpuKernel:
         """Create a kernel for a GPU target"""
         params = self._get_function_params(body)
         req_headers = self._get_headers(platform, body)
+
+        func_signature: str | None = None
+        if isinstance(platform, GenericGpu):
+            func_signature = "__global__"
+
+            if generate_launch_bounds:
+                func_signature += (
+                    f" __launch_bounds__({reduce(operator.mul, bs)})"
+                    if (bs := platform.default_block_size)
+                    else ""
+                )
 
         kfunc = GpuKernel(
             body,
@@ -525,6 +558,7 @@ class KernelFactory:
             params,
             req_headers,
             jit,
+            func_signature,
             launch_config_factory,
         )
         kfunc.metadata.update(self._ctx.metadata)
