@@ -1,7 +1,11 @@
 import datetime
 import re
+from os import environ
 
 from pystencils import __version__ as pystencils_version
+
+from sphinx.util import logging
+logger = logging.getLogger(__name__)
 
 project = "pystencils"
 html_title = "pystencils Documentation"
@@ -11,10 +15,27 @@ copyright = (
 )
 author = "Martin Bauer, Markus Holzer, Frederik Hennig"
 
-version = re.sub(r"(\d+\.\d+)\.\d+(.*)", r"\1\2", pystencils_version)
-version = re.sub(r"(\.dev\d+).*?$", r"\1", version)
-# The full version, including alpha/beta/rc tags.
-release = pystencils_version
+release = re.search(r"(([ab]?[0-9]+\.?)+)(\+)?", pystencils_version).groups()[0]
+
+announcement: str | None
+if pystencils_version != release:
+    announcement = (
+        f"This is the documentation for the development revision {pystencils_version} of pystencils. "
+        f"<a style='color: inherit' href='https://pycodegen.pages.i10git.cs.fau.de/docs/pystencils/{release}/'>"
+        "View the latest release instead</a>"
+    )
+else:
+    announcement = None
+
+#   Populate version switcher with versions for which documentation is published
+#   In the CI, `PYSTENCILS_DOC_VERSIONS` is defined as a group CI variable in the `pycodegen` group
+#   See README of `pycodegen/pycodegen.pages.i10git.cs.fau.de` repo
+
+doc_current_version = environ.get("PYSTENCILS_DOC_CURRENT_VERSION", release)
+doc_versions = ["master"] + environ.get("PYSTENCILS_DOC_VERSIONS", "").split()
+
+logger.info(f"Versions in version switcher: {doc_versions}")
+logger.info(f"Current version: {doc_current_version}")
 
 language = "en"
 default_role = "any"
@@ -83,6 +104,24 @@ html_theme_options = {
         "image_light": "_static/img/pystencils-logo-light.svg",
         "image_dark": "_static/img/pystencils-logo-dark.svg",
     }
+}
+
+if announcement:
+    html_theme_options["announcement"] = announcement
+
+html_sidebars = {
+    "**": [
+        "navbar-logo.html",
+        "icon-links.html",
+        "version_switcher.html",
+        "search-button-field.html",
+        "sbt-sidebar-nav.html",
+    ]
+}
+
+html_context = {
+    "doc_current_version": doc_current_version,
+    "doc_versions": doc_versions
 }
 
 # NbSphinx configuration

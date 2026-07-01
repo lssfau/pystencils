@@ -1,3 +1,10 @@
+# Workflow definition
+# See https://docs.gitlab.com/ci/yaml/workflow/
+workflow:
+  rules:
+    # Only run branch pipelines
+    - if: $CI_COMMIT_BRANCH
+
 stages:
   - "Code Quality"
   - "Unit Tests"
@@ -131,6 +138,11 @@ build-documentation:
   image: i10git.cs.fau.de:5005/pycodegen/pycodegen/nox:ubuntu24.04-cuda12.6-oapi
   stage: docs
   needs: []
+  rules:
+    - if: $CI_PROJECT_PATH == "pycodegen/pystencils" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        PYSTENCILS_DOC_CURRENT_VERSION: master
+    - if: $CI_COMMIT_BRANCH
   script:
     - nox --session docs -- --fail-on-warnings
   tags:
