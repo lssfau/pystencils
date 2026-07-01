@@ -59,14 +59,14 @@ class FVM1stOrder:
         self.j = normalize(flux, (self.dim,) + self.c.index_shape)
         self.q = normalize(source, self.c.index_shape)
 
-    def discrete_flux(self, flux_field: ps.field.Field):
+    def discrete_flux(self, flux: ps.StaggeredField):
         """Return a list of assignments for the discrete fluxes
 
         Args:
             flux_field: a staggered field to which the fluxes should be assigned
         """
 
-        assert ps.FieldType.is_staggered(flux_field)
+        assert isinstance(flux, ps.StaggeredField)
 
         num = 0
 
@@ -101,28 +101,24 @@ class FVM1stOrder:
                 return term
 
         fluxes = self.j.applyfunc(ps.fd.derivative.expand_diff_full)
-        fluxes = [
-            (
-                sp.Matrix(fluxes.tolist()[i])
-                if flux_field.index_dimensions > 1
-                else fluxes.tolist()[i]
-            )
-            for i in range(self.dim)
-        ]
+        # is_vector is True when the flux has per-component entries (multi-species / vector field)
+        is_vector = len(self.j.shape) > 1
+        if is_vector:
+            n_vec = self.j.shape[1]
+            if flux.index_shape != (n_vec,):
+                raise ValueError(
+                    f"Flux expression has {n_vec} components per direction, but "
+                    f"StaggeredGrid {flux.name!r} has index_shape={flux.index_shape}. "
+                    f"Expected index_shape=({n_vec},)."
+                )
+            fluxes = [sp.Matrix(fluxes.tolist()[i]) for i in range(self.dim)]
+        else:
+            fluxes = [fluxes.tolist()[i] for i in range(self.dim)]
 
-        A0 = (
-            sum(
-                [
-                    sp.Matrix(ps.stencil.direction_string_to_offset(d)).norm()
-                    for d in flux_field.staggered_stencil
-                ]
-            )
-            / self.dim
-        )
+        A0 = sum([sp.Matrix(d).norm() for d in flux.stencil.staggered_entries]) / self.dim
 
         discrete_fluxes = []
-        for neighbor in flux_field.staggered_stencil:
-            neighbor = ps.stencil.direction_string_to_offset(neighbor)
+        for neighbor in flux.stencil.staggered_entries[1:]:
             directional_flux = fluxes[0] * int(neighbor[0])
             for i in range(1, self.dim):
                 directional_flux += fluxes[i] * int(neighbor[i])
@@ -133,7 +129,7 @@ class FVM1stOrder:
                 if s.name.startswith("fvm_free_")
             ]
 
-            if len(free_weights) > 0:
+            if len(free_weights) > 0 and not is_vector:
                 discrete_flux = discrete_flux.collect(
                     discrete_flux.atoms(ps.field.Field.Access)
                 )
@@ -152,23 +148,18 @@ class FVM1stOrder:
                 )
             discrete_fluxes.append(discrete_flux / sp.Matrix(neighbor).norm())
 
-        if flux_field.index_dimensions > 1:
-            return [
-                ps.Assignment(lhs, rhs / A0)
-                for i, d in enumerate(flux_field.staggered_stencil)
-                if discrete_fluxes[i]
-                for lhs, rhs in zip(
-                    flux_field.staggered_vector_access(d),
-                    sp.simplify(discrete_fluxes[i]),
-                )
-            ]
-        else:
-            return [
-                ps.Assignment(
-                    flux_field.staggered_access(d), sp.simplify(discrete_fluxes[i]) / A0
-                )
-                for i, d in enumerate(flux_field.staggered_stencil)
-            ]
+        n_vec = self.j.shape[1] if is_vector else None
+
+        @ps.flow.block
+        def discrete_flux_block(let):
+            for i in range(1, flux.stencil.Q // 2 + 1):
+                val = sp.simplify(discrete_fluxes[i - 1]) / A0
+                if n_vec is not None:
+                    for k in range(n_vec):
+                        let.store[flux[i](k)] = val[k]
+                else:
+                    let.store[flux[i]] = val
+        return discrete_flux_block
 
     def discrete_source(self):
         """Return a list of assignments for the discrete source term"""
@@ -270,34 +261,35 @@ class FVM1stOrder:
             if rhs
         ]
 
-    def discrete_continuity(self, flux_field: ps.field.Field):
+    def discrete_continuity(self, flux: ps.StaggeredField):
         """Return a list of assignments for the continuity equation, which includes the source term
 
         Args:
-            flux_field: a staggered field from which the fluxes are taken
+            flux: a staggered grid from which the fluxes are taken
         """
 
-        assert ps.FieldType.is_staggered(flux_field)
+        assert isinstance(flux, ps.StaggeredField)
 
-        neighbors = flux_field.staggered_stencil + [
-            ps.stencil.inverse_direction_string(d) for d in flux_field.staggered_stencil
-        ]
-        divergence = flux_field.staggered_vector_access(neighbors[0])
-        for d in neighbors[1:]:
-            divergence += flux_field.staggered_vector_access(d)
+        neighbors = flux.stencil.stencil_entries
+
+        divergence = flux.face[1]
+        for d in range(2, len(neighbors)):
+            divergence += flux.face[d]
 
         source = self.discrete_source()
         source = {s.lhs: s.rhs for s in source}
+        lhs = self.c.center_vector[0, 0]
 
-        return [
-            ps.Assignment(
-                lhs, (lhs - rhs + source[lhs]) if lhs in source else (lhs - rhs)
-            )
-            for lhs, rhs in zip(self.c.center_vector, divergence)
-        ]
+        @ps.flow.block
+        def discrete_continuity_block(let):
+            if lhs in source:
+                let.store[lhs] = lhs - divergence + source[lhs]
+            else:
+                let.store[lhs] = lhs - divergence
+        return discrete_continuity_block
 
 
-def VOF(j: ps.field.Field, v: ps.field.Field, ρ: ps.field.Field):
+def VOF(j: ps.StaggeredField, v: ps.field.Field, ρ: ps.field.Field):
     """Volume-of-fluid discretization of advection
 
     Args:
@@ -306,43 +298,36 @@ def VOF(j: ps.field.Field, v: ps.field.Field, ρ: ps.field.Field):
         v: the flow velocity field
         ρ: the quantity to advect
     """
-    assert ps.FieldType.is_staggered(j)
+    assert isinstance(j, ps.StaggeredField)
 
-    fluxes = [[] for i in range(j.index_shape[0])]
+    fluxes = [[] for i in range(len(j.stencil.staggered_entries) - 1)]
 
     v0 = v.center_vector
-    for d, neighbor in enumerate(j.staggered_stencil):
-        c = ps.stencil.direction_string_to_offset(neighbor)
-        v1 = v.neighbor_vector(c)
+    for d, neighbor in enumerate(j.stencil.staggered_entries[1:]):
+        v1 = v.neighbor_vector(neighbor)
 
         # going out
-        cond = sp.And(*[sp.Or(c[i] * v0[i] > 0, c[i] == 0) for i in range(len(v0))])
+        cond = sp.And(*[sp.Or(neighbor[i] * v0[i] > 0, neighbor[i] == 0) for i in range(len(v0))])
         overlap1 = [1 - sp.Abs(v0[i]) for i in range(len(v0))]
-        overlap2 = [c[i] * v0[i] for i in range(len(v0))]
-        overlap = sp.Mul(
-            *[(overlap1[i] if c[i] == 0 else overlap2[i]) for i in range(len(v0))]
-        )
+        overlap2 = [neighbor[i] * v0[i] for i in range(len(v0))]
+        overlap = sp.Mul(*[(overlap1[i] if neighbor[i] == 0 else overlap2[i]) for i in range(len(v0))])
         fluxes[d].append(ρ.center_vector * overlap * sp.Piecewise((1, cond), (0, True)))
 
         # coming in
-        cond = sp.And(*[sp.Or(c[i] * v1[i] < 0, c[i] == 0) for i in range(len(v1))])
+        cond = sp.And(*[sp.Or(neighbor[i] * v1[i] < 0, neighbor[i] == 0) for i in range(len(v1))])
         overlap1 = [1 - sp.Abs(v1[i]) for i in range(len(v1))]
         overlap2 = [v1[i] for i in range(len(v1))]
-        overlap = sp.Mul(
-            *[(overlap1[i] if c[i] == 0 else overlap2[i]) for i in range(len(v1))]
-        )
-        sign = (c == 1).sum() % 2 * 2 - 1
-        fluxes[d].append(
-            sign * ρ.neighbor_vector(c) * overlap * sp.Piecewise((1, cond), (0, True))
-        )
+        overlap = sp.Mul(*[(overlap1[i] if neighbor[i] == 0 else overlap2[i]) for i in range(len(v1))])
+        sign = sum([1 if n == 1 else 0 for n in neighbor]) % 2 * 2 - 1
+        fluxes[d].append(sign * ρ.neighbor_vector(neighbor) * overlap * sp.Piecewise((1, cond), (0, True)))
 
     for i, ff in enumerate(fluxes):
         fluxes[i] = ff[0]
         for f in ff[1:]:
             fluxes[i] += f
 
-    assignments = []
-    for i, d in enumerate(j.staggered_stencil):
-        for lhs, rhs in zip(j.staggered_vector_access(d).values(), fluxes[i].values()):
-            assignments.append(ps.Assignment(lhs, rhs))
-    return assignments
+    @ps.flow.block
+    def VOF_block(let):
+        for i, d in enumerate(j.stencil.staggered_entries[1:]):
+            let.store[j[i + 1]] = fluxes[i][0]
+    return VOF_block

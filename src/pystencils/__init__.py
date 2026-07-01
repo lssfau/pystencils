@@ -2,6 +2,7 @@
 
 from .codegen import Target, CreateKernelConfig, AUTO
 from .defaults import DEFAULTS
+from .grids import StaggeredFieldAccess, StaggeredField, Staggering
 from . import fd
 from . import stencil as stencil
 from . import flow
@@ -52,6 +53,9 @@ __all__ = [
     "Field",
     "FieldType",
     "fields",
+    "StaggeredFieldAccess",
+    "StaggeredField",
+    "Staggering",
     "DEFAULTS",
     "TypedSymbol",
     "DynamicType",
