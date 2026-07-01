@@ -234,7 +234,7 @@ class FiniteDifferenceStaggeredStencilDerivation:
     def __init__(self, neighbor, dim, derivative=tuple(), free_weights_prefix=None):
         if type(neighbor) is str:
             neighbor = direction_string_to_offset(neighbor)
-        if dim == 2:
+        if dim == 2 and len(neighbor) > 2:
             assert neighbor[dim:] == 0
         assert derivative is tuple() or max(derivative) < dim
         neighbor = sp.Matrix(neighbor[:dim])

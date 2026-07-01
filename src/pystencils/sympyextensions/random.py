@@ -142,16 +142,27 @@ class Philox(RngBase):
         seed: Expression or integer; the 32-bit unsigned integer seed for this RNG
         offsets: Optionally, offsets that are added to the iteration space counters when
             computing the random values
+        periodicity: Sequence of booleans indicating which spatial dimensions are periodic.
+            For periodic dimensions, the spatial counter (after adding the offset) is
+            wrapped using integer remainder with the corresponding ``num_cells`` entry,
+            ensuring that cells on both sides of a periodic boundary receive the same
+            random numbers.
+        num_cells: Sequence of expressions or integers giving the number of cells
+            (domain size) in each spatial dimension. Must be provided (non-``None``)
+            for every dimension where ``periodicity`` is ``True``.
     """
 
     @dataclass(frozen=True)
     class PhiloxState(RngState):
         seed: sp.Expr | int
         offsets: tuple[sp.Expr | int, ...]
+        periodicity: tuple[bool, ...]
+        num_cells: tuple[sp.Expr | int | None, ...]
 
         def next(self) -> Philox.PhiloxState:
             return Philox.PhiloxState(
-                self.name, self.dtype, self.invocation_key + 1, self.seed, self.offsets
+                self.name, self.dtype, self.invocation_key + 1, self.seed,
+                self.offsets, self.periodicity, self.num_cells
             )
 
         def get_keys(self) -> tuple[sp.Expr | int, ...]:
@@ -166,11 +177,23 @@ class Philox(RngBase):
             counters = [invocation.args[0]]
 
             offsets = self.offsets + (0,) * (rank - len(self.offsets))
+            periodicity = self.periodicity + (False,) * (rank - len(self.periodicity))
+            num_cells = self.num_cells + (None,) * (rank - len(self.num_cells))
 
             from ..defaults import DEFAULTS
+            from .integer_functions import int_rem
 
-            for spatial_ctr, offset in zip(DEFAULTS.spatial_counters[:rank], offsets):
-                counters.append(spatial_ctr + offset)
+            for spatial_ctr, offset, periodic, nc in zip(
+                DEFAULTS.spatial_counters[:rank], offsets, periodicity, num_cells
+            ):
+                idx = spatial_ctr + offset
+                if periodic:
+                    if nc is None:
+                        raise ValueError(
+                            "num_cells must be specified for periodic dimensions"
+                        )
+                    idx = int_rem(idx, nc)
+                counters.append(idx)
 
             counters += [0 for _ in range(3 - rank)]
 
@@ -182,12 +205,26 @@ class Philox(RngBase):
         dtype: UserTypeSpec,
         seed: sp.Expr | int,
         offsets: Sequence[sp.Expr | int] = (),
+        periodicity: Sequence[bool] = (),
+        num_cells: Sequence[sp.Expr | int | None] = (),
     ):
         dtype = create_type(dtype)
         if not isinstance(dtype, PsIeeeFloatType):
             raise ValueError("Data type must be a floating-point type")
 
-        state = Philox.PhiloxState(name, dtype, 0, seed, tuple(offsets))
+        periodicity_t = tuple(periodicity)
+        num_cells_t = tuple(num_cells)
+
+        for i, periodic in enumerate(periodicity_t):
+            if periodic:
+                if i >= len(num_cells_t) or num_cells_t[i] is None:
+                    raise ValueError(
+                        f"num_cells must be specified for periodic dimension {i}"
+                    )
+
+        state = Philox.PhiloxState(
+            name, dtype, 0, seed, tuple(offsets), periodicity_t, num_cells_t
+        )
         super().__init__(state)
 
     @classmethod
