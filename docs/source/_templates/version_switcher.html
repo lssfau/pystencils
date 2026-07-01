@@ -1,0 +1,18 @@
+<div style="text-align: center">
+{% for version in doc_versions %}
+    {% if not loop.first %}
+    &#183;
+    {% endif %}
+    {% if version == "master" +%}
+    <a href="https://pycodegen.pages.i10git.cs.fau.de/pystencils/">
+    {% else +%}
+    <a href="https://pycodegen.pages.i10git.cs.fau.de/docs/pystencils/{{version}}/">
+    {% endif %}
+        {% if doc_current_version == version +%}
+            <b>{{version}}</b>
+        {% else +%}
+            {{version}}
+        {% endif %}
+    </a>
+{% endfor %}
+</div>
